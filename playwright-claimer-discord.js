@@ -1,0 +1,730 @@
+const { chromium } = require('playwright');
+const fs = require('fs');
+const dotenv = require('dotenv');
+const cron = require('node-cron');
+const DiscordService = require('./discord-service');
+const ImageGenerator = require('./image-generator');
+
+// Load environment variables
+dotenv.config();
+
+class EightBallPoolClaimer {
+  constructor() {
+    this.discordService = new DiscordService();
+    this.imageGenerator = new ImageGenerator();
+    this.shopUrl = process.env.SHOP_URL || 'https://8ballpool.com/en/shop';
+    this.userIds = this.getUserIdList();
+    this.delayBetweenUsers = parseInt(process.env.DELAY_BETWEEN_USERS || '5000', 10);
+    this.timeout = parseInt(process.env.TIMEOUT || '60000', 10);
+    this.headless = process.env.HEADLESS !== 'false';
+  }
+
+  getUserIdList() {
+    const userIds = process.env.USER_IDS;
+    const singleUserId = process.env.USER_ID;
+    
+    if (userIds) {
+      return userIds.split(',').map(id => id.trim()).filter(id => id.length > 0);
+    } else if (singleUserId) {
+      return [singleUserId.trim()];
+    } else {
+      return ['1826254746']; // Default fallback
+    }
+  }
+
+  async initializeDiscord() {
+    console.log('🤖 Initializing Discord service...');
+    const discordReady = await this.discordService.login();
+    if (discordReady) {
+      console.log('✅ Discord service ready');
+    } else {
+      console.log('⚠️ Discord service unavailable - confirmations will be skipped');
+    }
+    return discordReady;
+  }
+
+  async claimRewardsForUser(userId) {
+    console.log(`🚀 Starting claim process for User ID: ${userId}`);
+    
+    let browser = null;
+    let page = null;
+    let claimedItems = [];
+    let screenshotPath = null;
+
+    try {
+      // Launch browser
+      console.log('🌐 Launching browser...');
+      const launchOptions = {
+        headless: this.headless,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding'
+        ]
+      };
+
+      // Add slowMo for non-headless mode (development)
+      if (!this.headless) {
+        launchOptions.slowMo = 1000;
+      }
+
+      browser = await chromium.launch(launchOptions);
+      page = await browser.newPage();
+      console.log('📄 Created new page');
+
+      // Set realistic headers
+      await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'sec-ch-ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"'
+      });
+
+      // Navigate to shop
+      console.log(`🌐 Navigating to: ${this.shopUrl}`);
+      await page.goto(this.shopUrl, { 
+        waitUntil: 'domcontentloaded',
+        timeout: this.timeout 
+      });
+      console.log('✅ Successfully loaded shop page');
+
+      // Take initial screenshot
+      await page.screenshot({ path: `shop-page-${userId}.png` });
+      console.log(`📸 Initial screenshot saved as shop-page-${userId}.png`);
+
+      // Look for login modal
+      console.log('🔍 Looking for login modal...');
+      await this.handleLogin(page, userId);
+
+      // Wait for login to complete
+      await page.waitForTimeout(3000);
+
+      // Take screenshot after login
+      await page.screenshot({ path: `after-login-${userId}.png` });
+      console.log(`📸 Screenshot after login saved as after-login-${userId}.png`);
+
+      // Look for and click FREE buttons
+      console.log('🎁 Looking for FREE buttons...');
+      claimedItems = await this.claimFreeItems(page, userId);
+
+      // Take final screenshot
+      screenshotPath = `final-page-${userId}.png`;
+      await page.screenshot({ path: screenshotPath });
+      console.log(`📸 Final screenshot saved as ${screenshotPath}`);
+
+      // Logout
+      console.log('🚪 Logging out...');
+      await this.logout(page);
+
+      console.log(`✅ Claim process completed for user: ${userId}`);
+      
+      // Send Discord confirmation
+      if (this.discordService.isReady) {
+        console.log('📤 Sending Discord confirmation...');
+        await this.sendDiscordConfirmation(userId, screenshotPath, claimedItems);
+      }
+
+      return { success: true, claimedItems, screenshotPath };
+
+    } catch (error) {
+      console.error(`❌ Error during claim process for ${userId}:`, error.message);
+      return { success: false, error: error.message };
+    } finally {
+      if (browser) {
+        await browser.close();
+        console.log('🔒 Browser closed');
+      }
+    }
+  }
+
+  async handleLogin(page, userId) {
+    try {
+      // Wait for page to fully load
+      await page.waitForTimeout(2000);
+      
+      // Look for login triggers
+      const loginTriggers = await page.locator('button, a, div').filter({ hasText: /login|sign.?in|enter|join/i }).all();
+      console.log(`Found ${loginTriggers.length} potential login triggers`);
+
+      // Try hovering over elements to reveal login modal
+      for (let i = 0; i < Math.min(5, loginTriggers.length); i++) {
+        try {
+          const trigger = loginTriggers[i];
+          console.log(`🖱️ Hovering over potential trigger ${i + 1}...`);
+          await trigger.hover();
+          await page.waitForTimeout(1000);
+          
+          // Check if login modal appeared after hover
+          const modal = await page.locator('input[type="text"], input[placeholder*="ID"], input[placeholder*="id"]').first();
+          const modalVisible = await modal.isVisible().catch(() => false);
+          
+          if (modalVisible) {
+            console.log('✅ Login modal appeared after hover!');
+            await this.fillLoginForm(page, userId);
+            return;
+          }
+        } catch (error) {
+          console.log(`⚠️ Error hovering over trigger ${i + 1}`);
+        }
+      }
+
+      // Look for login buttons and click them
+      const loginButtons = await page.locator('button').filter({ hasText: /login|sign.?in|enter/i }).all();
+      console.log(`Found ${loginButtons.length} login buttons`);
+
+      let loginModalAppeared = false;
+      for (let i = 0; i < loginButtons.length; i++) {
+        try {
+          const button = loginButtons[i];
+          console.log(`🖱️ Clicking login button ${i + 1}...`);
+          await button.click();
+          await page.waitForTimeout(2000);
+          
+          // Check if login modal appeared
+          const modal = await page.locator('input[type="text"], input[placeholder*="ID"], input[placeholder*="id"]').first();
+          const modalVisible = await modal.isVisible().catch(() => false);
+          
+          if (modalVisible) {
+            console.log('✅ Login modal appeared after clicking!');
+            loginModalAppeared = true;
+            break;
+          }
+        } catch (error) {
+          console.log(`⚠️ Error clicking login button ${i + 1}`);
+        }
+      }
+
+      if (!loginModalAppeared) {
+        console.log('⚠️ No login modal found, trying direct input search...');
+      }
+
+      // Fill login form
+      console.log('📝 Filling login form...');
+      await this.fillLoginForm(page, userId);
+
+    } catch (error) {
+      console.error('❌ Error during login process:', error.message);
+    }
+  }
+
+  async fillLoginForm(page, userId) {
+    try {
+      // Wait a bit for any modals to appear
+      await page.waitForTimeout(1000);
+      
+      // Look for input field with more comprehensive selectors
+      const inputSelectors = [
+        'input[type="text"]',
+        'input[type="number"]',
+        'input[placeholder*="ID"]',
+        'input[placeholder*="id"]',
+        'input[placeholder*="User"]',
+        'input[placeholder*="user"]',
+        'input[name*="id"]',
+        'input[name*="user"]',
+        'input[class*="id"]',
+        'input[class*="user"]',
+        'input[class*="login"]',
+        'input[class*="input"]',
+        'input[data-testid*="id"]',
+        'input[data-testid*="user"]',
+        'input[data-testid*="login"]'
+      ];
+
+      let input = null;
+      for (const selector of inputSelectors) {
+        try {
+          const elements = await page.locator(selector).all();
+          if (elements.length > 0) {
+            // Check if any of these elements are visible
+            for (let i = 0; i < elements.length; i++) {
+              const element = elements[i];
+              const isVisible = await element.isVisible().catch(() => false);
+              if (isVisible) {
+                input = element;
+                console.log(`Found visible ${selector} input field at index ${i}`);
+                break;
+              }
+            }
+            if (input) break;
+          }
+        } catch (error) {
+          // Continue to next selector
+        }
+      }
+
+      if (!input) {
+        console.log('❌ No visible input field found');
+        // Try to find any input in a modal or dialog
+        const modalInputs = await page.locator('[role="dialog"] input, .modal input, .popup input, [class*="modal"] input').all();
+        if (modalInputs.length > 0) {
+          for (let i = 0; i < modalInputs.length; i++) {
+            const element = modalInputs[i];
+            const isVisible = await element.isVisible().catch(() => false);
+            if (isVisible) {
+              input = element;
+              console.log(`Found input field in modal at index ${i}`);
+              break;
+            }
+          }
+        }
+      }
+
+      if (!input) {
+        console.log('❌ No input field found anywhere');
+        return;
+      }
+
+      // Focus and fill input
+      console.log('🖱️ Hovering over input field...');
+      await input.hover();
+      console.log('🖱️ Clicking input field to focus...');
+      await input.click();
+      
+      console.log('📝 Clearing and filling input...');
+      await input.fill('');
+      await input.fill(userId);
+      console.log(`✅ Entered User ID: ${userId}`);
+
+      // Take screenshot after entering ID
+      await page.screenshot({ path: `after-id-entry-${userId}.png` });
+      console.log(`📸 Screenshot after ID entry saved as after-id-entry-${userId}.png`);
+
+      // Click Go button
+      await this.clickGoButton(page, input);
+      
+      // Wait for login to complete and take another screenshot
+      await page.waitForTimeout(3000);
+      await page.screenshot({ path: `after-go-click-${userId}.png` });
+      console.log(`📸 Screenshot after Go click saved as after-go-click-${userId}.png`);
+
+    } catch (error) {
+      console.error('❌ Error filling login form:', error.message);
+    }
+  }
+
+  async clickGoButton(page, input) {
+    try {
+      console.log('🔍 Looking for Go button by position and attributes...');
+      
+      let goButtonFound = false;
+
+      // Method 1: Look for button that's immediately after the input field in the DOM
+      try {
+        const nextElement = await input.locator('xpath=following-sibling::*[1]').first();
+        const nextElementTag = await nextElement.evaluate(el => el.tagName);
+        const nextElementText = await nextElement.textContent();
+        
+        console.log(`Next element after input: ${nextElementTag}, text: "${nextElementText}"`);
+        
+        if (nextElementTag === 'BUTTON' && nextElementText.includes('Go')) {
+          console.log('✅ Found Go button as immediate next sibling');
+          await nextElement.click();
+          console.log('✅ Clicked immediate next sibling Go button');
+          goButtonFound = true;
+        }
+      } catch (error) {
+        console.log('⚠️ Immediate next sibling not a Go button');
+      }
+
+      // Method 2: Look for button with specific styling that indicates it's the login button
+      if (!goButtonFound) {
+        try {
+          const styledButtons = await page.locator('button[style*="background"], button[class*="primary"], button[class*="submit"], button[class*="login"]').all();
+          
+          for (let i = 0; i < styledButtons.length; i++) {
+            const button = styledButtons[i];
+            const buttonText = await button.textContent();
+            const buttonClass = await button.getAttribute('class') || '';
+            
+            if (buttonText.includes('Go') && !buttonClass.includes('google')) {
+              const isVisible = await button.isVisible();
+              if (isVisible) {
+                console.log(`✅ Found styled Go button: "${buttonText}"`);
+                await button.click();
+                console.log('✅ Clicked styled Go button');
+                goButtonFound = true;
+                break;
+              }
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ No styled Go button found');
+        }
+      }
+
+      // Method 3: Look for button that's in a form with the input
+      if (!goButtonFound) {
+        try {
+          const form = await input.locator('xpath=ancestor::form').first();
+          const formButtons = await form.locator('button').all();
+          
+          for (let i = 0; i < formButtons.length; i++) {
+            const button = formButtons[i];
+            const buttonText = await button.textContent();
+            
+            if (buttonText.includes('Go')) {
+              const isVisible = await button.isVisible();
+              if (isVisible) {
+                console.log(`✅ Found Go button in form: "${buttonText}"`);
+                await button.click();
+                console.log('✅ Clicked form Go button');
+                goButtonFound = true;
+                break;
+              }
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ No form Go button found');
+        }
+      }
+
+      if (!goButtonFound) {
+        console.log('❌ No suitable Go button found');
+      }
+
+      // Wait for login to complete and check for redirects
+      await page.waitForTimeout(3000);
+      
+      // Check if we got redirected to Google or another site
+      const currentUrl = page.url();
+      console.log(`🌐 Current URL after login attempt: ${currentUrl}`);
+      
+      if (currentUrl.includes('google.com') || currentUrl.includes('accounts.google.com')) {
+        console.log('❌ Got redirected to Google - login failed');
+        console.log('🔄 Trying to go back to shop page...');
+        await page.goto(this.shopUrl, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(3000);
+      } else if (currentUrl.includes('8ballpool.com')) {
+        console.log('✅ Still on 8ball pool site - login may have succeeded');
+      } else {
+        console.log(`⚠️ Unexpected redirect to: ${currentUrl}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Error clicking Go button:', error.message);
+    }
+  }
+
+  async claimFreeItems(page, userId) {
+    try {
+      const claimedItems = [];
+      
+      // Look for FREE buttons with various selectors
+      const freeButtonSelectors = [
+        'button:has-text("FREE")',
+        'button:has-text("free")',
+        'a:has-text("FREE")',
+        'a:has-text("free")',
+        '[class*="free"]:has-text("FREE")',
+        '[class*="free"]:has-text("free")'
+      ];
+
+      let allFreeButtons = [];
+      for (const selector of freeButtonSelectors) {
+        try {
+          const buttons = await page.locator(selector).all();
+          allFreeButtons = allFreeButtons.concat(buttons);
+        } catch (error) {
+          // Continue with next selector
+        }
+      }
+
+      // Remove duplicates
+      const uniqueButtons = [];
+      for (const button of allFreeButtons) {
+        try {
+          const isVisible = await button.isVisible();
+          if (isVisible) {
+            const buttonText = await button.textContent();
+            const buttonId = await button.evaluate(el => el.id || el.className || el.textContent);
+            
+            // Check if we already have this button
+            const alreadyExists = uniqueButtons.some(existing => {
+              return existing.id === buttonId;
+            });
+            
+            if (!alreadyExists) {
+              uniqueButtons.push({
+                element: button,
+                text: buttonText,
+                id: buttonId
+              });
+            }
+          }
+        } catch (error) {
+          // Skip this button
+        }
+      }
+
+      console.log(`Found ${uniqueButtons.length} unique FREE buttons`);
+
+      if (uniqueButtons.length === 0) {
+        console.log('❌ No FREE buttons found - may already be claimed or not available');
+        
+        // Count total buttons for debugging
+        const allButtons = await page.locator('button').all();
+        console.log(`Found ${allButtons.length} total buttons on page`);
+        return claimedItems;
+      }
+
+      // Click each FREE button
+      for (let i = 0; i < uniqueButtons.length; i++) {
+        const buttonInfo = uniqueButtons[i];
+        try {
+          console.log(`🎁 Clicking FREE button ${i + 1}: "${buttonInfo.text}"`);
+          
+          // Scroll button into view
+          await buttonInfo.element.scrollIntoViewIfNeeded();
+          await page.waitForTimeout(500);
+          
+          // Click the button
+          await buttonInfo.element.click();
+          console.log(`✅ Successfully clicked FREE button: "${buttonInfo.text}"`);
+          
+          // Add to claimed items
+          claimedItems.push(buttonInfo.text);
+          
+          // Wait between clicks
+          await page.waitForTimeout(2000);
+          
+        } catch (error) {
+          console.log(`⚠️ Error clicking FREE button ${i + 1}: ${error.message}`);
+        }
+      }
+
+      console.log(`🎉 Claimed ${claimedItems.length} items: ${claimedItems.join(', ')}`);
+      return claimedItems;
+
+    } catch (error) {
+      console.error('❌ Error claiming free items:', error.message);
+      return [];
+    }
+  }
+
+  async logout(page) {
+    try {
+      console.log('🔍 Looking for logout button...');
+      
+      // Look for logout buttons
+      const logoutButtons = await page.locator('button:has-text("Logout"), button:has-text("Sign Out"), button:has-text("Log Out"), a:has-text("Logout"), a:has-text("Sign Out")').all();
+      
+      if (logoutButtons.length > 0) {
+        for (let i = 0; i < logoutButtons.length; i++) {
+          try {
+            const logoutButton = logoutButtons[i];
+            const isVisible = await logoutButton.isVisible();
+            
+            if (isVisible) {
+              const buttonText = await logoutButton.textContent();
+              console.log(`🚪 Found logout button: "${buttonText}"`);
+              await logoutButton.click();
+              console.log('✅ Clicked logout button');
+              await page.waitForTimeout(2000);
+              return true;
+            }
+          } catch (error) {
+            console.log(`⚠️ Error with logout button ${i + 1}: ${error.message}`);
+          }
+        }
+      }
+      
+      // Alternative: Look for user menu/profile that might contain logout
+      const profileButtons = await page.locator('button[class*="profile"], button[class*="user"], button[class*="account"], a[class*="profile"], a[class*="user"]').all();
+      
+      for (let i = 0; i < profileButtons.length; i++) {
+        try {
+          const profileButton = profileButtons[i];
+          const isVisible = await profileButton.isVisible();
+          
+          if (isVisible) {
+            console.log(`👤 Clicking profile button ${i + 1} to find logout...`);
+            await profileButton.click();
+            await page.waitForTimeout(1000);
+            
+            // Look for logout in dropdown
+            const dropdownLogout = await page.locator('button:has-text("Logout"), button:has-text("Sign Out"), a:has-text("Logout")').first();
+            const dropdownVisible = await dropdownLogout.isVisible().catch(() => false);
+            
+            if (dropdownVisible) {
+              await dropdownLogout.click();
+              console.log('✅ Clicked logout from dropdown');
+              await page.waitForTimeout(2000);
+              return true;
+            }
+          }
+        } catch (error) {
+          console.log(`⚠️ Error with profile button ${i + 1}: ${error.message}`);
+        }
+      }
+      
+      console.log('⚠️ No logout button found - user may already be logged out');
+      return false;
+      
+    } catch (error) {
+      console.log(`⚠️ Error during logout: ${error.message}`);
+      return false;
+    }
+  }
+
+  async sendDiscordConfirmation(userId, screenshotPath, claimedItems) {
+    try {
+      // Find username from user mapping
+      const fs = require('fs');
+      let username = 'Unknown User';
+      
+      try {
+        const mappingData = fs.readFileSync('user-mapping.json', 'utf8');
+        const mappings = JSON.parse(mappingData).userMappings;
+        const userMapping = mappings.find(mapping => mapping.bpAccountId === userId);
+        if (userMapping) {
+          username = userMapping.username;
+        }
+      } catch (error) {
+        console.log('⚠️ Could not load user mapping for username');
+      }
+
+      // Create confirmation image
+      const confirmationImagePath = await this.imageGenerator.createConfirmationImage(
+        userId, 
+        username, 
+        claimedItems, 
+        screenshotPath
+      );
+
+      if (confirmationImagePath) {
+        // Send Discord confirmation
+        const success = await this.discordService.sendConfirmation(
+          userId, 
+          confirmationImagePath, 
+          claimedItems
+        );
+
+        if (success) {
+          console.log(`✅ Discord confirmation sent for user ${userId}`);
+        } else {
+          console.log(`⚠️ Failed to send Discord confirmation for user ${userId}`);
+        }
+      } else {
+        console.log(`⚠️ Could not create confirmation image for user ${userId}`);
+      }
+
+    } catch (error) {
+      console.error(`❌ Error sending Discord confirmation for ${userId}:`, error.message);
+    }
+  }
+
+  async claimRewards() {
+    console.log(`🚀 Starting 8ball pool reward claimer for ${this.userIds.length} users...`);
+    console.log(`👥 Users: ${this.userIds.join(', ')}`);
+
+    const results = [];
+    
+    for (let i = 0; i < this.userIds.length; i++) {
+      const userId = this.userIds[i];
+      console.log(`\n📋 Processing user ${i + 1}/${this.userIds.length}: ${userId}`);
+      
+      const result = await this.claimRewardsForUser(userId);
+      results.push({ userId, ...result });
+      
+      if (i < this.userIds.length - 1) {
+        console.log(`⏳ Waiting ${this.delayBetweenUsers}ms before next user...`);
+        await new Promise(resolve => setTimeout(resolve, this.delayBetweenUsers));
+      }
+    }
+
+    // Summary
+    const successes = results.filter(r => r.success).length;
+    const failures = results.filter(r => !r.success).length;
+    
+    console.log('\n🎉 Claim process completed!');
+    console.log(`✅ Success: ${successes}`);
+    console.log(`❌ Failures: ${failures}`);
+
+    return results;
+  }
+
+  async runDailyClaim() {
+    console.log('🕐 Running daily claim process...');
+    
+    // Initialize Discord
+    await this.initializeDiscord();
+    
+    // Run claims
+    const results = await this.claimRewards();
+    
+    // Cleanup old files
+    this.imageGenerator.cleanupOldFiles();
+    
+    // Logout Discord
+    await this.discordService.logout();
+    
+    return results;
+  }
+
+  startScheduler() {
+    console.log('📅 Starting daily scheduler...');
+    console.log('🕛 Will run at 12:00 AM and 12:00 PM daily');
+    
+    // Schedule for 12:00 AM (midnight)
+    cron.schedule('0 0 * * *', async () => {
+      console.log('🕛 Midnight claim starting...');
+      await this.runDailyClaim();
+    });
+
+    // Schedule for 12:00 PM (noon)
+    cron.schedule('0 12 * * *', async () => {
+      console.log('🕛 Noon claim starting...');
+      await this.runDailyClaim();
+    });
+
+    console.log('✅ Scheduler started successfully');
+    console.log('💡 Press Ctrl+C to stop the scheduler');
+    
+    // Keep the process running
+    process.on('SIGINT', async () => {
+      console.log('\n🛑 Shutting down scheduler...');
+      await this.discordService.logout();
+      process.exit(0);
+    });
+  }
+}
+
+// Main execution
+async function main() {
+  const claimer = new EightBallPoolClaimer();
+  
+  if (process.argv.includes('--schedule')) {
+    claimer.startScheduler();
+  } else {
+    await claimer.runDailyClaim();
+  }
+}
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Run the main function
+if (require.main === module) {
+  main().catch(error => {
+    console.error('❌ Fatal error:', error);
+    process.exit(1);
+  });
+}
+
+module.exports = EightBallPoolClaimer;

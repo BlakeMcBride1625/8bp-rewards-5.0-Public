@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: 8bp-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-8bp_rewards}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - 8bp-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 8BP Rewards Application
+  app:
+    build: .
+    container_name: 8bp-rewards-app
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      # MongoDB Configuration
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD}@mongodb:27017/${MONGO_DATABASE:-8bp_rewards}?authSource=admin
+      
+      # 8Ball Pool Configuration
+      USER_IDS: ${USER_IDS}
+      SHOP_URL: ${SHOP_URL:-https://8ballpool.com/en/shop}
+      HEADLESS: ${HEADLESS:-true}
+      TIMEOUT: ${TIMEOUT:-60000}
+      DELAY_BETWEEN_USERS: ${DELAY_BETWEEN_USERS:-10000}
+      
+      # Discord Bot Configuration
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DISCORD_SPECIAL_USERS: ${DISCORD_SPECIAL_USERS}
+      
+      # Timezone
+      TZ: ${TZ:-Europe/London}
+    volumes:
+      - ./logs:/app/logs
+      - ./user-mapping.json:/app/user-mapping.json
+    networks:
+      - 8bp-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('App health check')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+
+networks:
+  8bp-network:
+    driver: bridge
