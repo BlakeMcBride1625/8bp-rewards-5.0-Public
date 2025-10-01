@@ -19,10 +19,11 @@ BACKEND_PORT=2600
 PUBLIC_URL=https://8bp.epildevconnect.uk/8bp-rewards
 HOME_URL=https://8bp.epildevconnect.uk/8bp-rewards/home
 REGISTER_URL=https://8bp.epildevconnect.uk/8bp-rewards/register
-ADMIN_DASHBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/admin-dashboard
 CONTACT_URL=https://8bp.epildevconnect.uk/8bp-rewards/contact
-SYSTEM_STATUS_URL=https://8bp.epildevconnect.uk/8bp-rewards/system-status
 LEADERBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/leaderboard
+SOCIALS_URL=https://8bp.epildevconnect.uk/8bp-rewards/socials
+SYSTEM_STATUS_URL=https://8bp.epildevconnect.uk/8bp-rewards/system-status
+ADMIN_DASHBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/admin-dashboard
 
 # Nodemailer SMTP Configuration
 SMTP_HOST=smtp.gmail.com
