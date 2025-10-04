@@ -81,3 +81,9 @@ registrationSchema.statics.getRegistrationCount = function() {
 
 export const Registration = mongoose.model<IRegistration, IRegistrationModel>('Registration', registrationSchema);
 
+
+
+
+
+
+

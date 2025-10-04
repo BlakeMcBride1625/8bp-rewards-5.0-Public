@@ -2,6 +2,7 @@ import puppeteer, { Browser, Page } from 'puppeteer';
 import * as cron from 'node-cron';
 import { config } from './config';
 import { Logger } from './logger';
+import { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } from './claimer-utils';
 
 export class EightBallPoolClaimer {
   private browser: Browser | null = null;
@@ -218,9 +219,37 @@ export class EightBallPoolClaimer {
     return true; // Assume success if we got this far
   }
 
+  private async ensureScreenshotDirectories(): Promise<void> {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+
+      const directories = [
+        'screenshots',
+        'screenshots/shop-page',
+        'screenshots/login',
+        'screenshots/id-entry',
+        'screenshots/go-click',
+        'screenshots/final-page'
+      ];
+
+      for (const dir of directories) {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+          this.logger.info(`📁 Created directory: ${dir}`);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`❌ Error creating screenshot directories: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   public async claimFreeItems(userId: string): Promise<boolean> {
     try {
       this.logger.info(`Starting claim process for User ID: ${userId}`);
+      
+      // Ensure screenshot directories exist
+      await this.ensureScreenshotDirectories();
       
       this.browser = await this.setupBrowser();
       const page = await this.browser.newPage();
@@ -242,21 +271,26 @@ export class EightBallPoolClaimer {
         'Cache-Control': 'max-age=0'
       });
 
-      // Navigate to shop page
-      this.logger.info(`Navigating to: ${config.shopUrl}`);
+      // Navigate to Daily Reward section first
+      const dailyRewardUrl = `${config.shopUrl}#daily_reward`;
+      this.logger.info(`Navigating to Daily Reward section: ${dailyRewardUrl}`);
       try {
-        await page.goto(config.shopUrl, { 
+        await page.goto(dailyRewardUrl, { 
           waitUntil: 'domcontentloaded',
           timeout: config.timeout 
         });
-        this.logger.info('Successfully navigated to shop page');
+        this.logger.info('Successfully navigated to Daily Reward page');
       } catch (error) {
-        this.logger.error(`Failed to navigate to shop page: ${error instanceof Error ? error.message : String(error)}`);
+        this.logger.error(`Failed to navigate to Daily Reward page: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
       }
 
       // Wait for page to load
       await page.waitForTimeout(5000);
+
+      // Take initial screenshot
+      await page.screenshot({ path: `screenshots/shop-page/daily-reward-page-${userId}.png` });
+      this.logger.info('📸 Initial screenshot saved');
 
       // Step 1: Check if we need to login first
       this.logger.info('Checking if login is required...');
@@ -306,6 +340,10 @@ export class EightBallPoolClaimer {
         // Wait a moment for input to be processed
         await page.waitForTimeout(2000);
 
+        // Take screenshot after entering ID
+        await page.screenshot({ path: `screenshots/id-entry/after-id-entry-${userId}.png` });
+        this.logger.info('📸 Screenshot after ID entry saved');
+
         // Click login button (Go button)
         const loginButtonSelectors = [
           'button:has-text("Go")',
@@ -352,6 +390,10 @@ export class EightBallPoolClaimer {
         // Wait for login to complete and page to load
         this.logger.info('Waiting for login to complete...');
         await page.waitForTimeout(8000);
+
+        // Take screenshot after login
+        await page.screenshot({ path: `screenshots/login/after-login-${userId}.png` });
+        this.logger.info('📸 Screenshot after login saved');
       }
 
       // Step 2: Look for specific reward sections
@@ -431,6 +473,22 @@ export class EightBallPoolClaimer {
             const isVisible = await button.isVisible();
             
             if (isVisible && buttonText.includes('FREE')) {
+              // Check if button should be clicked (for actual claiming)
+              const shouldClick = await shouldClickButton(button, buttonText, this.logger);
+              if (!shouldClick) {
+                continue;
+              }
+              
+              // Check if button should be skipped for counting (already claimed indicators)
+              const shouldSkipForCounting = shouldSkipButtonForCounting(buttonText, this.logger);
+              
+              // Check if button is disabled
+              const isDisabled = await button.evaluate(el => el.disabled);
+              if (isDisabled) {
+                this.logger.info(`⏭️ Skipping button ${i + 1} - disabled/greyed out`);
+                continue;
+              }
+              
               // Get context about what this button is for
               const parentElement = await button.evaluateHandle(el => el.closest('[class*="daily"], [class*="reward"], [class*="cue"], [class*="piece"], [class*="card"]'));
               let contextText = '';
@@ -441,11 +499,18 @@ export class EightBallPoolClaimer {
               }
               
               await button.click();
-              this.logger.info(`✅ Clicked FREE button ${i + 1}/${allFreeButtons.length}`);
+              
+              // Use standardized claim validation logic
+              const isValidNewClaim = await validateClaimResult(button, 'Unknown Item', this.logger);
+              
+              // Only count if it wasn't already skipped for counting AND it's a valid new claim
+              if (!shouldSkipForCounting && isValidNewClaim) {
+                totalClicked++;
+              }
+              
               if (contextText) {
                 this.logger.info(`   Context: ${contextText}...`);
               }
-              totalClicked++;
               
               // Wait between clicks to avoid rate limiting
               if (i < allFreeButtons.length - 1) {
@@ -463,9 +528,25 @@ export class EightBallPoolClaimer {
           try {
             const buttonText = await button.evaluate(el => el.textContent || '');
             if (buttonText.includes('FREE') && await button.isVisible()) {
+              // Check if button should be clicked (for actual claiming)
+              const shouldClick = await shouldClickButton(button, buttonText, this.logger);
+              if (!shouldClick) {
+                continue;
+              }
+              
+              // Check if button should be skipped for counting (already claimed indicators)
+              const shouldSkipForCounting = shouldSkipButtonForCounting(buttonText, this.logger);
+              
               await button.click();
-              this.logger.info(`✅ Clicked FREE button: ${buttonText}`);
-              totalClicked++;
+              
+              // Use standardized claim validation logic
+              const isValidNewClaim = await validateClaimResult(button, buttonText, this.logger);
+              
+              // Only count if it wasn't already skipped for counting AND it's a valid new claim
+              if (!shouldSkipForCounting && isValidNewClaim) {
+                totalClicked++;
+              }
+              
               await page.waitForTimeout(2000);
             }
           } catch (error) {
@@ -486,10 +567,104 @@ export class EightBallPoolClaimer {
       // Check for success
       const success = await this.checkForSuccess(page);
       
+      // Navigate to Free Daily Cue Piece section
+      this.logger.info('Navigating to Free Daily Cue Piece section...');
+      const freeDailyCueUrl = `${config.shopUrl}#free_daily_cue_piece`;
+      try {
+        await page.goto(freeDailyCueUrl, { 
+          waitUntil: 'domcontentloaded',
+          timeout: config.timeout 
+        });
+        this.logger.info('Successfully navigated to Free Daily Cue Piece page');
+        
+        // Wait for page to load
+        await page.waitForTimeout(3000);
+        
+        // Look for FREE buttons in Free Daily Cue Piece section
+        this.logger.info('Checking Free Daily Cue Piece section for FREE items...');
+        const cueFreeButtons = await page.$$('button:has-text("FREE")');
+        this.logger.info(`Found ${cueFreeButtons.length} FREE buttons in cue section`);
+        
+        let cueClicked = 0;
+        if (cueFreeButtons.length > 0) {
+          this.logger.info('Clicking FREE buttons in cue section...');
+          
+          for (let i = 0; i < cueFreeButtons.length; i++) {
+            try {
+              const button = cueFreeButtons[i];
+              const buttonText = await button.evaluate(el => el.textContent || '');
+              const isVisible = await button.isVisible();
+              
+              if (isVisible && buttonText.includes('FREE')) {
+                // Skip if button says "CLAIMED" (case insensitive)
+                if (buttonText.toLowerCase().includes('claimed')) {
+                  this.logger.info(`⏭️ Skipping cue button ${i + 1} - already CLAIMED: "${buttonText}"`);
+                  continue;
+                }
+                
+                // Check if button is disabled
+                const isDisabled = await button.evaluate(el => el.disabled);
+                if (isDisabled) {
+                  this.logger.info(`⏭️ Skipping cue button ${i + 1} - disabled/greyed out`);
+                  continue;
+                }
+                
+                await button.click();
+                
+                // Wait a moment and check if button text changed
+                await page.waitForTimeout(1000);
+                try {
+                  const newButtonText = await button.evaluate(el => el.textContent || '');
+                  if (newButtonText.toLowerCase().includes('claimed')) {
+                    this.logger.warn(`⚠️ Cue button text changed to "${newButtonText}" - item was already claimed`);
+                  } else {
+                    this.logger.info(`✅ Successfully clicked cue FREE button ${i + 1}/${cueFreeButtons.length}`);
+                  }
+                } catch (error) {
+                  this.logger.info(`✅ Successfully clicked cue FREE button ${i + 1}/${cueFreeButtons.length}`);
+                }
+                
+                cueClicked++;
+                
+                // Wait between clicks
+                if (i < cueFreeButtons.length - 1) {
+                  await page.waitForTimeout(2000);
+                }
+              }
+            } catch (error) {
+              this.logger.warn(`Failed to click cue FREE button ${i + 1}: ${error}`);
+            }
+          }
+          
+          if (cueClicked > 0) {
+            this.logger.success(`🎉 Successfully clicked ${cueClicked} cue FREE buttons!`);
+          } else {
+            this.logger.warn('⚠️ No cue FREE buttons were claimable');
+          }
+        } else {
+          this.logger.warn('❌ No FREE buttons found in cue section');
+        }
+        
+        // Wait for cue actions to process
+        await page.waitForTimeout(3000);
+        
+      } catch (error) {
+        this.logger.error(`Failed to navigate to Free Daily Cue Piece section: ${error instanceof Error ? error.message : String(error)}`);
+        // Continue with the process even if cue section fails
+      }
+      
       if (success) {
+        // Take final screenshot
+        await page.screenshot({ path: `screenshots/final-page/final-page-${userId}.png` });
+        this.logger.info('📸 Final screenshot saved');
+        
         this.logger.success('Free items claimed successfully!');
         return true;
       } else {
+        // Take final screenshot even if success is unclear
+        await page.screenshot({ path: `screenshots/final-page/final-page-${userId}.png` });
+        this.logger.info('📸 Final screenshot saved');
+        
         this.logger.warn('Claim process completed but success unclear');
         return true; // Assume success if we got this far
       }

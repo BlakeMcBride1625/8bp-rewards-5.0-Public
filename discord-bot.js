@@ -21,9 +21,15 @@ class DiscordBot {
         console.log('📋 Available commands:');
         console.log('   /register - Register an 8BP account');
         console.log('   /list-accounts - List all registered accounts');
-        console.log('   /deregister - Remove a registration');
         console.log('   /check-accounts - Check account status');
+        console.log('   /deregister - Remove a registration');
+        console.log('   /clear - Delete bot messages');
         console.log('   /help - Show help information');
+        console.log('   /md - Show documentation');
+        console.log('   /server-status - Check bot server status');
+        console.log('   /website-status - Check website status');
+        console.log('   /ping-discord - Test Discord connectivity');
+        console.log('   /ping-website - Test website connectivity');
         
         // Keep the bot running
         process.on('SIGINT', async () => {

@@ -1,4 +1,5 @@
 const { chromium } = require('playwright');
+const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
 const fs = require('fs');
 const cron = require('node-cron');
 const DatabaseService = require('./services/database-service');
@@ -46,8 +47,36 @@ async function getUserIdsFromDatabase() {
   }
 }
 
+async function ensureScreenshotDirectories() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+
+    const directories = [
+      'screenshots',
+      'screenshots/shop-page',
+      'screenshots/login',
+      'screenshots/id-entry',
+      'screenshots/go-click',
+      'screenshots/final-page'
+    ];
+
+    for (const dir of directories) {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`📁 Created directory: ${dir}`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error creating screenshot directories:', error.message);
+  }
+}
+
 async function claimRewardsForUser(userId) {
   console.log(`🚀 Starting claim process for User ID: ${userId}`);
+  
+  // Ensure screenshot directories exist
+  await ensureScreenshotDirectories();
   
   const shopUrl = 'https://8ballpool.com/en/shop';
   
@@ -68,16 +97,18 @@ async function claimRewardsForUser(userId) {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
     
-    console.log(`🌐 Navigating to: ${shopUrl}`);
-    await page.goto(shopUrl, { waitUntil: 'networkidle' });
-    console.log('✅ Successfully loaded shop page');
+    // Navigate to Daily Reward section first
+    const dailyRewardUrl = 'https://8ballpool.com/en/shop#daily_reward';
+    console.log(`🌐 Navigating to Daily Reward section: ${dailyRewardUrl}`);
+    await page.goto(dailyRewardUrl, { waitUntil: 'networkidle' });
+    console.log('✅ Successfully loaded Daily Reward page');
     
     // Wait for page to fully load
     await page.waitForTimeout(5000);
     
     // Take a screenshot to see what we're working with
-    await page.screenshot({ path: 'shop-page.png' });
-    console.log('📸 Screenshot saved as shop-page.png');
+    await page.screenshot({ path: 'screenshots/shop-page/daily-reward-page.png' });
+    console.log('📸 Screenshot saved as daily-reward-page.png');
     
     // Look for login modal - it might appear after hovering or clicking
     console.log('🔍 Looking for login modal...');
@@ -306,7 +337,7 @@ async function claimRewardsForUser(userId) {
         }
         
         // Take screenshot after login
-        await page.screenshot({ path: 'after-login.png' });
+        await page.screenshot({ path: 'screenshots/login/after-login.png' });
         console.log('📸 Screenshot after login saved as after-login.png');
       }
     } else {
@@ -362,6 +393,42 @@ async function claimRewardsForUser(userId) {
           if (isVisible) {
             // Get context about what this button is for
             const buttonText = await button.textContent().catch(() => '');
+            
+            // Skip if button says "CLAIMED" (case insensitive)
+            if (buttonText && buttonText.toLowerCase().includes('claimed')) {
+              console.log(`⏭️ Skipping button ${i + 1} - already CLAIMED: "${buttonText}"`);
+              continue;
+            }
+            
+            // Check multiple indicators that an item was already claimed
+            const alreadyClaimedIndicators = [
+              'claimed', 'already', 'collected', '✓', 'checkmark', 
+              'disabled', 'greyed out', 'unavailable', 'completed'
+            ];
+            
+            const isAlreadyClaimedBeforeClick = alreadyClaimedIndicators.some(indicator => 
+              buttonText && buttonText.toLowerCase().includes(indicator.toLowerCase())
+            );
+            
+            if (isAlreadyClaimedBeforeClick) {
+              console.log(`⏭️ Skipping button ${i + 1} - already claimed indicator: "${buttonText}"`);
+              continue;
+            }
+            
+            // Check if button is disabled
+            const isDisabled = await button.isDisabled().catch(() => false);
+            if (isDisabled) {
+              console.log(`⏭️ Skipping button ${i + 1} - disabled/greyed out`);
+              continue;
+            }
+            
+            // Check if button is actually clickable
+            const isClickable = await button.isEnabled().catch(() => false);
+            if (!isClickable) {
+              console.log(`⏭️ Skipping button ${i + 1} - not clickable`);
+              continue;
+            }
+            
             const parentText = await button.locator('xpath=ancestor::*[contains(@class, "daily") or contains(@class, "reward") or contains(@class, "cue") or contains(@class, "piece") or contains(@class, "card")]').first().textContent().catch(() => '');
             
             console.log(`🖱️ Clicking FREE button ${i + 1}/${uniqueButtons.length}`);
@@ -374,9 +441,25 @@ async function claimRewardsForUser(userId) {
             await button.hover();
             await page.waitForTimeout(500);
             
-            // Click the button
-            await button.click();
-            console.log(`✅ Clicked FREE button ${i + 1}`);
+              // Check if button should be clicked (for actual claiming)
+              const shouldClick = await shouldClickButton(button, buttonText, console);
+              if (!shouldClick) {
+                continue;
+              }
+              
+              // Check if button should be skipped for counting (already claimed indicators)
+              const shouldSkipForCounting = shouldSkipButtonForCounting(buttonText, console);
+              
+              // Click the button
+              await button.click();
+              
+              // Use standardized claim validation logic
+              const isValidNewClaim = await validateClaimResult(button, 'Unknown Item', console);
+              
+              // Only count if it wasn't already skipped for counting AND it's a valid new claim
+              if (!shouldSkipForCounting && isValidNewClaim) {
+                // Count as successful claim
+              }
             
             // Wait between clicks
             if (i < uniqueButtons.length - 1) {
@@ -413,8 +496,83 @@ async function claimRewardsForUser(userId) {
       }
     }
     
+    // Navigate to Free Daily Cue Piece section
+    console.log('🌐 Navigating to Free Daily Cue Piece section...');
+    const freeDailyCueUrl = 'https://8ballpool.com/en/shop#free_daily_cue_piece';
+    await page.goto(freeDailyCueUrl, { waitUntil: 'networkidle' });
+    console.log('✅ Successfully loaded Free Daily Cue Piece page');
+    
+    // Wait for page to load
+    await page.waitForTimeout(3000);
+    
+    // Look for FREE buttons in Free Daily Cue Piece section
+    console.log('🎁 Checking Free Daily Cue Piece section for FREE items...');
+    const cueFreeButtons = await page.locator('button:has-text("FREE")').all();
+    console.log(`Found ${cueFreeButtons.length} FREE buttons in cue section`);
+    
+    if (cueFreeButtons.length > 0) {
+      console.log('🎯 Clicking FREE buttons in cue section...');
+      
+      for (let i = 0; i < cueFreeButtons.length; i++) {
+        try {
+          const button = cueFreeButtons[i];
+          const isVisible = await button.isVisible();
+          
+          if (isVisible) {
+            const buttonText = await button.textContent().catch(() => '');
+            
+            // Skip if button says "CLAIMED" (case insensitive)
+            if (buttonText && buttonText.toLowerCase().includes('claimed')) {
+              console.log(`⏭️ Skipping cue button ${i + 1} - already CLAIMED: "${buttonText}"`);
+              continue;
+            }
+            
+            // Check if button is disabled
+            const isDisabled = await button.isDisabled().catch(() => false);
+            if (isDisabled) {
+              console.log(`⏭️ Skipping cue button ${i + 1} - disabled/greyed out`);
+              continue;
+            }
+            
+            console.log(`🖱️ Clicking cue FREE button ${i + 1}/${cueFreeButtons.length}`);
+            
+            // Hover over button first
+            await button.hover();
+            await page.waitForTimeout(500);
+            
+            // Click the button
+            await button.click();
+            
+            // Wait a moment and check if button text changed
+            await page.waitForTimeout(1000);
+            try {
+              const newButtonText = await button.textContent();
+              if (newButtonText && newButtonText.toLowerCase().includes('claimed')) {
+                console.log(`⚠️ Cue button text changed to "${newButtonText}" - item was already claimed`);
+              } else {
+                console.log(`✅ Successfully clicked cue FREE button ${i + 1}`);
+              }
+            } catch (error) {
+              console.log(`✅ Successfully clicked cue FREE button ${i + 1}`);
+            }
+            
+            // Wait between clicks
+            if (i < cueFreeButtons.length - 1) {
+              await page.waitForTimeout(3000);
+            }
+          }
+        } catch (error) {
+          console.log(`⚠️ Failed to click cue FREE button ${i + 1}: ${error.message}`);
+        }
+      }
+      
+      console.log(`🎉 Successfully clicked ${cueFreeButtons.length} cue FREE buttons!`);
+    } else {
+      console.log('❌ No FREE buttons found in cue section');
+    }
+    
     // Take final screenshot
-    await page.screenshot({ path: `final-page-${userId}.png` });
+    await page.screenshot({ path: `screenshots/final-page/final-page-${userId}.png` });
     console.log(`📸 Final screenshot saved as final-page-${userId}.png`);
     
     // Wait a bit to see results

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { Navigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS, getAdminUserBlockEndpoint, getAdminRegistrationDeleteEndpoint } from '../config/api';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { 
   Shield, 
   Users, 
@@ -16,10 +17,24 @@ import {
   Settings,
   LogOut,
   User,
-  Mail,
   Clock,
-  Database
+  Database,
+  FileText,
+  Filter,
+  Monitor,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
+  Server,
+  Cpu,
+  HardDrive,
+  Wifi,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
+import ClaimProgressTracker from '../components/ClaimProgressTracker';
+import VPSAuthModal from '../components/VPSAuthModal';
+import ResetLeaderboardAuthModal from '../components/ResetLeaderboardAuthModal';
 import { toast } from 'react-hot-toast';
 
 interface AdminOverview {
@@ -54,6 +69,75 @@ interface Registration {
   updatedAt: string;
 }
 
+interface VPSStats {
+  timestamp: string;
+  system: {
+    hostname: string;
+    uptime: number;
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+  };
+  cpu: {
+    usage: number;
+    cores: number;
+    loadAverage: number[];
+    temperature?: number;
+  };
+  memory: {
+    total: number;
+    free: number;
+    used: number;
+    available: number;
+    usagePercent: number;
+    swap: {
+      total: number;
+      free: number;
+      used: number;
+    };
+  };
+  disk: {
+    total: number;
+    free: number;
+    used: number;
+    usagePercent: number;
+    inodes: {
+      total: number;
+      free: number;
+      used: number;
+    };
+  };
+  network: {
+    interfaces: Array<{
+      name: string;
+      bytesReceived: number;
+      bytesSent: number;
+      packetsReceived: number;
+      packetsSent: number;
+    }>;
+    connections: number;
+  };
+  processes: {
+    total: number;
+    running: number;
+    sleeping: number;
+    zombie: number;
+  };
+  services: Array<{
+    name: string;
+    status: string;
+    uptime: string;
+    memory: string;
+    cpu: string;
+  }>;
+  ping: {
+    google: number;
+    cloudflare: number;
+    localhost: number;
+  };
+  uptime: string;
+}
+
 const AdminDashboardPage: React.FC = () => {
   const { user, isAuthenticated, isAdmin, isLoading, logout } = useAuth();
   const [overview, setOverview] = useState<AdminOverview | null>(null);
@@ -68,13 +152,97 @@ const AdminDashboardPage: React.FC = () => {
     eightBallPoolId: '',
     username: ''
   });
+  const [logs, setLogs] = useState<any[]>([]);
+  const [logFilters, setLogFilters] = useState({
+    level: '',
+    action: '',
+    search: ''
+  });
+  const [showProgressTracker, setShowProgressTracker] = useState(false);
+  const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
+  const [activeProcesses, setActiveProcesses] = useState<any[]>([]);
+  const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
+  const [vpsStats, setVpsStats] = useState<VPSStats | null>(null);
+  const [isLoadingVpsStats, setIsLoadingVpsStats] = useState(false);
+  const [autoRefreshVps, setAutoRefreshVps] = useState(true);
+  const [chartData, setChartData] = useState<Array<{
+    time: string;
+    cpu: number;
+    memory: number;
+    timestamp: number;
+  }>>([
+    // Sample data for testing
+    { time: "00:00:01", cpu: 10, memory: 30, timestamp: Date.now() },
+    { time: "00:00:02", cpu: 15, memory: 35, timestamp: Date.now() },
+    { time: "00:00:03", cpu: 20, memory: 40, timestamp: Date.now() }
+  ]);
+  const [showVPSAuthModal, setShowVPSAuthModal] = useState(false);
+  const [vpsAccessGranted, setVpsAccessGranted] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [isResettingLeaderboard, setIsResettingLeaderboard] = useState(false);
+  const [showResetAuthModal, setShowResetAuthModal] = useState(false);
+  const [resetAccessGranted, setResetAccessGranted] = useState(false);
+
+  const fetchVpsStats = useCallback(async () => {
+    setIsLoadingVpsStats(true);
+    try {
+      const response = await axios.get(API_ENDPOINTS.VPS_MONITOR_STATS, { withCredentials: true });
+      const stats = response.data;
+      setVpsStats(stats);
+      
+      // Update chart data with new reading
+      const now = new Date();
+      const timeString = now.toLocaleTimeString('en-US', { 
+        hour12: false, 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit' 
+      });
+      const newDataPoint = {
+        time: timeString,
+        cpu: stats.cpu.usage,
+        memory: stats.memory.usagePercent,
+        timestamp: now.getTime()
+      };
+      
+      setChartData(prevData => {
+        const updatedData = [...prevData, newDataPoint];
+        // Keep only last 60 data points (1 minute of data at 1-second intervals)
+        const finalData = updatedData.slice(-60);
+        console.log('Chart data updated:', finalData.length, 'points, latest:', newDataPoint);
+        return finalData;
+      });
+    } catch (error: any) {
+      toast.error('Failed to fetch VPS statistics');
+      console.error('Error fetching VPS stats:', error);
+    } finally {
+      setIsLoadingVpsStats(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated && isAdmin) {
       fetchAdminData();
       fetchUserIp();
+      if (activeTab === 'logs') {
+        fetchLogs();
+      }
+      if (activeTab === 'vps') {
+        fetchVpsStats();
+      }
     }
-  }, [isAuthenticated, isAdmin]);
+  }, [isAuthenticated, isAdmin, activeTab, fetchVpsStats]);
+
+  // Auto-refresh VPS stats when on VPS tab
+  useEffect(() => {
+    if (activeTab === 'vps' && autoRefreshVps) {
+      const interval = setInterval(() => {
+        fetchVpsStats();
+      }, 1000); // Refresh every 1 second for real-time graphs
+      
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, autoRefreshVps, fetchVpsStats]);
 
   const fetchUserIp = async () => {
     try {
@@ -101,6 +269,22 @@ const AdminDashboardPage: React.FC = () => {
       console.error('Error fetching admin data:', error);
     } finally {
       setIsLoadingData(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (logFilters.level) params.append('level', logFilters.level);
+      if (logFilters.action) params.append('action', logFilters.action);
+      
+      const response = await axios.get(`${API_ENDPOINTS.ADMIN_OVERVIEW.replace('/overview', '/logs')}?${params.toString()}`, { 
+        withCredentials: true 
+      });
+      setLogs(response.data.logs);
+    } catch (error: any) {
+      toast.error('Failed to fetch logs');
+      console.error('Error fetching logs:', error);
     }
   };
 
@@ -133,11 +317,63 @@ const AdminDashboardPage: React.FC = () => {
 
   const handleManualClaim = async () => {
     try {
-      await axios.post(API_ENDPOINTS.ADMIN_CLAIM_ALL, {}, { withCredentials: true });
-      toast.success('Manual claim triggered successfully');
+      const response = await axios.post(API_ENDPOINTS.ADMIN_CLAIM_ALL, {}, { withCredentials: true });
+      const { processId } = response.data;
+      setCurrentProcessId(processId);
+      setShowProgressTracker(true);
+      toast.success('Manual claim triggered successfully - Opening progress tracker');
     } catch (error: any) {
       toast.error('Failed to trigger manual claim');
     }
+  };
+
+  const handleResetLeaderboard = async () => {
+    setIsResettingLeaderboard(true);
+    try {
+      const response = await axios.post(API_ENDPOINTS.ADMIN_RESET_LEADERBOARD, {}, { withCredentials: true });
+      const { stats } = response.data;
+      
+      toast.success(
+        `Leaderboard reset successfully! Deleted ${stats.claimRecordsDeleted} claim records, preserved ${stats.usersPreserved} users.`,
+        { duration: 6000 }
+      );
+      
+      setShowResetModal(false);
+      setResetAccessGranted(false); // Reset access after use
+      
+      // Refresh the overview data to show updated statistics
+      fetchAdminData();
+      
+    } catch (error: any) {
+      toast.error('Failed to reset leaderboard');
+      console.error('Reset leaderboard error:', error);
+    } finally {
+      setIsResettingLeaderboard(false);
+    }
+  };
+
+  const fetchActiveProcesses = async () => {
+    setIsLoadingProcesses(true);
+    try {
+      const response = await axios.get(API_ENDPOINTS.ADMIN_CLAIM_PROGRESS, { withCredentials: true });
+      setActiveProcesses(response.data);
+      if (response.data.length > 0) {
+        toast.success(`Found ${response.data.length} active claim process(es)`);
+      } else {
+        toast('No active claim processes found', { icon: 'ℹ️' });
+      }
+    } catch (error: any) {
+      toast.error('Failed to fetch active processes');
+      console.error('Error fetching active processes:', error);
+    } finally {
+      setIsLoadingProcesses(false);
+    }
+  };
+
+  const connectToProcess = (processId: string) => {
+    setCurrentProcessId(processId);
+    setShowProgressTracker(true);
+    toast.success(`Connected to process ${processId}`);
   };
 
   const handleLogout = async () => {
@@ -217,13 +453,24 @@ const AdminDashboardPage: React.FC = () => {
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'registrations', label: 'Registrations', icon: Users },
               { id: 'users', label: 'User Management', icon: Shield },
+              { id: 'logs', label: 'Logs', icon: FileText },
               { id: 'tools', label: 'Tools', icon: Settings },
+              { id: 'progress', label: 'Progress', icon: Monitor },
+              { id: 'vps', label: 'VPS Monitor', icon: Server },
             ].map((tab) => {
               const Icon = tab.icon;
+              const handleTabClick = () => {
+                if (tab.id === 'vps' && !vpsAccessGranted) {
+                  setShowVPSAuthModal(true);
+                } else {
+                  setActiveTab(tab.id);
+                }
+              };
+              
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={handleTabClick}
                   className={`btn ${
                     activeTab === tab.id
                       ? 'btn-primary'
@@ -463,21 +710,21 @@ const AdminDashboardPage: React.FC = () => {
               ) : (
                 <div className="space-y-4">
                   {filteredRegistrations.map((reg) => (
-                    <div key={reg._id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div key={reg._id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-transparent dark:border-dark-accent-navy">
                       <div>
-                        <p className="font-medium text-text-primary">
+                        <p className="font-medium text-text-primary dark:text-text-dark-primary">
                           {reg.username}
                         </p>
-                        <p className="text-sm text-text-secondary">
+                        <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
                           ID: {reg.eightBallPoolId}
                         </p>
-                        <p className="text-sm text-text-secondary">
+                        <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
                           Registered: {new Date(reg.createdAt).toLocaleDateString()}
                         </p>
                       </div>
                       <button
                         onClick={() => handleRemoveRegistration(reg.eightBallPoolId)}
-                        className="btn-outline text-red-600 hover:bg-red-50 inline-flex items-center space-x-2"
+                        className="btn-outline text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 inline-flex items-center space-x-2"
                       >
                         <Trash2 className="w-4 h-4" />
                         <span>Remove</span>
@@ -533,25 +780,23 @@ const AdminDashboardPage: React.FC = () => {
               ) : (
                 <div className="space-y-4">
                   {filteredUsers.map((reg: any) => (
-                    <div key={reg._id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-gray-200 dark:border-dark-accent-navy">
+                    <div key={reg._id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-gray-200 dark:border-dark-accent-navy space-y-3 sm:space-y-0">
                       <div className="flex-1">
-                        <div className="flex items-center space-x-3">
-                          <div>
-                            <p className="font-medium text-text-primary dark:text-text-dark-primary">
-                              {reg.username}
+                        <div>
+                          <p className="font-medium text-text-primary dark:text-text-dark-primary">
+                            {reg.username}
+                          </p>
+                          <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                            8BP ID: {reg.eightBallPoolId}
+                          </p>
+                          <p className="text-xs text-text-muted dark:text-text-dark-muted font-mono">
+                            IP: {reg.registrationIp || 'Unknown'}
+                          </p>
+                          {reg.isBlocked && (
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                              🚫 Blocked: {reg.blockedReason || 'No reason provided'}
                             </p>
-                            <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
-                              8BP ID: {reg.eightBallPoolId}
-                            </p>
-                            <p className="text-xs text-text-muted dark:text-text-dark-muted font-mono">
-                              IP: {reg.registrationIp || 'Unknown'}
-                            </p>
-                            {reg.isBlocked && (
-                              <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                🚫 Blocked: {reg.blockedReason || 'No reason provided'}
-                              </p>
-                            )}
-                          </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
@@ -571,11 +816,113 @@ const AdminDashboardPage: React.FC = () => {
                               }
                             }
                           }}
-                          className={`btn ${reg.isBlocked ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'} text-sm inline-flex items-center space-x-2`}
+                          className={`btn ${reg.isBlocked ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'} text-sm inline-flex items-center space-x-2 w-full sm:w-auto`}
                         >
                           <Shield className="w-4 h-4" />
                           <span>{reg.isBlocked ? 'Unblock' : 'Block'}</span>
                         </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Logs Tab */}
+        {activeTab === 'logs' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            {/* Filters */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">
+                Filter Logs
+              </h3>
+              <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label className="label">Level</label>
+                  <select
+                    value={logFilters.level}
+                    onChange={(e) => {
+                      setLogFilters({...logFilters, level: e.target.value});
+                      fetchLogs();
+                    }}
+                    className="input"
+                  >
+                    <option value="">All Levels</option>
+                    <option value="info">Info</option>
+                    <option value="warn">Warning</option>
+                    <option value="error">Error</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Action</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. admin_access, oauth_success"
+                    value={logFilters.action}
+                    onChange={(e) => setLogFilters({...logFilters, action: e.target.value})}
+                    className="input"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={fetchLogs}
+                    className="btn-primary w-full inline-flex items-center justify-center space-x-2"
+                  >
+                    <Filter className="w-4 h-4" />
+                    <span>Apply Filters</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Logs List */}
+            <div className="card">
+              <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-6">
+                System Logs ({logs.length})
+              </h2>
+              {logs.length === 0 ? (
+                <p className="text-text-secondary dark:text-text-dark-secondary text-center py-8">
+                  No logs found.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                  {logs.map((log, index) => (
+                    <div key={index} className="p-3 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-transparent dark:border-dark-accent-navy">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              log.level === 'error' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400' :
+                              log.level === 'warn' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
+                              'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'
+                            }`}>
+                              {log.level || 'info'}
+                            </span>
+                            {log.action && (
+                              <span className="text-xs text-text-secondary dark:text-text-dark-secondary font-mono">
+                                {log.action}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-text-primary dark:text-text-dark-primary font-mono">
+                            {log.message}
+                          </p>
+                          {log.userId && (
+                            <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">
+                              User: {log.userId}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-xs text-text-secondary dark:text-text-dark-secondary whitespace-nowrap ml-4">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -606,6 +953,22 @@ const AdminDashboardPage: React.FC = () => {
                     <Play className="w-4 h-4" />
                     <span>Trigger Manual Claim</span>
                   </button>
+                  
+                  <button
+                    onClick={() => {
+                      if (resetAccessGranted) {
+                        setShowResetModal(true);
+                      } else {
+                        setShowResetAuthModal(true);
+                      }
+                    }}
+                    className="btn-primary w-full inline-flex items-center justify-center space-x-2"
+                    style={{ marginTop: '8px' }}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Reset Leaderboard</span>
+                  </button>
+                  
                 </div>
               </div>
 
@@ -635,11 +998,649 @@ const AdminDashboardPage: React.FC = () => {
             </div>
           </motion.div>
         )}
+
+        {/* Progress Tab */}
+        {activeTab === 'progress' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-6">
+                Claim Progress Tracker
+              </h2>
+              
+              <div className="space-y-4">
+                <p className="text-text-secondary dark:text-text-dark-secondary">
+                  Monitor real-time progress of manual claim processes. Click the button below to start tracking a claim process.
+                </p>
+                
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <button
+                    onClick={handleManualClaim}
+                    className="btn-primary inline-flex items-center justify-center space-x-2"
+                  >
+                    <Play className="w-4 h-4" />
+                    <span>Trigger Manual Claim</span>
+                  </button>
+                  
+                  <button
+                    onClick={fetchActiveProcesses}
+                    disabled={isLoadingProcesses}
+                    className="btn-secondary inline-flex items-center justify-center space-x-2"
+                  >
+                    {isLoadingProcesses ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Activity className="w-4 h-4" />
+                    )}
+                    <span>View Active Progress</span>
+                  </button>
+                  
+                  {currentProcessId && (
+                    <button
+                      onClick={() => setShowProgressTracker(true)}
+                      className="btn-secondary inline-flex items-center justify-center space-x-2"
+                    >
+                      <Monitor className="w-4 h-4" />
+                      <span>View Progress Tracker</span>
+                    </button>
+                  )}
+                </div>
+                
+                {currentProcessId && (
+                  <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center space-x-2">
+                      <Activity className="w-5 h-5 text-green-600" />
+                      <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                        Active Process ID: {currentProcessId}
+                      </span>
+                    </div>
+                    <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                      Click "View Progress Tracker" to monitor the claim process in real-time
+                    </p>
+                  </div>
+                )}
+
+                {activeProcesses.length > 0 && (
+                  <div className="mt-6">
+                    <h4 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">
+                      Active Claim Processes ({activeProcesses.length})
+                    </h4>
+                    <div className="space-y-3">
+                      {activeProcesses.map((process) => (
+                        <div key={process.processId} className="card p-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
+                            <div className="flex items-center space-x-3">
+                              <div className="flex items-center space-x-2">
+                                {process.status === 'running' ? (
+                                  <Activity className="w-5 h-5 text-blue-500" />
+                                ) : process.status === 'completed' ? (
+                                  <CheckCircle className="w-5 h-5 text-green-500" />
+                                ) : (
+                                  <XCircle className="w-5 h-5 text-red-500" />
+                                )}
+                                <span className="font-medium text-text-primary dark:text-text-dark-primary">
+                                  Process ID: {process.processId}
+                                </span>
+                              </div>
+                              <span className={`text-xs px-2 py-1 rounded-full ${
+                                process.status === 'running' ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100' :
+                                process.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100' :
+                                'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
+                              }`}>
+                                {process.status}
+                              </span>
+                            </div>
+                            <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-2">
+                              <div className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                                <div className="flex justify-between sm:block sm:text-right">
+                                  <span>Total: {process.totalUsers || 0}</span>
+                                  <span className="sm:block">Completed: {process.completedUsers || 0}</span>
+                                  <span className="sm:block">Failed: {process.failedUsers || 0}</span>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => connectToProcess(process.processId)}
+                                className="btn-primary text-sm px-3 py-1 w-full sm:w-auto"
+                              >
+                                Connect
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* VPS Monitor Tab */}
+        {activeTab === 'vps' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">
+                    VPS Monitor
+                  </h2>
+                  {autoRefreshVps && (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                      <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                        Live
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => setAutoRefreshVps(!autoRefreshVps)}
+                    className={`btn ${autoRefreshVps ? 'btn-primary' : 'btn-outline'} text-sm px-3 py-1`}
+                  >
+                    {autoRefreshVps ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
+                  </button>
+                  <button
+                    onClick={fetchVpsStats}
+                    disabled={isLoadingVpsStats}
+                    className="btn-secondary text-sm px-3 py-1 inline-flex items-center space-x-1"
+                  >
+                    {isLoadingVpsStats ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {isLoadingVpsStats && !vpsStats ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                  <p className="text-text-secondary">Loading VPS statistics...</p>
+                </div>
+              ) : vpsStats ? (
+                <div className="space-y-6">
+                  {/* System Overview */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="card p-4">
+                      <div className="flex items-center space-x-3">
+                        <Server className="w-8 h-8 text-blue-500" />
+                        <div>
+                          <h3 className="font-semibold text-text-primary dark:text-text-dark-primary">System</h3>
+                          <p className="text-sm text-text-secondary dark:text-text-dark-secondary">{vpsStats.system.hostname}</p>
+                          <p className="text-xs text-text-secondary dark:text-text-dark-secondary">{vpsStats.system.platform} {vpsStats.system.arch}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card p-4">
+                      <div className="flex items-center space-x-3">
+                        <Clock className="w-8 h-8 text-green-500" />
+                        <div>
+                          <h3 className="font-semibold text-text-primary dark:text-text-dark-primary">Uptime</h3>
+                          <p className="text-sm text-text-secondary dark:text-text-dark-secondary">{vpsStats.uptime}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card p-4">
+                      <div className="flex items-center space-x-3">
+                        <Cpu className="w-8 h-8 text-purple-500" />
+                        <div>
+                          <h3 className="font-semibold text-text-primary dark:text-text-dark-primary">CPU</h3>
+                          <p className="text-sm text-text-secondary dark:text-text-dark-secondary">{vpsStats.cpu.usage.toFixed(1)}%</p>
+                          <p className="text-xs text-text-secondary dark:text-text-dark-secondary">{vpsStats.cpu.cores} cores</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card p-4">
+                      <div className="flex items-center space-x-3">
+                        <HardDrive className="w-8 h-8 text-orange-500" />
+                        <div>
+                          <h3 className="font-semibold text-text-primary dark:text-text-dark-primary">Memory</h3>
+                          <p className="text-sm text-text-secondary dark:text-text-dark-secondary">{vpsStats.memory.usagePercent.toFixed(1)}%</p>
+                          <p className="text-xs text-text-secondary dark:text-text-dark-secondary">
+                            {(vpsStats.memory.used / 1024 / 1024 / 1024).toFixed(1)}GB / {(vpsStats.memory.total / 1024 / 1024 / 1024).toFixed(1)}GB
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Real-time Charts */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    {/* CPU Usage Chart */}
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <Cpu className="w-5 h-5" />
+                        <span>CPU Usage (Real-time)</span>
+                      </h3>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={chartData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                            <XAxis 
+                              dataKey="time" 
+                              stroke="#9CA3AF"
+                              fontSize={12}
+                              interval={0}
+                              tick={{ fontSize: 10 }}
+                            />
+                            <YAxis 
+                              domain={[0, 100]}
+                              stroke="#9CA3AF"
+                              fontSize={12}
+                              label={{ value: '%', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip 
+                              contentStyle={{
+                                backgroundColor: '#1F2937',
+                                border: '1px solid #374151',
+                                borderRadius: '8px',
+                                color: '#F9FAFB'
+                              }}
+                              labelStyle={{ color: '#F9FAFB' }}
+                              formatter={(value: number, name: string) => [
+                                `${value.toFixed(1)}%`, 
+                                name === 'cpu' ? 'CPU' : 'Memory'
+                              ]}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="cpu"
+                              stroke="#8B5CF6"
+                              fill="#8B5CF6"
+                              fillOpacity={0.3}
+                              strokeWidth={2}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Memory Usage Chart */}
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <HardDrive className="w-5 h-5" />
+                        <span>Memory Usage (Real-time)</span>
+                      </h3>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={chartData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                            <XAxis 
+                              dataKey="time" 
+                              stroke="#9CA3AF"
+                              fontSize={12}
+                              interval={0}
+                              tick={{ fontSize: 10 }}
+                            />
+                            <YAxis 
+                              domain={[0, 100]}
+                              stroke="#9CA3AF"
+                              fontSize={12}
+                              label={{ value: '%', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip 
+                              contentStyle={{
+                                backgroundColor: '#1F2937',
+                                border: '1px solid #374151',
+                                borderRadius: '8px',
+                                color: '#F9FAFB'
+                              }}
+                              labelStyle={{ color: '#F9FAFB' }}
+                              formatter={(value: number, name: string) => [
+                                `${value.toFixed(1)}%`, 
+                                name === 'memory' ? 'Memory' : 'CPU'
+                              ]}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="memory"
+                              stroke="#F59E0B"
+                              fill="#F59E0B"
+                              fillOpacity={0.3}
+                              strokeWidth={2}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Combined CPU & Memory Chart */}
+                  <div className="card p-6 mb-6">
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                      <Activity className="w-5 h-5" />
+                      <span>CPU & Memory Usage Comparison</span>
+                      <span className="text-xs text-gray-500 ml-2">({chartData.length} points)</span>
+                    </h3>
+                    <div className="h-80 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData}>
+                          {console.log('Chart rendering with data:', chartData)}
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="time" 
+                            tick={{ fontSize: 12 }}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis 
+                            domain={[0, 100]} 
+                            tick={{ fontSize: 12 }}
+                          />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="cpu" stroke="#8B5CF6" strokeWidth={2} />
+                          <Line type="monotone" dataKey="memory" stroke="#F59E0B" strokeWidth={2} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Detailed Stats */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Memory Details */}
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <HardDrive className="w-5 h-5" />
+                        <span>Memory Usage</span>
+                      </h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Used</span>
+                          <span className="font-medium">{(vpsStats.memory.used / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Available</span>
+                          <span className="font-medium">{(vpsStats.memory.available / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Swap Used</span>
+                          <span className="font-medium">{(vpsStats.memory.swap.used / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                          <div 
+                            className="bg-primary-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${vpsStats.memory.usagePercent}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Disk Details */}
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <HardDrive className="w-5 h-5" />
+                        <span>Disk Usage</span>
+                      </h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Used</span>
+                          <span className="font-medium">{(vpsStats.disk.used / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Free</span>
+                          <span className="font-medium">{(vpsStats.disk.free / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Total</span>
+                          <span className="font-medium">{(vpsStats.disk.total / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                          <div 
+                            className="bg-orange-500 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${vpsStats.disk.usagePercent}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Network & Ping */}
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <Wifi className="w-5 h-5" />
+                        <span>Network & Ping</span>
+                      </h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Google</span>
+                          <span className={`font-medium ${vpsStats.ping.google > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {vpsStats.ping.google > 0 ? `${vpsStats.ping.google.toFixed(2)}ms` : 'Failed'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Cloudflare</span>
+                          <span className={`font-medium ${vpsStats.ping.cloudflare > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {vpsStats.ping.cloudflare > 0 ? `${vpsStats.ping.cloudflare.toFixed(2)}ms` : 'Failed'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Localhost</span>
+                          <span className={`font-medium ${vpsStats.ping.localhost > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {vpsStats.ping.localhost > 0 ? `${vpsStats.ping.localhost.toFixed(2)}ms` : 'Failed'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Active Connections</span>
+                          <span className="font-medium">{vpsStats.network.connections}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Processes & Services */}
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <Activity className="w-5 h-5" />
+                        <span>Processes & Services</span>
+                      </h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Total Processes</span>
+                          <span className="font-medium">{vpsStats.processes.total}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Running</span>
+                          <span className="font-medium text-green-500">{vpsStats.processes.running}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Sleeping</span>
+                          <span className="font-medium text-blue-500">{vpsStats.processes.sleeping}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-secondary dark:text-text-dark-secondary">Services</span>
+                          <span className="font-medium">{vpsStats.services.length}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Services Table */}
+                  {vpsStats.services.length > 0 && (
+                    <div className="card p-6">
+                      <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4 flex items-center space-x-2">
+                        <Server className="w-5 h-5" />
+                        <span>Running Services</span>
+                      </h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-gray-200 dark:border-gray-700">
+                              <th className="text-left py-2 text-text-secondary dark:text-text-dark-secondary">Service</th>
+                              <th className="text-left py-2 text-text-secondary dark:text-text-dark-secondary">Status</th>
+                              <th className="text-left py-2 text-text-secondary dark:text-text-dark-secondary">Uptime</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {vpsStats.services.slice(0, 10).map((service, index) => (
+                              <tr key={index} className="border-b border-gray-100 dark:border-gray-800">
+                                <td className="py-2 text-text-primary dark:text-text-dark-primary font-medium">
+                                  {service.name}
+                                </td>
+                                <td className="py-2">
+                                  <span className={`px-2 py-1 rounded-full text-xs ${
+                                    service.status === 'active' 
+                                      ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
+                                      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100'
+                                  }`}>
+                                    {service.status}
+                                  </span>
+                                </td>
+                                <td className="py-2 text-text-secondary dark:text-text-dark-secondary">
+                                  {service.uptime}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="text-center text-xs text-text-secondary dark:text-text-dark-secondary">
+                    Last updated: {new Date(vpsStats.timestamp).toLocaleString()}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+                  <p className="text-text-secondary dark:text-text-dark-secondary">Failed to load VPS statistics</p>
+                  <button
+                    onClick={fetchVpsStats}
+                    className="btn-primary mt-4"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
       </div>
+      
+      {/* Progress Tracker Modal */}
+      {showProgressTracker && (
+        <ClaimProgressTracker
+          processId={currentProcessId || undefined}
+          onClose={() => setShowProgressTracker(false)}
+        />
+      )}
+      
+      {/* VPS Authentication Modal */}
+      <VPSAuthModal
+        isOpen={showVPSAuthModal}
+        onClose={() => setShowVPSAuthModal(false)}
+        onSuccess={() => {
+          setVpsAccessGranted(true);
+          setActiveTab('vps');
+        }}
+      />
+
+      {/* Reset Leaderboard Authentication Modal */}
+      <ResetLeaderboardAuthModal
+        isOpen={showResetAuthModal}
+        onClose={() => setShowResetAuthModal(false)}
+        onSuccess={() => {
+          setResetAccessGranted(true);
+          setShowResetModal(true);
+        }}
+      />
+
+      {/* Reset Leaderboard Confirmation Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+          >
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center">
+                  <RotateCcw className="w-5 h-5 text-red-600 dark:text-red-400" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">
+                  Reset Leaderboard
+                </h3>
+                <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                  This action cannot be undone
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <p className="text-text-primary dark:text-text-dark-primary mb-3">
+                Are you sure you want to reset the leaderboard? This will:
+              </p>
+              <ul className="space-y-2 text-sm text-text-secondary dark:text-text-dark-secondary">
+                <li className="flex items-center space-x-2">
+                  <div className="w-1.5 h-1.5 bg-red-500 rounded-full"></div>
+                  <span>Delete all claim records and statistics</span>
+                </li>
+                <li className="flex items-center space-x-2">
+                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                  <span>Preserve all user registrations</span>
+                </li>
+                <li className="flex items-center space-x-2">
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                  <span>Create a backup before deletion</span>
+                </li>
+                <li className="flex items-center space-x-2">
+                  <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></div>
+                  <span>Send Discord notification</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setShowResetModal(false)}
+                disabled={isResettingLeaderboard}
+                className="flex-1 px-4 py-2 text-sm font-medium text-text-secondary dark:text-text-dark-secondary bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetLeaderboard}
+                disabled={isResettingLeaderboard}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center space-x-2"
+              >
+                {isResettingLeaderboard ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Resetting...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Reset Leaderboard</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default AdminDashboardPage;
+
+
 
 

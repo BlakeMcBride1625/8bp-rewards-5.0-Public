@@ -1,52 +1,99 @@
-# Backend Dockerfile
-FROM node:18-alpine
+# Multi-stage build for 8BP Rewards Backend
+FROM node:18-slim AS builder
 
-# Install system dependencies
-RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
-    curl
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set Puppeteer to use installed Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-
-# Create app directory
+# Set working directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY tsconfig.backend.json ./
+COPY frontend/package*.json ./frontend/
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including devDependencies for building)
+RUN npm ci
+RUN cd frontend && npm ci
 
 # Copy source code
-COPY backend/ ./backend/
-COPY models/ ./models/
-COPY services/ ./services/
-COPY scripts/ ./scripts/
+COPY . .
 
-# Build TypeScript
+# Build TypeScript backend
 RUN npm run build:backend
 
-# Create logs directory
-RUN mkdir -p logs
+# Build React frontend
+RUN npm run build:frontend
 
-# Expose port
+# Production stage
+FROM node:18-slim
+
+# Install runtime dependencies and Playwright dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    build-essential \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libjpeg62-turbo \
+    libgif7 \
+    librsvg2-2 \
+    chromium \
+    fonts-liberation \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Playwright to use system Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=0
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install ONLY production dependencies
+RUN npm ci --only=production
+
+# Install Playwright with system dependencies
+RUN npx playwright install-deps chromium || true
+RUN npx playwright install chromium || echo "Playwright install attempted"
+
+# Copy built files from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/frontend/build ./frontend/build
+
+# Copy necessary files
+COPY models ./models
+COPY services ./services
+COPY discord-service.js ./
+COPY playwright-claimer-discord.js ./
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Expose backend port
 EXPOSE 2600
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:2600/health || exit 1
+    CMD curl -f http://localhost:2600/api/status || exit 1
 
-# Start the application
+# Start backend server
 CMD ["node", "dist/backend/server.js"]
-
-
-

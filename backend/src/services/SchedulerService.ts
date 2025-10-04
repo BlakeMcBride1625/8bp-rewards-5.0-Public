@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { logger } from './LoggerService';
 import { Registration } from '../models/Registration';
 import { ClaimRecord } from '../models/ClaimRecord';
-import DiscordService from '../../discord-service';
+const DiscordService = require('../../../discord-service');
 
 interface ClaimResult {
   eightBallPoolId: string;
@@ -21,7 +21,7 @@ interface SchedulerSummary {
 }
 
 class SchedulerService {
-  private discordService: DiscordService;
+  private discordService: any;
   private isRunning: boolean = false;
   private lastRun: Date | null = null;
   private nextRun: Date | null = null;
@@ -117,7 +117,7 @@ class SchedulerService {
           // Log the claim record
           await this.logClaimRecord(registration, result);
           
-        } catch (error) {
+        } catch (error: any) {
           logger.error('Failed to claim rewards for user', {
             action: 'scheduler_user_error',
             eightBallPoolId: registration.eightBallPoolId,
@@ -159,7 +159,7 @@ class SchedulerService {
         summary
       });
 
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Scheduled claim run failed', {
         action: 'scheduler_error',
         error: error.message
@@ -181,7 +181,7 @@ class SchedulerService {
       // For now, simulate the claim process
       
       // Import the claimer dynamically to avoid circular dependencies
-      const EightBallPoolClaimer = require('../playwright-claimer-discord');
+      const EightBallPoolClaimer = require('../../../playwright-claimer-discord');
       const claimer = new EightBallPoolClaimer();
       
       const result = await claimer.claimRewardsForUser(registration.eightBallPoolId);
@@ -194,7 +194,7 @@ class SchedulerService {
         error: result.success ? undefined : result.error
       };
 
-    } catch (error) {
+    } catch (error: any) {
       return {
         eightBallPoolId: registration.eightBallPoolId,
         websiteUserId: registration.username,
@@ -217,7 +217,7 @@ class SchedulerService {
       });
 
       await claimRecord.save();
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to log claim record', {
         action: 'log_claim_record_error',
         eightBallPoolId: registration.eightBallPoolId,

@@ -1,0 +1,65 @@
+{
+  "timestamp": "2025-10-02T20:15:28.686Z",
+  "action": "leaderboard_reset",
+  "summary": {
+    "claimRecordsDeleted": 517,
+    "registrationsPreserved": 34,
+    "successfulClaimsDeleted": 517,
+    "failedClaimsDeleted": 0,
+    "totalItemsDeleted": 1187
+  },
+  "beforeReset": {
+    "totalClaimRecords": 517,
+    "successfulClaims": 517,
+    "failedClaims": 0,
+    "totalItemsClaimed": 1187,
+    "totalRegistrations": 34,
+    "userStats": [
+      {
+        "_id": "3057211056",
+        "totalClaims": 20,
+        "successfulClaims": 20,
+        "totalItemsClaimed": 45
+      },
+      {
+        "_id": "1826254746",
+        "totalClaims": 21,
+        "successfulClaims": 21,
+        "totalItemsClaimed": 45
+      },
+      {
+        "_id": "2660625144",
+        "totalClaims": 20,
+        "successfulClaims": 20,
+        "totalItemsClaimed": 43
+      },
+      {
+        "_id": "3417777776",
+        "totalClaims": 18,
+        "successfulClaims": 18,
+        "totalItemsClaimed": 42
+      },
+      {
+        "_id": "2811111711",
+        "totalClaims": 18,
+        "successfulClaims": 18,
+        "totalItemsClaimed": 42
+      }
+    ]
+  },
+  "afterReset": {
+    "totalClaimRecords": 0,
+    "successfulClaims": 0,
+    "failedClaims": 0,
+    "totalItemsClaimed": 0,
+    "totalRegistrations": 34
+  },
+  "backupFile": "/home/blake/8bp-rewards/database-backups/claim-records-backup-2025-10-02T20-15-28-344Z.json",
+  "nextSteps": [
+    "All claim records have been cleared",
+    "User registrations are preserved",
+    "New claims will start fresh statistics",
+    "Leaderboard will show zero until new claims are made",
+    "Scheduled claims will continue to work normally"
+  ]
+}

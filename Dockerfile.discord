@@ -1,21 +1,31 @@
-# Discord Bot Dockerfile
-FROM node:18-alpine
+# Dockerfile for 8BP Rewards Discord Bot
+FROM node:18-slim
 
-# Install system dependencies
-RUN apk add --no-cache \
+# Install build and runtime dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    build-essential \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libjpeg62-turbo \
+    libgif7 \
+    librsvg2-2 \
     chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
+    fonts-liberation \
+    libnss3 \
+    libxss1 \
+    libasound2 \
     ca-certificates \
-    ttf-freefont
+    && rm -rf /var/lib/apt/lists/*
 
-# Set Puppeteer to use installed Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+# Set Playwright to use system Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=0
 
-# Create app directory
 WORKDIR /app
 
 # Copy package files
@@ -24,25 +34,24 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy Discord bot files
-COPY discord-bot.js ./
+# Install Playwright
+RUN npx playwright install-deps chromium || true
+RUN npx playwright install chromium || echo "Playwright install attempted"
+
+# Copy necessary files
+COPY models ./models
+COPY services ./services
 COPY discord-service.js ./
+COPY discord-bot.js ./
 COPY playwright-claimer-discord.js ./
-COPY playwright-claimer.js ./
-COPY image-generator.js ./
-COPY models/ ./models/
-COPY services/ ./services/
-COPY user-mapping.json ./
+COPY dist ./dist
 
 # Create logs directory
-RUN mkdir -p logs
+RUN mkdir -p /app/logs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD node -e "console.log('Discord bot health check')" || exit 1
+    CMD node -e "console.log('Discord bot running')" || exit 1
 
-# Start the Discord bot
+# Start Discord bot
 CMD ["node", "discord-bot.js"]
-
-
-

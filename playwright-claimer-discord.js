@@ -3,23 +3,158 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
 const DiscordService = require('./discord-service');
-const ImageGenerator = require('./image-generator');
+const mongoose = require('mongoose');
+const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
+
+// ImageGenerator is optional
+let ImageGenerator;
+try {
+  ImageGenerator = require('./image-generator');
+} catch (error) {
+  console.log('ℹ️ ImageGenerator not available - screenshots will be used instead');
+  ImageGenerator = null;
+}
 
 // Load environment variables
 dotenv.config();
 
+// Import ClaimRecord model (compiled JS version)
+const { ClaimRecord } = require('./dist/backend/models/ClaimRecord');
+
 class EightBallPoolClaimer {
   constructor() {
     this.discordService = new DiscordService();
-    this.imageGenerator = new ImageGenerator();
+    this.imageGenerator = ImageGenerator ? new ImageGenerator() : null;
     this.shopUrl = process.env.SHOP_URL || 'https://8ballpool.com/en/shop';
-    this.userIds = this.getUserIdList();
+    this.dailyRewardUrl = 'https://8ballpool.com/en/shop#daily_reward';
+    this.freeDailyCueUrl = 'https://8ballpool.com/en/shop#free_daily_cue_piece';
+    this.userIds = []; // Will be populated in initialize()
     this.delayBetweenUsers = parseInt(process.env.DELAY_BETWEEN_USERS || '5000', 10);
     this.timeout = parseInt(process.env.TIMEOUT || '60000', 10);
     this.headless = process.env.HEADLESS !== 'false';
+    this.dbConnected = false;
   }
 
-  getUserIdList() {
+  async connectToDatabase() {
+    if (this.dbConnected) return true;
+    
+    try {
+      const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
+      if (!mongoUri) {
+        console.warn('⚠️ MongoDB URI not found - claims will not be saved to database');
+        return false;
+      }
+      
+      await mongoose.connect(mongoUri);
+      this.dbConnected = true;
+      console.log('✅ Connected to MongoDB for claim records');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to connect to MongoDB:', error.message);
+      return false;
+    }
+  }
+
+  async saveClaimRecord(userId, claimedItems, success, error = null) {
+    if (!this.dbConnected) {
+      console.log('⚠️ Database not connected - skipping claim record save');
+      return;
+    }
+
+    try {
+      const claimRecord = new ClaimRecord({
+        eightBallPoolId: userId,
+        websiteUserId: userId, // Use the same ID for both fields
+        status: success ? 'success' : 'failed',
+        itemsClaimed: claimedItems || [],
+        error: error,
+        claimedAt: new Date(),
+        schedulerRun: new Date()
+      });
+
+      await claimRecord.save();
+      console.log(`💾 Saved claim record to database for user ${userId}`);
+    } catch (error) {
+      console.error(`❌ Failed to save claim record for ${userId}:`, error.message);
+    }
+  }
+
+  async ensureScreenshotDirectories() {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+
+      const directories = [
+        'screenshots',
+        'screenshots/shop-page',
+        'screenshots/login',
+        'screenshots/id-entry',
+        'screenshots/go-click',
+        'screenshots/final-page'
+      ];
+
+      for (const dir of directories) {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+          console.log(`📁 Created directory: ${dir}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error creating screenshot directories:', error.message);
+    }
+  }
+
+  async cleanupOldScreenshots() {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const projectRoot = path.join(__dirname);
+      
+      console.log('🧹 Cleaning up old screenshot files...');
+      
+      // Get all PNG files in the project root
+      const files = fs.readdirSync(projectRoot);
+      const pngFiles = files.filter(file => file.endsWith('.png'));
+      
+      const oneHourAgo = Date.now() - (60 * 60 * 1000); // 1 hour in milliseconds
+      let deletedCount = 0;
+      
+      for (const file of pngFiles) {
+        const filePath = path.join(projectRoot, file);
+        try {
+          const stats = fs.statSync(filePath);
+          
+          // Delete if older than 1 hour
+          if (stats.mtimeMs < oneHourAgo) {
+            fs.unlinkSync(filePath);
+            deletedCount++;
+          }
+        } catch (err) {
+          // Skip files we can't access
+        }
+      }
+      
+      console.log(`🧹 Cleaned up ${deletedCount} old screenshot files (older than 1 hour)`);
+    } catch (error) {
+      console.error('❌ Error cleaning up screenshots:', error.message);
+    }
+  }
+
+  async getUserIdList() {
+    try {
+      // First try to get users from MongoDB database
+      const db = mongoose.connection.db;
+      const registrations = await db.collection('registrations').find({}).project({ eightBallPoolId: 1 }).toArray();
+      if (registrations && registrations.length > 0) {
+        const userIds = registrations.map(reg => reg.eightBallPoolId).filter(id => id);
+        console.log(`📊 Found ${userIds.length} users in database`);
+        return userIds;
+      }
+    } catch (error) {
+      console.log('⚠️ Could not fetch users from database, falling back to env vars');
+    }
+    
+    // Fallback to environment variables
     const userIds = process.env.USER_IDS;
     const singleUserId = process.env.USER_ID;
     
@@ -45,6 +180,14 @@ class EightBallPoolClaimer {
 
   async claimRewardsForUser(userId) {
     console.log(`🚀 Starting claim process for User ID: ${userId}`);
+    
+    // Ensure screenshot directories exist
+    await this.ensureScreenshotDirectories();
+    
+    // Ensure database connection
+    if (!this.dbConnected) {
+      await this.connectToDatabase();
+    }
     
     let browser = null;
     let page = null;
@@ -93,16 +236,16 @@ class EightBallPoolClaimer {
         'sec-ch-ua-platform': '"macOS"'
       });
 
-      // Navigate to shop
-      console.log(`🌐 Navigating to: ${this.shopUrl}`);
-      await page.goto(this.shopUrl, { 
+      // Navigate to Daily Reward section FIRST
+      console.log(`🌐 Navigating to Daily Reward section: ${this.dailyRewardUrl}`);
+      await page.goto(this.dailyRewardUrl, { 
         waitUntil: 'domcontentloaded',
         timeout: this.timeout 
       });
-      console.log('✅ Successfully loaded shop page');
+      console.log('✅ Successfully loaded Daily Reward page');
 
       // Take initial screenshot
-      await page.screenshot({ path: `shop-page-${userId}.png` });
+      await page.screenshot({ path: `screenshots/shop-page/shop-page-${userId}.png` });
       console.log(`📸 Initial screenshot saved as shop-page-${userId}.png`);
 
       // Look for login modal
@@ -113,15 +256,37 @@ class EightBallPoolClaimer {
       await page.waitForTimeout(3000);
 
       // Take screenshot after login
-      await page.screenshot({ path: `after-login-${userId}.png` });
+      await page.screenshot({ path: `screenshots/login/after-login-${userId}.png` });
       console.log(`📸 Screenshot after login saved as after-login-${userId}.png`);
 
-      // Look for and click FREE buttons
-      console.log('🎁 Looking for FREE buttons...');
-      claimedItems = await this.claimFreeItems(page, userId);
+      // Check for FREE buttons in Daily Reward section
+      console.log('🎁 Checking Daily Reward section for FREE items...');
+      let dailyItems = await this.claimFreeItems(page, userId);
+      claimedItems = claimedItems.concat(dailyItems);
+      console.log(`✅ Claimed ${dailyItems.length} items from Daily Reward section`);
+
+      // Wait between sections
+      await page.waitForTimeout(2000);
+
+      // Navigate to Free Daily Cue Piece section
+      console.log(`🌐 Navigating to Free Daily Cue Piece section: ${this.freeDailyCueUrl}`);
+      await page.goto(this.freeDailyCueUrl, { 
+        waitUntil: 'domcontentloaded',
+        timeout: this.timeout 
+      });
+      console.log('✅ Successfully loaded Free Daily Cue Piece page');
+
+      // Wait for page to settle
+      await page.waitForTimeout(2000);
+
+      // Check for FREE buttons in Free Daily Cue Piece section
+      console.log('🎁 Checking Free Daily Cue Piece section for FREE items...');
+      let cueItems = await this.claimFreeItems(page, userId);
+      claimedItems = claimedItems.concat(cueItems);
+      console.log(`✅ Claimed ${cueItems.length} items from Free Daily Cue Piece section`);
 
       // Take final screenshot
-      screenshotPath = `final-page-${userId}.png`;
+      screenshotPath = `screenshots/final-page/final-page-${userId}.png`;
       await page.screenshot({ path: screenshotPath });
       console.log(`📸 Final screenshot saved as ${screenshotPath}`);
 
@@ -130,6 +295,12 @@ class EightBallPoolClaimer {
       await this.logout(page);
 
       console.log(`✅ Claim process completed for user: ${userId}`);
+      
+      // Save claim record to database
+      await this.saveClaimRecord(userId, claimedItems, true);
+      
+      // Cleanup old screenshots
+      await this.cleanupOldScreenshots();
       
       // Send Discord confirmation
       if (this.discordService.isReady) {
@@ -141,6 +312,10 @@ class EightBallPoolClaimer {
 
     } catch (error) {
       console.error(`❌ Error during claim process for ${userId}:`, error.message);
+      
+      // Save failed claim record to database
+      await this.saveClaimRecord(userId, [], false, error.message);
+      
       return { success: false, error: error.message };
     } finally {
       if (browser) {
@@ -300,7 +475,7 @@ class EightBallPoolClaimer {
       console.log(`✅ Entered User ID: ${userId}`);
 
       // Take screenshot after entering ID
-      await page.screenshot({ path: `after-id-entry-${userId}.png` });
+      await page.screenshot({ path: `screenshots/id-entry/after-id-entry-${userId}.png` });
       console.log(`📸 Screenshot after ID entry saved as after-id-entry-${userId}.png`);
 
       // Click Go button
@@ -308,7 +483,7 @@ class EightBallPoolClaimer {
       
       // Wait for login to complete and take another screenshot
       await page.waitForTimeout(3000);
-      await page.screenshot({ path: `after-go-click-${userId}.png` });
+      await page.screenshot({ path: `screenshots/go-click/after-go-click-${userId}.png` });
       console.log(`📸 Screenshot after Go click saved as after-go-click-${userId}.png`);
 
     } catch (error) {
@@ -423,7 +598,27 @@ class EightBallPoolClaimer {
     try {
       const claimedItems = [];
       
-      // Look for FREE buttons with various selectors
+      console.log('🎁 Looking for all FREE and CLAIM buttons...');
+      
+      // Specific target keywords to identify rewards we care about
+      // ORDER MATTERS! Check more specific items first
+      const targetKeywords = [
+        // Free Daily Cue Piece FIRST (most specific - check before individual cue names)
+        'Free Daily Cue Piece', 'FREE DAILY CUE PIECE', 'DAILY CUE PIECE', 'Daily Cue Piece',
+        'Free Cue Piece', 'FREE CUE PIECE',
+        // Black Diamond (special item)
+        'Black Diamond', 'BLACK DIAMOND',
+        // Daily Rewards
+        'Daily Reward', 'DAILY REWARD', 'WEBSHOP EXCLUSIVE',
+        // 7 Random Cues (check AFTER Free Daily Cue Piece)
+        'Opti Shot', 'Spin Wizard', 'Power Break', 'Strike Zone', 
+        'Trickster', 'Gamechanger', 'Legacy Strike',
+        // Other items
+        'Cash', 'Coins', 'Box', 'Boxes', 'FREE CASH', 'FREE COINS'
+      ];
+      
+      // Find all FREE/CLAIM buttons first
+      console.log('🔍 Scanning for all FREE and CLAIM buttons...');
       const freeButtonSelectors = [
         'button:has-text("FREE")',
         'button:has-text("free")',
@@ -481,11 +676,66 @@ class EightBallPoolClaimer {
         return claimedItems;
       }
 
-      // Click each FREE button
+      // Click each FREE button (after checking if it's claimable)
       for (let i = 0; i < uniqueButtons.length; i++) {
         const buttonInfo = uniqueButtons[i];
         try {
-          console.log(`🎁 Clicking FREE button ${i + 1}: "${buttonInfo.text}"`);
+          // Check if button should be clicked (for actual claiming)
+          const shouldClick = await shouldClickButton(buttonInfo.element, buttonInfo.text, console);
+          if (!shouldClick) {
+            continue;
+          }
+          
+          // Check if button should be skipped for counting (already claimed indicators)
+          const shouldSkipForCounting = shouldSkipButtonForCounting(buttonInfo.text, console);
+          
+          // Check if button is disabled
+          const isDisabled = await buttonInfo.element.isDisabled().catch(() => false);
+          if (isDisabled) {
+            console.log(`⏭️ Skipping button ${i + 1} - disabled/greyed out`);
+            continue;
+          }
+          
+          // Check if button is actually clickable
+          const isClickable = await buttonInfo.element.isEnabled().catch(() => false);
+          if (!isClickable) {
+            console.log(`⏭️ Skipping button ${i + 1} - not clickable`);
+            continue;
+          }
+          
+          // Try to identify what item this button is for
+          let itemName = 'Unknown Item';
+          try {
+            // Look for text in multiple parent levels
+            let parentText = '';
+            
+            // Try to get text from several ancestor levels
+            for (let level = 1; level <= 5; level++) {
+              try {
+                const parent = await buttonInfo.element.locator(`xpath=ancestor::div[${level}]`).first();
+                const text = await parent.textContent().catch(() => '');
+                parentText += ' ' + text;
+              } catch (e) {
+                // Continue with next level
+              }
+            }
+            
+            console.log(`📝 Parent text snippet: ${parentText.substring(0, 200)}...`);
+            
+            // Check if it matches any of our target keywords
+            for (const keyword of targetKeywords) {
+              if (parentText.includes(keyword)) {
+                itemName = keyword;
+                console.log(`🎯 Identified item: ${keyword}`);
+                break;
+              }
+            }
+          } catch (error) {
+            // Use button text if we can't find parent
+            itemName = buttonInfo.text || 'Unknown';
+          }
+          
+          console.log(`🎁 Clicking FREE button ${i + 1} for "${itemName}" (button text: "${buttonInfo.text}")`);
           
           // Scroll button into view
           await buttonInfo.element.scrollIntoViewIfNeeded();
@@ -493,10 +743,14 @@ class EightBallPoolClaimer {
           
           // Click the button
           await buttonInfo.element.click();
-          console.log(`✅ Successfully clicked FREE button: "${buttonInfo.text}"`);
           
-          // Add to claimed items
-          claimedItems.push(buttonInfo.text);
+          // Use standardized claim validation logic
+          const isValidNewClaim = await validateClaimResult(buttonInfo.element, itemName, console);
+          
+          // Only count if it wasn't already skipped for counting AND it's a valid new claim
+          if (!shouldSkipForCounting && isValidNewClaim) {
+            claimedItems.push(itemName);
+          }
           
           // Wait between clicks
           await page.waitForTimeout(2000);
@@ -628,8 +882,15 @@ class EightBallPoolClaimer {
   }
 
   async claimRewards() {
+    // Initialize user list from database
+    this.userIds = await this.getUserIdList();
+    
     console.log(`🚀 Starting 8ball pool reward claimer for ${this.userIds.length} users...`);
     console.log(`👥 Users: ${this.userIds.join(', ')}`);
+    
+    // Connect to database
+    await this.connectToDatabase();
+    
     console.log(`\n🚀 Running ${this.userIds.length} claims in PARALLEL for maximum speed!`);
 
     // Process all users in parallel! 🚀
@@ -664,7 +925,11 @@ class EightBallPoolClaimer {
     const results = await this.claimRewards();
     
     // Cleanup old files
-    this.imageGenerator.cleanupOldFiles();
+    if (this.imageGenerator) {
+      this.imageGenerator.cleanupOldFiles();
+    } else {
+      await this.cleanupOldScreenshots();
+    }
     
     // Logout Discord
     await this.discordService.logout();

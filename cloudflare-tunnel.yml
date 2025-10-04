@@ -2,7 +2,7 @@
 # This file configures Cloudflare Tunnels to route traffic to your local services
 
 tunnel: 8bp-rewards-tunnel
-credentials-file: /root/.cloudflared/8bp-rewards-tunnel.json
+credentials-file: /home/blake/.cloudflared/59ce795a-9617-4dcc-975b-37ca377ffdb9.json
 
 ingress:
   # Frontend (React app)

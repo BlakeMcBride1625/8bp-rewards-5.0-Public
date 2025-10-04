@@ -24,10 +24,11 @@ interface LeaderboardStats {
 
 const LeaderboardPage: React.FC = () => {
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardStats | null>(null);
+  const [totalStats, setTotalStats] = useState<LeaderboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState('7d');
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(10);
   const [searchQuery, setSearchQuery] = useState('');
 
   const timeframes = [
@@ -47,12 +48,20 @@ const LeaderboardPage: React.FC = () => {
   const fetchLeaderboard = async () => {
     setIsLoading(true);
     try {
+      // Fetch filtered leaderboard data
       const response = await axios.get(`${API_ENDPOINTS.LEADERBOARD}?timeframe=${timeframe}&limit=${limit}`, { withCredentials: true });
       setLeaderboardData(response.data);
+      
+      // Fetch complete stats (no limit) for totals
+      const totalResponse = await axios.get(`${API_ENDPOINTS.LEADERBOARD}?timeframe=${timeframe}&limit=1000`, { withCredentials: true });
+      setTotalStats(totalResponse.data);
+      
       setError(null);
     } catch (err: any) {
       setError('Failed to fetch leaderboard data');
       console.error('Error fetching leaderboard:', err);
+      setLeaderboardData(null);
+      setTotalStats(null);
     } finally {
       setIsLoading(false);
     }
@@ -135,24 +144,30 @@ const LeaderboardPage: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="card mb-8"
+          className="card mb-8 border-2 border-primary-100 dark:border-dark-accent-navy/20"
         >
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Filter className="w-5 h-5 text-text-secondary" />
-              <span className="text-text-secondary font-medium">Filters:</span>
+          <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-primary-100 dark:bg-dark-accent-navy/20 rounded-full flex items-center justify-center">
+                <Filter className="w-5 h-5 text-primary-600 dark:text-dark-accent-navy" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">Filters</h3>
+                <p className="text-sm text-text-secondary dark:text-text-dark-secondary">Customize your leaderboard view</p>
+              </div>
             </div>
             
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div>
-                <label htmlFor="timeframe" className="label text-sm">
+            <div className="flex flex-col sm:flex-row gap-6 w-full lg:w-auto">
+              <div className="flex-1 lg:flex-none lg:min-w-[200px]">
+                <label htmlFor="timeframe" className="label">
+                  <Clock className="w-4 h-4 inline mr-2" />
                   Time Period
                 </label>
                 <select
                   id="timeframe"
                   value={timeframe}
                   onChange={(e) => setTimeframe(e.target.value)}
-                  className="input text-sm"
+                  className="input"
                 >
                   {timeframes.map((tf) => (
                     <option key={tf.value} value={tf.value}>
@@ -162,24 +177,70 @@ const LeaderboardPage: React.FC = () => {
                 </select>
               </div>
               
-              <div>
-                <label htmlFor="limit" className="label text-sm">
+              <div className="flex-1 lg:flex-none lg:min-w-[150px]">
+                <label htmlFor="limit" className="label">
+                  <Trophy className="w-4 h-4 inline mr-2" />
                   Show Top
                 </label>
                 <select
                   id="limit"
                   value={limit}
                   onChange={(e) => setLimit(Number(e.target.value))}
-                  className="input text-sm"
+                  className="input"
                 >
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
+                  <option value={10}>10 Players</option>
+                  <option value={25}>25 Players</option>
+                  <option value={50}>50 Players</option>
+                  <option value={100}>100 Players</option>
                 </select>
               </div>
             </div>
           </div>
         </motion.div>
+
+        {/* Total Claims Stats */}
+        {totalStats && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.3 }}
+            className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"
+          >
+            <div className="card text-center">
+              <div className="flex items-center justify-center mb-3">
+                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/20 rounded-full flex items-center justify-center">
+                  <Trophy className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Players</h3>
+              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalStats.totalUsers}</p>
+            </div>
+
+            <div className="card text-center">
+              <div className="flex items-center justify-center mb-3">
+                <div className="w-12 h-12 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6 text-green-600 dark:text-green-400" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Claims</h3>
+              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalClaims, 0)}
+              </p>
+            </div>
+
+            <div className="card text-center">
+              <div className="flex items-center justify-center mb-3">
+                <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/20 rounded-full flex items-center justify-center">
+                  <Medal className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Items</h3>
+              <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalItemsClaimed, 0)}
+              </p>
+            </div>
+          </motion.div>
+        )}
 
         {/* Leaderboard */}
         <motion.div
@@ -243,7 +304,7 @@ const LeaderboardPage: React.FC = () => {
                       transition={{ duration: 0.5, delay: index * 0.1 }}
                       className={`p-4 rounded-lg border transition-all hover:shadow-md ${getRankColor(entry.rank)}`}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
                         <div className="flex items-center space-x-4">
                           <div className="flex items-center justify-center w-8 h-8">
                             {getRankIcon(entry.rank)}
@@ -259,7 +320,7 @@ const LeaderboardPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="flex items-center space-x-6 text-sm">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                           <div className="text-center">
                             <div className="font-semibold text-text-primary dark:text-text-dark-primary">
                               {entry.totalItemsClaimed}
@@ -283,7 +344,11 @@ const LeaderboardPage: React.FC = () => {
                           
                           <div className="text-center">
                             <div className="font-semibold text-text-primary dark:text-text-dark-primary">
-                              {entry.lastClaimed ? new Date(entry.lastClaimed).toLocaleDateString() : 'Never'}
+                              {entry.lastClaimed ? new Date(entry.lastClaimed).toLocaleDateString('en-GB', { 
+                                day: '2-digit', 
+                                month: '2-digit', 
+                                year: '2-digit' 
+                              }) : 'Never'}
                             </div>
                             <div className="text-text-secondary dark:text-text-dark-secondary">Last Claim</div>
                           </div>
@@ -348,5 +413,11 @@ const LeaderboardPage: React.FC = () => {
 };
 
 export default LeaderboardPage;
+
+
+
+
+
+
 
 

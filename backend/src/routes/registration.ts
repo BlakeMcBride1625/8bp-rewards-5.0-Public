@@ -10,7 +10,7 @@ import path from 'path';
 const router = express.Router();
 
 // Register a new user
-router.post('/', validateRegistration, async (req, res) => {
+router.post('/', validateRegistration, async (req, res): Promise<void> => {
   try {
     const { eightBallPoolId, username } = req.body;
 
@@ -24,10 +24,11 @@ router.post('/', validateRegistration, async (req, res) => {
         username
       });
       
-      return res.status(409).json({
+      res.status(409).json({
         error: 'User with this 8 Ball Pool ID is already registered',
         eightBallPoolId
       });
+      return;
     }
 
     // Create new registration
@@ -55,32 +56,54 @@ router.post('/', validateRegistration, async (req, res) => {
       });
     });
 
-    // Trigger immediate first-time claim for this user in the background
-    const projectRoot = path.join(__dirname, '../../..');
-    const claimScript = path.join(projectRoot, 'first-time-claim.js');
-    
+    // Trigger immediate first-time claim for this user using the working claimer
     logger.info('Triggering first-time claim for new user', {
       action: 'first_claim_trigger',
       eightBallPoolId,
       username
     });
     
-    // Run claim in background (don't wait for it)
-    exec(`cd ${projectRoot} && node ${claimScript} ${eightBallPoolId} "${username}"`, (error, stdout, stderr) => {
-      if (error) {
-        logger.error('First-time claim failed', {
+    // Use the working claimer script directly
+    // Run in background (don't await - let it run async)
+    (async () => {
+      try {
+        logger.info('🚀 ASYNC CLAIM STARTED', { eightBallPoolId });
+        const EightBallPoolClaimer = require('../../../playwright-claimer-discord');
+        logger.info('✅ Claimer module loaded', { eightBallPoolId });
+        const claimer = new EightBallPoolClaimer();
+        logger.info('✅ Claimer instance created', { eightBallPoolId });
+        
+        // Initialize Discord and Database before claiming
+        logger.info('Initializing Discord service for claim', { eightBallPoolId });
+        await claimer.initializeDiscord();
+        
+        logger.info('Connecting to MongoDB for claim', { eightBallPoolId });
+        await claimer.connectToDatabase();
+        
+        logger.info('Starting claim process', { eightBallPoolId });
+        const result = await claimer.claimRewardsForUser(eightBallPoolId);
+        
+        if (result.success) {
+          logger.info('First-time claim completed', {
+            action: 'first_claim_success',
+            eightBallPoolId,
+            itemsClaimed: result.claimedItems
+          });
+        } else {
+          logger.error('First-time claim failed', {
+            action: 'first_claim_error',
+            eightBallPoolId,
+            error: result.error
+          });
+        }
+      } catch (error) {
+        logger.error('First-time claim error', {
           action: 'first_claim_error',
           eightBallPoolId,
-          error: error.message
-        });
-      } else {
-        logger.info('First-time claim completed', {
-          action: 'first_claim_success',
-          eightBallPoolId,
-          output: stdout
+          error: error instanceof Error ? error.message : 'Unknown error'
         });
       }
-    });
+    })();
 
     res.status(201).json({
       message: 'Registration successful',
@@ -133,16 +156,17 @@ router.get('/', async (req, res) => {
 });
 
 // Get registration by 8BP ID
-router.get('/:eightBallPoolId', async (req, res) => {
+router.get('/:eightBallPoolId', async (req, res): Promise<void> => {
   try {
     const { eightBallPoolId } = req.params;
 
     const registration = await Registration.findByEightBallPoolId(eightBallPoolId);
     
     if (!registration) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Registration not found'
       });
+      return;
     }
 
     res.json({
@@ -166,7 +190,7 @@ router.get('/:eightBallPoolId', async (req, res) => {
 });
 
 // Get user's claim history
-router.get('/:eightBallPoolId/claims', async (req, res) => {
+router.get('/:eightBallPoolId/claims', async (req, res): Promise<void> => {
   try {
     const { eightBallPoolId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -174,9 +198,10 @@ router.get('/:eightBallPoolId/claims', async (req, res) => {
     // Verify user exists
     const registration = await Registration.findByEightBallPoolId(eightBallPoolId);
     if (!registration) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Registration not found'
       });
+      return;
     }
 
     const claims = await ClaimRecord.getClaimsByUser(eightBallPoolId, limit);
@@ -238,4 +263,6 @@ router.get('/stats/overview', async (req, res) => {
 });
 
 export default router;
+
+
 

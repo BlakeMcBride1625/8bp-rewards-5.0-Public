@@ -17,7 +17,7 @@ import SocialsPage from './pages/SocialsPage';
 function App() {
   return (
     <AuthProvider>
-      <Router>
+      <Router basename="/8bp-rewards">
         <div className="min-h-screen bg-gradient-subtle dark:bg-background-dark-primary">
           <DarkModeToggle />
           <Layout>

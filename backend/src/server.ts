@@ -25,6 +25,7 @@ import adminRoutes from './routes/admin';
 import contactRoutes from './routes/contact';
 import statusRoutes from './routes/status';
 import leaderboardRoutes from './routes/leaderboard';
+import vpsMonitorRoutes from './routes/vps-monitor';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -47,16 +48,19 @@ class Server {
   }
 
   private setupMiddleware(): void {
+    // Trust proxy (needed for Cloudflare tunnel)
+    this.app.set('trust proxy', 1);
+    
     // Security middleware
     this.app.use(helmet({
       contentSecurityPolicy: {
         directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-          fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "https:"],
-          connectSrc: ["'self'"]
+          defaultSrc: ["'self'", "https://8bp.epildevconnect.uk"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://8bp.epildevconnect.uk"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com", "https://8bp.epildevconnect.uk"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://8bp.epildevconnect.uk"],
+          imgSrc: ["'self'", "data:", "https:", "https://8bp.epildevconnect.uk"],
+          connectSrc: ["'self'", "https://8bp.epildevconnect.uk", "https://*.8bp.epildevconnect.uk", "wss://8bp.epildevconnect.uk", "https://api.ipify.org"]
         }
       }
     }));
@@ -65,6 +69,7 @@ class Server {
     const allowedOrigins = [
       'http://localhost:2500',
       'http://localhost:3000',
+      'https://8bp.epildevconnect.uk',
       process.env.PUBLIC_URL
     ].filter(Boolean);
 
@@ -104,6 +109,9 @@ class Server {
     });
     this.app.use('/api/', limiter);
 
+    // Disable ETags globally to prevent caching issues
+    this.app.set('etag', false);
+    
     // Body parsing
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -116,7 +124,9 @@ class Server {
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        path: '/'
       }
     }));
 
@@ -139,27 +149,61 @@ class Server {
       });
     });
 
-    // API routes
+    // API routes (both at /api and /8bp-rewards/api for compatibility)
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/registration', registrationRoutes);
     this.app.use('/api/admin', adminRoutes);
     this.app.use('/api/contact', contactRoutes);
     this.app.use('/api/status', statusRoutes);
     this.app.use('/api/leaderboard', leaderboardRoutes);
+    this.app.use('/api/vps-monitor', vpsMonitorRoutes);
+    
+    // Also register API routes under /8bp-rewards prefix for frontend
+    this.app.use('/8bp-rewards/api/auth', authRoutes);
+    this.app.use('/8bp-rewards/api/registration', registrationRoutes);
+    this.app.use('/8bp-rewards/api/admin', adminRoutes);
+    this.app.use('/8bp-rewards/api/contact', contactRoutes);
+    this.app.use('/8bp-rewards/api/status', statusRoutes);
+    this.app.use('/8bp-rewards/api/leaderboard', leaderboardRoutes);
+    this.app.use('/8bp-rewards/api/vps-monitor', vpsMonitorRoutes);
 
     // Serve static files from React build
     if (process.env.NODE_ENV === 'production') {
-      this.app.use(express.static(path.join(__dirname, '../../frontend/build')));
+      this.app.use('/8bp-rewards', express.static(path.join(__dirname, '../../frontend/build')));
       
       // Handle React routing, return all requests to React app
-      this.app.get('*', (req, res) => {
+      this.app.get('/8bp-rewards/*', (req, res) => {
         res.sendFile(path.join(__dirname, '../../frontend/build/index.html'));
+      });
+      
+      // Redirect root to /8bp-rewards
+      this.app.get('/', (req, res) => {
+        res.redirect('/8bp-rewards/home');
+      });
+      
+      // Redirect any other GET requests (not API) to /8bp-rewards
+      this.app.get('*', (req, res, next) => {
+        // Don't redirect API calls
+        if (req.path.startsWith('/api/')) {
+          return next();
+        }
+        // Redirect to the same path under /8bp-rewards
+        res.redirect('/8bp-rewards' + req.path);
       });
     }
   }
 
   private setupErrorHandling(): void {
-    // 404 handler
+    // 404 handler for API routes only
+    this.app.use('/api/*', (req, res) => {
+      res.status(404).json({
+        error: 'API route not found',
+        path: req.originalUrl,
+        method: req.method
+      });
+    });
+    
+    // Final 404 handler
     this.app.use('*', (req, res) => {
       res.status(404).json({
         error: 'Route not found',
@@ -190,11 +234,9 @@ class Server {
       });
 
       // Initialize scheduler service
-      // TODO: Fix SchedulerService Discord service dependency before enabling
-      // this.schedulerService = new SchedulerService();
-      // logger.info('⏰ Scheduler service initialized');
-      // logger.info('📅 Next scheduled run: ' + (this.schedulerService.getStatus().nextRun || 'Not scheduled'));
-      logger.info('⏰ Scheduler service disabled (Discord service dependency needs fixing)');
+      this.schedulerService = new SchedulerService();
+      logger.info('⏰ Scheduler service initialized');
+      logger.info('📅 Next scheduled run: ' + (this.schedulerService.getStatus().nextRun || 'Not scheduled'));
 
       // Graceful shutdown
       process.on('SIGTERM', this.shutdown.bind(this));
@@ -227,4 +269,6 @@ if (require.main === module) {
 }
 
 export default Server;
+
+
 

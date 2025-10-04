@@ -21,10 +21,25 @@ export const API_ENDPOINTS = {
   ADMIN_REGISTRATIONS: `${API_BASE_URL}/admin/registrations`,
   ADMIN_CLAIM_ALL: `${API_BASE_URL}/admin/claim-all`,
   ADMIN_USERS: `${API_BASE_URL}/admin/users`,
+  ADMIN_CLAIM_PROGRESS: `${API_BASE_URL}/admin/claim-progress`,
+  ADMIN_CLAIM_PROGRESS_BY_ID: (processId: string) => `${API_BASE_URL}/admin/claim-progress/${processId}`,
+  ADMIN_CLAIM_PROGRESS_CLEANUP: `${API_BASE_URL}/admin/claim-progress/cleanup`,
+  ADMIN_RESET_LEADERBOARD: `${API_BASE_URL}/admin/reset-leaderboard`,
+  ADMIN_RESET_LEADERBOARD_REQUEST_ACCESS: `${API_BASE_URL}/admin/reset-leaderboard/request-access`,
+  ADMIN_RESET_LEADERBOARD_VERIFY_ACCESS: `${API_BASE_URL}/admin/reset-leaderboard/verify-access`,
+  ADMIN_RESET_LEADERBOARD_ACCESS_STATUS: `${API_BASE_URL}/admin/reset-leaderboard/access-status`,
+  
+  // VPS Monitor Authentication
+  ADMIN_VPS_REQUEST_ACCESS: `${API_BASE_URL}/admin/vps/request-access`,
+  ADMIN_VPS_VERIFY_ACCESS: `${API_BASE_URL}/admin/vps/verify-access`,
+  ADMIN_VPS_ACCESS_STATUS: `${API_BASE_URL}/admin/vps/access-status`,
   
   // System Status
   STATUS: `${API_BASE_URL}/status`,
   STATUS_SCHEDULER: `${API_BASE_URL}/status/scheduler`,
+  
+  // VPS Monitor
+  VPS_MONITOR_STATS: `${API_BASE_URL}/vps-monitor/stats`,
   
   // Leaderboard
   LEADERBOARD: `${API_BASE_URL}/leaderboard`,

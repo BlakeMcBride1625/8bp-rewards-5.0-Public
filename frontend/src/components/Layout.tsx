@@ -34,43 +34,106 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Navigation */}
       <nav className="relative z-10 bg-white/80 dark:bg-background-dark-secondary/90 backdrop-blur-subtle border-b border-gray-200 dark:border-dark-accent-navy shadow-lg dark:shadow-dark-accent-navy/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Logo */}
-            <Link to="/home" className="flex items-center space-x-2">
-              <img 
-                src="/assets/logos/8logo.png" 
-                alt="8BP Rewards Logo" 
-                className="w-8 h-8 rounded-lg object-cover"
-              />
-              <span className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">Rewards</span>
-            </Link>
+          {/* Logged Out State - Centered Navigation */}
+          {!isAuthenticated && (
+            <div className="relative flex items-center justify-center h-16">
+              {/* Logo - absolute left */}
+              <div className="absolute left-0">
+                <Link to="/home" className="flex items-center space-x-2">
+                  <img 
+                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    alt="8BP Rewards Logo" 
+                    className="w-8 h-8 rounded-lg object-cover shadow-lg"
+                  />
+                  <span className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">Rewards</span>
+                </Link>
+              </div>
 
-            {/* Desktop Navigation */}
-            <div className="hidden lg:flex items-center space-x-1">
-              {navigation.map((item) => {
-                // Hide Admin Dashboard if not admin
-                if (item.name === 'Admin Dashboard' && !isAdmin) return null;
-                
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                            className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                              isActive(item.href)
-                                ? 'bg-primary-100 dark:bg-dark-accent-navy/30 text-primary-700 dark:text-text-dark-highlight shadow-lg dark:shadow-dark-accent-navy/20'
-                                : 'text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-accent hover:bg-gray-100 dark:hover:bg-background-dark-tertiary dark:hover:shadow-dark-accent-ocean/10'
-                            }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span>{item.name}</span>
-                  </Link>
-                );
-              })}
-              
-              {/* Auth Button */}
-              {isAuthenticated ? (
-                <div className="flex items-center space-x-2 border-l border-gray-200 dark:border-dark-accent-navy pl-3 ml-3">
+              {/* Desktop Navigation - Centered */}
+              <div className="hidden lg:flex items-center space-x-1">
+                {navigation.map((item) => {
+                  if (item.name === 'Admin Dashboard' && !isAdmin) return null;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isActive(item.href)
+                          ? 'bg-primary-100 dark:bg-dark-accent-navy/30 text-primary-700 dark:text-text-dark-highlight shadow-lg dark:shadow-dark-accent-navy/20'
+                          : 'text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-accent hover:bg-gray-100 dark:hover:bg-background-dark-tertiary dark:hover:shadow-dark-accent-ocean/10'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+
+              {/* Login Button - absolute right */}
+              <div className="absolute right-0 hidden lg:block">
+                <button
+                  onClick={login}
+                  className="flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 dark:bg-dark-accent-navy text-white hover:bg-blue-700 dark:hover:bg-dark-accent-blue transition-all duration-200 shadow-lg"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Login</span>
+                </button>
+              </div>
+
+              {/* Mobile menu button - logged out */}
+              <div className="lg:hidden absolute right-0">
+                <button
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-gray-100 dark:hover:bg-background-dark-tertiary transition-colors"
+                >
+                  {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Logged In State - Centered Navigation */}
+          {isAuthenticated && (
+            <div className="relative flex items-center justify-center h-16">
+              {/* Logo - absolute left */}
+              <div className="absolute left-0">
+                <Link to="/home" className="flex items-center space-x-2">
+                  <img 
+                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    alt="8BP Rewards Logo" 
+                    className="w-8 h-8 rounded-lg object-cover shadow-lg"
+                  />
+                  <span className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">Rewards</span>
+                </Link>
+              </div>
+
+              {/* Desktop Navigation - Centered */}
+              <div className="hidden lg:flex items-center space-x-1">
+                {navigation.map((item) => {
+                  if (item.name === 'Admin Dashboard' && !isAdmin) return null;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isActive(item.href)
+                          ? 'bg-primary-100 dark:bg-dark-accent-navy/30 text-primary-700 dark:text-text-dark-highlight shadow-lg dark:shadow-dark-accent-navy/20'
+                          : 'text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-accent hover:bg-gray-100 dark:hover:bg-background-dark-tertiary dark:hover:shadow-dark-accent-ocean/10'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+
+              {/* User Info & Logout - absolute right */}
+              <div className="absolute right-0 hidden lg:block">
+                <div className="flex items-center space-x-2">
                   <div className="flex items-center space-x-2">
                     <User className="w-4 h-4 text-text-secondary dark:text-text-dark-secondary" />
                     <span className="text-sm text-text-secondary dark:text-text-dark-secondary">{user?.username}</span>
@@ -83,31 +146,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     <span>Logout</span>
                   </button>
                 </div>
-              ) : (
-                <button
-                  onClick={login}
-                  className="flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 dark:bg-dark-accent-navy text-white hover:bg-blue-700 dark:hover:bg-dark-accent-blue transition-all duration-200 shadow-lg ml-3"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>Login</span>
-                </button>
-              )}
-            </div>
+              </div>
 
-            {/* Mobile menu button */}
-            <div className="lg:hidden">
-              <button
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="p-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-gray-100 dark:hover:bg-background-dark-tertiary transition-colors"
-              >
-                {isMobileMenuOpen ? (
-                  <X className="w-6 h-6" />
-                ) : (
-                  <Menu className="w-6 h-6" />
-                )}
-              </button>
+              {/* Mobile menu button - logged in */}
+              <div className="lg:hidden absolute right-0">
+                <button
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-gray-100 dark:hover:bg-background-dark-tertiary transition-colors"
+                >
+                  {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Mobile Navigation */}

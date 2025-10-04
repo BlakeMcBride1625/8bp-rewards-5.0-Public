@@ -87,23 +87,25 @@ router.get('/me', (req, res) => {
 });
 
 // Logout
-router.post('/logout', (req, res) => {
-  req.logout((err) => {
+router.post('/logout', (req, res): void => {
+  req.logout((err): void => {
     if (err) {
       logger.error('Logout error', {
         action: 'logout_error',
         error: err.message
       });
-      return res.status(500).json({ error: 'Logout failed' });
+      res.status(500).json({ error: 'Logout failed' });
+      return;
     }
 
-    req.session.destroy((err) => {
+    req.session.destroy((err): void => {
       if (err) {
         logger.error('Session destruction error', {
           action: 'session_destroy_error',
           error: err.message
         });
-        return res.status(500).json({ error: 'Session cleanup failed' });
+        res.status(500).json({ error: 'Session cleanup failed' });
+        return;
       }
 
       res.clearCookie('connect.sid');
@@ -113,13 +115,18 @@ router.post('/logout', (req, res) => {
 });
 
   // Check authentication status
-  router.get('/status', (req, res) => {
+  router.get('/status', (req, res): void => {
+    // Disable caching for auth status
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    
     // Development bypass - auto-authenticate in development mode
     if (process.env.NODE_ENV === 'development') {
       const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
       const devAdminId = allowedAdmins[0] || '850726663289700373'; // Use first admin or your ID
       
-      return res.json({
+      res.json({
         authenticated: true,
         isAdmin: true,
         user: {
@@ -129,6 +136,7 @@ router.post('/logout', (req, res) => {
           avatar: 'dev-avatar'
         }
       });
+      return;
     }
   
   const isAuthenticated = req.isAuthenticated && req.isAuthenticated();
@@ -158,5 +166,7 @@ router.post('/logout', (req, res) => {
 });
 
 export default router;
+
+
 
 

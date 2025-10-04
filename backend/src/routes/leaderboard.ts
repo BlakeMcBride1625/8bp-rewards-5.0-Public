@@ -87,7 +87,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get user's ranking
-router.get('/user/:eightBallPoolId', async (req, res) => {
+router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
   try {
     const { eightBallPoolId } = req.params;
     const timeframe = req.query.timeframe as string || '7d';
@@ -118,9 +118,10 @@ router.get('/user/:eightBallPoolId', async (req, res) => {
     ]);
 
     if (userStats.length === 0) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'No claims found for this user in the specified timeframe'
       });
+      return;
     }
 
     const userStat = userStats[0];
@@ -268,4 +269,6 @@ function getDaysFromTimeframe(timeframe: string): number {
 }
 
 export default router;
+
+
 

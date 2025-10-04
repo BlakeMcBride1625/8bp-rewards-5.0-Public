@@ -66,6 +66,6 @@ registrationSchema.pre('save', function(next) {
   next();
 });
 
-const Registration = mongoose.model('Registration', registrationSchema);
+const Registration = mongoose.models.Registration || mongoose.model('Registration', registrationSchema);
 
 module.exports = Registration;

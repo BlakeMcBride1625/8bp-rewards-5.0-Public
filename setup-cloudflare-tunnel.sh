@@ -24,14 +24,14 @@ fi
 
 # Create tunnel
 echo "📡 Creating Cloudflare tunnel..."
-TUNNEL_ID=$(cloudflared tunnel create 8bp-rewards-tunnel --output json | jq -r '.id')
+cloudflared tunnel create 8bp-rewards-tunnel
 
-if [ -z "$TUNNEL_ID" ] || [ "$TUNNEL_ID" = "null" ]; then
+if [ $? -ne 0 ]; then
     echo "❌ Failed to create tunnel"
     exit 1
 fi
 
-echo "✅ Tunnel created with ID: $TUNNEL_ID"
+echo "✅ Tunnel created: 8bp-rewards-tunnel"
 
 # Create DNS record
 echo "🌐 Creating DNS record..."

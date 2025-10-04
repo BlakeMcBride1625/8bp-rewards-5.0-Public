@@ -79,3 +79,4 @@ downloads/
 
 # Test files
 test-*.js
+.env.backup

@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, AttachmentBuilder, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, Collection, ActivityType } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const DatabaseService = require('./services/database-service');
@@ -37,6 +37,16 @@ class DiscordService {
       console.log(`📋 Logged in as: ${this.client.user.tag}`);
       this.isReady = true;
       
+      // Set bot status to DND and activity
+      this.client.user.setPresence({
+        status: 'dnd',
+        activities: [{
+          name: 'https://8bp.epildevconnect.uk/8bp-rewards/home',
+          type: ActivityType.Watching
+        }]
+      });
+      console.log('👁️ Bot status set to DND - Watching https://8bp.epildevconnect.uk/8bp-rewards/home');
+      
       // Register slash commands
       await this.registerSlashCommands();
     });
@@ -57,7 +67,7 @@ class DiscordService {
         if (interaction.inGuild()) {
           return interaction.reply({
             content: errorMessage,
-            ephemeral: true
+            flags: 64 // EPHEMERAL
           });
         } else {
           return interaction.reply({
@@ -208,10 +218,24 @@ class DiscordService {
         .setDescription('List all registered accounts'),
       async execute(interaction, service) {
         try {
+          await interaction.deferReply({ ephemeral: interaction.inGuild() });
+          
+          console.log('📋 /list-accounts command executed');
+          
+          // Check database connection first
+          const healthCheck = await service.dbService.healthCheck();
+          console.log('📊 Database health check:', healthCheck);
+          
+          if (!healthCheck.connected) {
+            console.log('❌ Database not connected, attempting to reconnect...');
+            await service.dbService.connect();
+          }
+          
           const users = await service.dbService.getAllUsers();
+          console.log(`📋 Retrieved ${users.length} users from database`);
           
           if (users.length === 0) {
-            return interaction.reply({
+            return interaction.followUp({
               content: '📋 No registered accounts found.',
               ephemeral: interaction.inGuild()
             });
@@ -223,7 +247,9 @@ class DiscordService {
             .setColor(0x0099FF)
             .setTimestamp();
 
-          users.forEach((user, index) => {
+          // Limit to first 25 users to avoid embed limits
+          const displayUsers = users.slice(0, 25);
+          displayUsers.forEach((user, index) => {
             embed.addFields({
               name: `${index + 1}. ${user.username}`,
               value: `🎱 **8BP ID:** ${user.eightBallPoolId}\n📅 **Registered:** ${new Date(user.createdAt).toLocaleDateString()}`,
@@ -231,14 +257,23 @@ class DiscordService {
             });
           });
 
-          await interaction.reply({ embeds: [embed], ephemeral: interaction.inGuild() });
+          if (users.length > 25) {
+            embed.setFooter({ text: `Showing first 25 of ${users.length} accounts` });
+          }
+
+          await interaction.followUp({ embeds: [embed] });
 
         } catch (error) {
           console.error('❌ Error in /list-accounts command:', error);
-          await interaction.reply({
-            content: '❌ An error occurred while fetching accounts. Please try again.',
-            ephemeral: interaction.inGuild()
-          });
+          const errorMessage = interaction.replied || interaction.deferred 
+            ? { content: '❌ An error occurred while fetching accounts. Please try again.', ephemeral: interaction.inGuild() }
+            : { content: '❌ An error occurred while fetching accounts. Please try again.', ephemeral: interaction.inGuild() };
+          
+          if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorMessage);
+          } else {
+            await interaction.reply(errorMessage);
+          }
         }
       }
     };
@@ -350,6 +385,7 @@ class DiscordService {
             { name: '/list-accounts', value: 'List all registered accounts', inline: false },
             { name: '/check-accounts', value: 'Check the status of all registered accounts', inline: false },
             { name: '/deregister', value: 'Remove your account from the rewards system', inline: false },
+            { name: '/clear', value: 'Delete bot messages from current channel or user\'s DMs', inline: false },
             { name: '/help', value: 'Show this help message', inline: false },
             { name: '/md', value: 'Show markdown documentation', inline: false },
             { name: '/server-status', value: 'Check Discord bot server status', inline: false },
@@ -544,11 +580,181 @@ class DiscordService {
       }
     };
 
+    // Clear messages command
+    const clearCommand = {
+      data: new SlashCommandBuilder()
+        .setName('clear')
+        .setDescription('Delete bot messages from current channel or specified user\'s DMs')
+        .addIntegerOption(option =>
+          option.setName('amount')
+            .setDescription('Number of messages to delete (1-100)')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(100))
+        .addUserOption(option =>
+          option.setName('user')
+            .setDescription('User whose DMs to clear (optional - if not specified, clears current channel)')
+            .setRequired(false)),
+      async execute(interaction, service) {
+        const amount = interaction.options.getInteger('amount');
+        const targetUser = interaction.options.getUser('user');
+        
+        try {
+          console.log(`🗑️ /clear command executed by ${interaction.user.tag} in ${interaction.inGuild() ? 'guild' : 'DM'}`);
+          
+          // Defer reply first to prevent timeout
+          await interaction.deferReply({ 
+            flags: interaction.inGuild() ? 64 : undefined // 64 = EPHEMERAL flag
+          });
+          
+          // If executed in DMs, show limitation message
+          if (!interaction.inGuild()) {
+            return interaction.followUp({
+              content: `❌ **Discord Bot Limitation**\n\n` +
+                      `Bots cannot delete messages in Direct Messages due to Discord's API restrictions.\n\n` +
+                      `**Solutions:**\n` +
+                      `• Use \`/clear\` in a server channel (requires "Manage Messages" permission)\n` +
+                      `• Manually delete bot messages in this DM\n` +
+                      `• Use \`/clear user:@username\` in a server channel to clear someone's DMs\n\n` +
+                      `*This is a Discord platform limitation, not a bot issue.*`,
+              flags: 64 // EPHEMERAL
+            });
+          }
+          
+          // Check permissions for server channels
+          if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+            return interaction.followUp({
+              content: '❌ You need the "Manage Messages" permission to use this command.',
+              flags: 64 // EPHEMERAL
+            });
+          }
+          
+          // Check channel access
+          const channel = interaction.channel;
+          if (!channel) {
+            return interaction.followUp({
+              content: '❌ Unable to access channel. Please try again.',
+              flags: 64 // EPHEMERAL
+            });
+          }
+          
+          if (!channel.messages) {
+            return interaction.followUp({
+              content: '❌ Unable to access message history in this channel.',
+              flags: 64 // EPHEMERAL
+            });
+          }
+          
+          if (targetUser) {
+            // Clear specified user's DMs
+            try {
+              console.log(`🗑️ Clearing DMs for user: ${targetUser.tag}`);
+              
+              // Get the target user's DM channel
+              const dmChannel = await targetUser.createDM();
+              
+              if (!dmChannel) {
+                return interaction.followUp({
+                  content: `❌ Unable to access ${targetUser.tag}'s DM channel.`,
+                  flags: 64 // EPHEMERAL
+                });
+              }
+              
+              // Fetch messages from the target user's DM channel
+              const messages = await dmChannel.messages.fetch({ limit: amount });
+              const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+              
+              if (botMessages.size === 0) {
+                return interaction.followUp({
+                  content: `❌ No bot messages found in ${targetUser.tag}'s DMs.`,
+                  flags: 64 // EPHEMERAL
+                });
+              }
+              
+              let deletedCount = 0;
+              for (const [id, message] of botMessages) {
+                try {
+                  await message.delete();
+                  deletedCount++;
+                  // Small delay to avoid rate limits
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (error) {
+                  console.error(`Failed to delete message ${id}:`, error);
+                }
+              }
+              
+              await interaction.followUp({
+                content: `✅ Deleted ${deletedCount} bot messages from ${targetUser.tag}'s DMs.`,
+                flags: 64 // EPHEMERAL
+              });
+              
+            } catch (dmError) {
+              console.error('DM clearing error:', dmError);
+              return interaction.followUp({
+                content: `❌ Unable to clear ${targetUser.tag}'s DMs. Please try again later.`,
+                flags: 64 // EPHEMERAL
+              });
+            }
+          } else {
+            // Clear current channel
+            console.log(`🗑️ Clearing current channel: ${channel.name}`);
+            
+            const messages = await channel.messages.fetch({ limit: amount });
+            const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+            
+            if (botMessages.size === 0) {
+              return interaction.followUp({
+                content: '❌ No bot messages found to delete in this channel.',
+                flags: 64 // EPHEMERAL
+              });
+            }
+            
+            let deletedCount = 0;
+            for (const [id, message] of botMessages) {
+              try {
+                await message.delete();
+                deletedCount++;
+                // Small delay to avoid rate limits
+                await new Promise(resolve => setTimeout(resolve, 100));
+              } catch (error) {
+                console.error(`Failed to delete message ${id}:`, error);
+              }
+            }
+            
+            await interaction.followUp({
+              content: `✅ Deleted ${deletedCount} bot messages in this channel.`,
+              flags: 64 // EPHEMERAL
+            });
+          }
+          
+        } catch (error) {
+          console.error('❌ Error in /clear command:', error);
+          
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.followUp({
+                content: '❌ An error occurred while deleting messages.',
+                flags: 64 // EPHEMERAL
+              });
+            } else {
+              await interaction.reply({
+                content: '❌ An error occurred while deleting messages.',
+                ephemeral: interaction.inGuild()
+              });
+            }
+          } catch (replyError) {
+            console.error('❌ Failed to send error message:', replyError);
+          }
+        }
+      }
+    };
+
     // Add all commands to collection
     this.commands.set('register', registerCommand);
     this.commands.set('list-accounts', listAccountsCommand);
     this.commands.set('check-accounts', checkAccountsCommand);
     this.commands.set('deregister', deregisterCommand);
+    this.commands.set('clear', clearCommand);
     this.commands.set('help', helpCommand);
     this.commands.set('md', mdCommand);
     this.commands.set('server-status', serverStatusCommand);
