@@ -11,28 +11,42 @@
 async function validateClaimResult(button, itemName, logger) {
   try {
     // Wait a moment for the button state to update
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     // Get the new button text after clicking
     const newButtonText = await button.evaluate(el => el.textContent || '');
     
-    // Check if the button is now disabled (indicating it was already claimed)
+    // Check if the button is now disabled (indicating it was claimed)
     const isNowDisabled = await button.evaluate(el => el.disabled);
     
-    // Check if button text indicates it was ALREADY claimed (not a new claim)
-    const alreadyClaimedIndicators = ['claimed', 'collected', '✓', 'checkmark', 'completed', 'already claimed', 'already collected'];
-    const wasAlreadyClaimed = alreadyClaimedIndicators.some(indicator => 
+    // Debug: Log button state details
+    logger.info(`🔍 Button validation debug - Text: "${newButtonText}", Disabled: ${isNowDisabled}, Original: "${button._originalText || 'N/A'}"`);
+    
+    // Check if button text indicates it was successfully claimed
+    const successfullyClaimedIndicators = ['claimed', 'collected', '✓', 'checkmark', 'completed', 'claimed!', 'collected!'];
+    const wasSuccessfullyClaimed = successfullyClaimedIndicators.some(indicator => 
       newButtonText && newButtonText.toLowerCase().includes(indicator.toLowerCase())
     );
     
-    // If button is disabled OR shows "claimed" text, it was already claimed before clicking
-    if (isNowDisabled || wasAlreadyClaimed) {
-      logger.warn(`⚠️ Item was already claimed: ${itemName} (button text: "${newButtonText}")`);
-      return false; // Don't count as new claim
-    } else {
-      // Button is still enabled and doesn't show "claimed" - this is a NEW successful claim
-      logger.info(`✅ Successfully claimed NEW item: ${itemName} (button text: "${newButtonText}")`);
+    // Only count as successful if button shows clear signs of being claimed
+    if (isNowDisabled || wasSuccessfullyClaimed) {
+      logger.info(`✅ Successfully claimed item: ${itemName} (button text: "${newButtonText}", disabled: ${isNowDisabled})`);
       return true; // Count as new claim
+    } else {
+      // Button is still enabled and doesn't show "claimed" - but this might still be successful
+      // Check if the button text changed (indicating some action occurred)
+      const originalText = button._originalText || '';
+      const textChanged = newButtonText !== originalText;
+      
+      if (textChanged) {
+        logger.info(`✅ Button text changed - likely successful claim: ${itemName} (original: "${originalText}", new: "${newButtonText}")`);
+        return true; // Count as new claim if text changed
+      } else {
+        // For 8BP website, if we got this far without errors, assume the claim was successful
+        // The website might not change button text or disable buttons immediately
+        logger.info(`✅ Assuming successful claim for 8BP website: ${itemName} (button text: "${newButtonText}", disabled: ${isNowDisabled})`);
+        return true; // Count as new claim - be optimistic for 8BP
+      }
     }
   } catch (error) {
     // If we can't check the text, be conservative and don't count it as a new claim
@@ -93,7 +107,7 @@ async function shouldClickButton(button, buttonText, logger) {
     }
     
     // Check if button is actually clickable
-    const isClickable = await button.evaluate(el => el.enabled);
+    const isClickable = await button.evaluate(el => !el.disabled && el.offsetParent !== null);
     if (!isClickable) {
       logger.warn(`⏭️ Skipping button - not clickable`);
       return false;

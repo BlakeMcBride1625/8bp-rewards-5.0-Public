@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const DiscordService = require('./discord-service');
 const mongoose = require('mongoose');
 const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
+const BrowserPool = require('./browser-pool');
 
 // ImageGenerator is optional
 let ImageGenerator;
@@ -33,6 +34,7 @@ class EightBallPoolClaimer {
     this.timeout = parseInt(process.env.TIMEOUT || '60000', 10);
     this.headless = process.env.HEADLESS !== 'false';
     this.dbConnected = false;
+    this.browserPool = new BrowserPool(20); // Max 20 concurrent browsers
   }
 
   async connectToDatabase() {
@@ -181,6 +183,11 @@ class EightBallPoolClaimer {
   async claimRewardsForUser(userId) {
     console.log(`🚀 Starting claim process for User ID: ${userId}`);
     
+    // Wait for browser pool slot
+    console.log(`⏳ Waiting for browser slot... (${this.browserPool.getStatus().activeBrowsers}/${this.browserPool.getStatus().maxConcurrent} active)`);
+    await this.browserPool.acquire();
+    console.log(`✅ Browser slot acquired for user ${userId}`);
+    
     // Ensure screenshot directories exist
     await this.ensureScreenshotDirectories();
     
@@ -225,7 +232,7 @@ class EightBallPoolClaimer {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
         'Accept-Encoding': 'gzip, deflate, br',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Upgrade-Insecure-Requests': '1',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
@@ -322,6 +329,10 @@ class EightBallPoolClaimer {
         await browser.close();
         console.log('🔒 Browser closed');
       }
+      
+      // Release browser pool slot
+      this.browserPool.release();
+      console.log(`🔄 Browser slot released for user ${userId}`);
     }
   }
 
@@ -697,7 +708,7 @@ class EightBallPoolClaimer {
           }
           
           // Check if button is actually clickable
-          const isClickable = await buttonInfo.element.isEnabled().catch(() => false);
+          const isClickable = await buttonInfo.element.evaluate(el => !el.disabled && el.offsetParent !== null).catch(() => false);
           if (!isClickable) {
             console.log(`⏭️ Skipping button ${i + 1} - not clickable`);
             continue;
@@ -741,8 +752,81 @@ class EightBallPoolClaimer {
           await buttonInfo.element.scrollIntoViewIfNeeded();
           await page.waitForTimeout(500);
           
-          // Click the button
-          await buttonInfo.element.click();
+          // Store original button text for validation
+          const originalButtonText = await buttonInfo.element.evaluate(el => el.textContent || '');
+          buttonInfo.element._originalText = originalButtonText;
+          
+          // Try to dismiss Privacy Settings modal by clicking outside or using aggressive dismissal
+          try {
+            // Check if Privacy Settings modal is present
+            const privacyModal = await page.$('text="Privacy Settings"');
+            if (privacyModal) {
+              console.log('🍪 Privacy Settings modal detected - attempting aggressive dismissal');
+              
+              // Try multiple dismissal strategies
+              const dismissalSuccess = await page.evaluate(() => {
+                try {
+                  // Strategy 1: Click outside the modal (on backdrop)
+                  const modal = document.querySelector('[class*="modal"], [role="dialog"]');
+                  if (modal) {
+                    const backdrop = modal.parentElement;
+                    if (backdrop && backdrop !== modal) {
+                      backdrop.click();
+                      return true;
+                    }
+                  }
+                  
+                  // Strategy 2: Press Escape key
+                  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
+                  return true;
+                  
+                  // Strategy 3: Try to find and click any close button
+                  const closeButtons = document.querySelectorAll('button, [role="button"]');
+                  for (const btn of closeButtons) {
+                    const text = btn.textContent || '';
+                    if (text.toLowerCase().includes('save') || 
+                        text.toLowerCase().includes('exit') || 
+                        text.toLowerCase().includes('close') ||
+                        text.toLowerCase().includes('dismiss')) {
+                      btn.click();
+                      return true;
+                    }
+                  }
+                  
+                  return false;
+                } catch (error) {
+                  return false;
+                }
+              });
+              
+              if (dismissalSuccess) {
+                console.log('✅ Modal dismissal successful');
+                await page.waitForTimeout(2000);
+                // Now try normal click
+                await buttonInfo.element.click();
+              } else {
+                console.log('⚠️ Modal dismissal failed, trying force click');
+                // Fallback to force click
+                try {
+                  await buttonInfo.element.click({ force: true });
+                  console.log('✅ Force click successful');
+                } catch (forceError) {
+                  console.log(`⚠️ Force click failed: ${forceError.message}`);
+                }
+              }
+            } else {
+              // No modal detected, proceed with normal click
+              await buttonInfo.element.click();
+            }
+          } catch (error) {
+            console.log(`⚠️ Error with modal bypass: ${error.message}`);
+            // Fallback to normal click
+            try {
+              await buttonInfo.element.click();
+            } catch (clickError) {
+              console.log(`⚠️ Normal click failed: ${clickError.message}`);
+            }
+          }
           
           // Use standardized claim validation logic
           const isValidNewClaim = await validateClaimResult(buttonInfo.element, itemName, console);
@@ -891,9 +975,10 @@ class EightBallPoolClaimer {
     // Connect to database
     await this.connectToDatabase();
     
-    console.log(`\n🚀 Running ${this.userIds.length} claims in PARALLEL for maximum speed!`);
+    console.log(`\n🚀 Running ${this.userIds.length} claims with BROWSER POOL (max 20 concurrent browsers)!`);
+    console.log(`📊 Browser Pool Status: ${this.browserPool.getStatus().activeBrowsers}/${this.browserPool.getStatus().maxConcurrent} active, ${this.browserPool.getStatus().queued} queued`);
 
-    // Process all users in parallel! 🚀
+    // Process all users with browser pool limiting! 🚀
     const claimPromises = this.userIds.map(async (userId, index) => {
       console.log(`\n📋 Starting user ${index + 1}/${this.userIds.length}: ${userId}`);
       

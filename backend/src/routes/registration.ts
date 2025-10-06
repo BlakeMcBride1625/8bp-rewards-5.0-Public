@@ -63,39 +63,55 @@ router.post('/', validateRegistration, async (req, res): Promise<void> => {
       username
     });
     
-    // Use the working claimer script directly
+    // Trigger first-time claim using the standalone script
     // Run in background (don't await - let it run async)
     (async () => {
       try {
-        logger.info('🚀 ASYNC CLAIM STARTED', { eightBallPoolId });
-        const EightBallPoolClaimer = require('../../../playwright-claimer-discord');
-        logger.info('✅ Claimer module loaded', { eightBallPoolId });
-        const claimer = new EightBallPoolClaimer();
-        logger.info('✅ Claimer instance created', { eightBallPoolId });
+        logger.info('🚀 ASYNC CLAIM STARTED', { eightBallPoolId, username });
         
-        // Initialize Discord and Database before claiming
-        logger.info('Initializing Discord service for claim', { eightBallPoolId });
-        await claimer.initializeDiscord();
+        // Use the first-time-claim.js script directly
+        const { spawn } = require('child_process');
+        const claimScript = path.join(__dirname, '../../../first-time-claim.js');
         
-        logger.info('Connecting to MongoDB for claim', { eightBallPoolId });
-        await claimer.connectToDatabase();
+        logger.info('Running first-time claim script', { 
+          eightBallPoolId, 
+          username, 
+          script: claimScript 
+        });
         
-        logger.info('Starting claim process', { eightBallPoolId });
-        const result = await claimer.claimRewardsForUser(eightBallPoolId);
+        const claimProcess = spawn('node', [claimScript, eightBallPoolId, username], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          cwd: path.join(__dirname, '../../../')
+        });
         
-        if (result.success) {
-          logger.info('First-time claim completed', {
-            action: 'first_claim_success',
-            eightBallPoolId,
-            itemsClaimed: result.claimedItems
-          });
-        } else {
-          logger.error('First-time claim failed', {
-            action: 'first_claim_error',
-            eightBallPoolId,
-            error: result.error
-          });
-        }
+        let output = '';
+        claimProcess.stdout.on('data', (data: Buffer) => {
+          output += data.toString();
+        });
+        
+        claimProcess.stderr.on('data', (data: Buffer) => {
+          output += data.toString();
+        });
+        
+        claimProcess.on('close', (code: number | null) => {
+          if (code === 0) {
+            logger.info('First-time claim completed successfully', {
+              action: 'first_claim_success',
+              eightBallPoolId,
+              username,
+              output: output.substring(0, 500) // Limit output length
+            });
+          } else {
+            logger.error('First-time claim failed', {
+              action: 'first_claim_error',
+              eightBallPoolId,
+              username,
+              exitCode: code,
+              output: output.substring(0, 500) // Limit output length
+            });
+          }
+        });
+        
       } catch (error) {
         logger.error('First-time claim error', {
           action: 'first_claim_error',

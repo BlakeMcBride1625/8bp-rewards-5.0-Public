@@ -904,26 +904,48 @@ router.post('/vps/request-access', async (req, res) => {
       }
     }
 
-    // Send Telegram code if requested and allowed
+    // Send Telegram code if requested and allowed - only to the logged-in user
     if ((!channel || channel === 'telegram') && isAllowedForTelegram(userId) && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here') {
       try {
         const telegramService = new TelegramNotificationService();
-        // Use the Telegram user ID (7631397609) for sending messages
-        const telegramUserId = '7631397609';
         
-        const telegramMessage = await telegramService.sendDirectMessage(
-          telegramUserId,
-          `🔐 *VPS Monitor Access Code (Telegram)*\n\n` +
-          `Your Telegram access code is: *${vpsCode.telegramCode}*\n` +
-          `This code expires in 5 minutes.\n\n` +
-          `⚠️ *Security Notice*: This code is required for VPS Monitor access.`
-        );
+        // Map Discord user ID to Telegram user ID for the logged-in user only
+        // Read mapping from environment variable: DISCORD_TO_TELEGRAM_MAPPING=discord_id1:telegram_id1,discord_id2:telegram_id2
+        const mappingEnv = process.env.DISCORD_TO_TELEGRAM_MAPPING || '';
+        const userMapping: Record<string, string> = {};
+        
+        if (mappingEnv) {
+          mappingEnv.split(',').forEach(mapping => {
+            const [discordId, telegramId] = mapping.trim().split(':');
+            if (discordId && telegramId) {
+              userMapping[discordId] = telegramId;
+            }
+          });
+        }
+        
+        const telegramUserId = userMapping[userId];
+        
+        if (telegramUserId) {
+          const telegramMessage = await telegramService.sendDirectMessage(
+            telegramUserId,
+            `🔐 *VPS Monitor Access Code (Telegram)*\n\n` +
+            `Your Telegram access code is: *${vpsCode.telegramCode}*\n` +
+            `This code expires in 5 minutes.\n\n` +
+            `⚠️ *Security Notice*: This code is required for VPS Monitor access.`
+          );
 
-        telegramSent = telegramMessage !== null;
-        
-        // Store Telegram message ID for cleanup
-        if (telegramMessage && telegramMessage.id) {
-          vpsCode.telegramMessageId = telegramMessage.id;
+          telegramSent = telegramMessage !== null;
+          
+          // Store Telegram message ID for cleanup
+          if (telegramMessage && telegramMessage.id) {
+            vpsCode.telegramMessageId = telegramMessage.id;
+          }
+        } else {
+          logger.warn('No Telegram mapping found for Discord user', {
+            action: 'telegram_mapping_not_found',
+            userId,
+            username
+          });
         }
 
       } catch (telegramError) {

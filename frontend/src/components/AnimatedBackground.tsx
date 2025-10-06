@@ -172,6 +172,92 @@ const AnimatedBackground: React.FC = () => {
         ))}
       </div>
 
+      {/* Shooting Stars - From Both Sides */}
+      <div className="absolute inset-0">
+        {/* Left-to-Right Shooting Stars */}
+        {Array.from({ length: 4 }).map((_, i) => (
+          <motion.div
+            key={`shooting-star-left-${i}`}
+            className="shooting-star shooting-star-left"
+            style={{
+              left: '-100px',
+              top: `${20 + i * 20}%`,
+            }}
+            animate={{
+              x: [0, window.innerWidth + 200],
+              y: [0, window.innerHeight * 0.3],
+              opacity: [0, 1, 1, 0],
+              rotate: [0, 15],
+            }}
+            transition={{
+              duration: 2.5 + Math.random() * 1.5,
+              repeat: Infinity,
+              ease: "easeOut",
+              delay: Math.random() * 8,
+              repeatDelay: 12 + Math.random() * 10,
+            }}
+          >
+            <div className="shooting-star-trail" />
+          </motion.div>
+        ))}
+        
+        {/* Right-to-Left Shooting Stars */}
+        {Array.from({ length: 4 }).map((_, i) => (
+          <motion.div
+            key={`shooting-star-right-${i}`}
+            className="shooting-star shooting-star-right"
+            style={{
+              right: '-100px',
+              top: `${30 + i * 15}%`,
+            }}
+            animate={{
+              x: [0, -(window.innerWidth + 200)],
+              y: [0, window.innerHeight * 0.4],
+              opacity: [0, 1, 1, 0],
+              rotate: [0, -15],
+            }}
+            transition={{
+              duration: 2.8 + Math.random() * 1.2,
+              repeat: Infinity,
+              ease: "easeOut",
+              delay: 4 + Math.random() * 6,
+              repeatDelay: 15 + Math.random() * 8,
+            }}
+          >
+            <div className="shooting-star-trail" />
+          </motion.div>
+        ))}
+        
+        {/* Diagonal Shooting Stars */}
+        {Array.from({ length: 3 }).map((_, i) => (
+          <motion.div
+            key={`shooting-star-diagonal-${i}`}
+            className="shooting-star shooting-star-diagonal"
+            style={{
+              left: `${i % 2 === 0 ? '-50px' : 'calc(100% + 50px)'}`,
+              top: `${15 + i * 25}%`,
+            }}
+            animate={{
+              x: i % 2 === 0 
+                ? [0, window.innerWidth + 100] 
+                : [0, -(window.innerWidth + 100)],
+              y: [0, window.innerHeight * 0.6],
+              opacity: [0, 1, 1, 0],
+              rotate: i % 2 === 0 ? [0, 25] : [0, -25],
+            }}
+            transition={{
+              duration: 3 + Math.random() * 1,
+              repeat: Infinity,
+              ease: "easeOut",
+              delay: 2 + Math.random() * 4,
+              repeatDelay: 18 + Math.random() * 12,
+            }}
+          >
+            <div className="shooting-star-trail" />
+          </motion.div>
+        ))}
+      </div>
+
       {/* Floating Lines/Connections - Removed to prevent visible lines */}
 
       {/* Grid Pattern - Removed to eliminate visible lines */}

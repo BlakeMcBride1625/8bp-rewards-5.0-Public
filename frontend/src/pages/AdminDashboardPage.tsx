@@ -30,7 +30,11 @@ import {
   HardDrive,
   Wifi,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Camera,
+  Terminal,
+  HelpCircle,
+  Send
 } from 'lucide-react';
 import ClaimProgressTracker from '../components/ClaimProgressTracker';
 import VPSAuthModal from '../components/VPSAuthModal';
@@ -165,6 +169,21 @@ const AdminDashboardPage: React.FC = () => {
   const [vpsStats, setVpsStats] = useState<VPSStats | null>(null);
   const [isLoadingVpsStats, setIsLoadingVpsStats] = useState(false);
   const [autoRefreshVps, setAutoRefreshVps] = useState(true);
+  const [screenshotUserQuery, setScreenshotUserQuery] = useState('');
+  const [isClearingScreenshots, setIsClearingScreenshots] = useState(false);
+  const [screenshotFolders, setScreenshotFolders] = useState<any[]>([]);
+  const [allScreenshotFolders, setAllScreenshotFolders] = useState<any[]>([]);
+  const [isLoadingScreenshots, setIsLoadingScreenshots] = useState(false);
+  const [screenshotSearchQuery, setScreenshotSearchQuery] = useState('');
+  const [terminalAccess, setTerminalAccess] = useState<boolean | null>(null);
+  const [terminalCommand, setTerminalCommand] = useState('');
+  const [terminalOutput, setTerminalOutput] = useState('');
+  const [isExecutingCommand, setIsExecutingCommand] = useState(false);
+  const [mfaVerified, setMfaVerified] = useState(false);
+  const [discordCode, setDiscordCode] = useState('');
+  const [telegramCode, setTelegramCode] = useState('');
+  const [showCommandHelp, setShowCommandHelp] = useState(false);
+  const [isRequestingCodes, setIsRequestingCodes] = useState(false);
   const [chartData, setChartData] = useState<Array<{
     time: string;
     cpu: number;
@@ -229,6 +248,12 @@ const AdminDashboardPage: React.FC = () => {
       }
       if (activeTab === 'vps') {
         fetchVpsStats();
+      }
+      if (activeTab === 'screenshots') {
+        fetchScreenshotFolders();
+      }
+      if (activeTab === 'terminal') {
+        checkTerminalAccess();
       }
     }
   }, [isAuthenticated, isAdmin, activeTab, fetchVpsStats]);
@@ -376,6 +401,190 @@ const AdminDashboardPage: React.FC = () => {
     toast.success(`Connected to process ${processId}`);
   };
 
+  const clearUserScreenshots = async () => {
+    if (!screenshotUserQuery.trim()) {
+      toast.error('Please enter a user ID or username');
+      return;
+    }
+
+    setIsClearingScreenshots(true);
+    try {
+      const response = await axios.post('/api/admin/screenshots/clear-user', {
+        userQuery: screenshotUserQuery.trim()
+      }, { withCredentials: true });
+      
+      toast.success(response.data.message || 'User screenshots cleared successfully');
+      setScreenshotUserQuery('');
+      // Refresh the screenshot list after clearing
+      fetchScreenshotFolders();
+      // Clear search if it was for the same user
+      if (screenshotSearchQuery && screenshotSearchQuery === screenshotUserQuery.trim()) {
+        setScreenshotSearchQuery('');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to clear user screenshots');
+      console.error('Error clearing user screenshots:', error);
+    } finally {
+      setIsClearingScreenshots(false);
+    }
+  };
+
+  const clearAllScreenshots = async () => {
+    if (!window.confirm('Are you sure you want to clear ALL screenshots? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsClearingScreenshots(true);
+    try {
+      const response = await axios.post('/api/admin/screenshots/clear-all', {}, { withCredentials: true });
+      
+      toast.success(response.data.message || 'All screenshots cleared successfully');
+      // Refresh the screenshot list after clearing
+      fetchScreenshotFolders();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to clear all screenshots');
+      console.error('Error clearing all screenshots:', error);
+    } finally {
+      setIsClearingScreenshots(false);
+    }
+  };
+
+  const fetchScreenshotFolders = async () => {
+    setIsLoadingScreenshots(true);
+    try {
+      const response = await axios.get('/api/admin/screenshots/folders', { withCredentials: true });
+      setAllScreenshotFolders(response.data.folders);
+      // Apply current search filter if any
+      filterScreenshotsByUser(response.data.folders, screenshotSearchQuery);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to fetch screenshot folders');
+      console.error('Error fetching screenshot folders:', error);
+    } finally {
+      setIsLoadingScreenshots(false);
+    }
+  };
+
+  const filterScreenshotsByUser = (folders: any[], searchQuery: string) => {
+    if (!searchQuery.trim()) {
+      setScreenshotFolders(folders);
+      return;
+    }
+
+    const filteredFolders = folders.map(folder => ({
+      ...folder,
+      files: folder.files.filter((file: any) => 
+        file.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    })).filter(folder => folder.files.length > 0);
+
+    setScreenshotFolders(filteredFolders);
+  };
+
+  const handleScreenshotSearch = (query: string) => {
+    setScreenshotSearchQuery(query);
+    filterScreenshotsByUser(allScreenshotFolders, query);
+  };
+
+  // Terminal functions
+  const checkTerminalAccess = async () => {
+    try {
+      const response = await axios.get('/api/admin/terminal/check-access', { withCredentials: true });
+      const hasAccess = response.data.hasAccess;
+      setTerminalAccess(hasAccess);
+      
+      // If user doesn't have access, redirect to admin dashboard
+      if (!hasAccess) {
+        toast.error('Access denied. You are not authorized to access the Terminal.');
+        setActiveTab('overview');
+        return;
+      }
+      
+      // If user has access, allow them to access the terminal tab
+      setActiveTab('terminal');
+    } catch (error: any) {
+      toast.error('Failed to check terminal access');
+      console.error('Error checking terminal access:', error);
+      setTerminalAccess(false);
+      setActiveTab('overview');
+    }
+  };
+
+  const verifyMFA = async () => {
+    try {
+      const response = await axios.post('/api/admin/terminal/verify-mfa', {
+        discordCode,
+        telegramCode
+      }, { withCredentials: true });
+      
+      if (response.data.success) {
+        setMfaVerified(true);
+        toast.success('MFA verification successful');
+      } else {
+        toast.error('Invalid MFA codes');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'MFA verification failed');
+      console.error('Error verifying MFA:', error);
+    }
+  };
+
+  const executeTerminalCommand = async () => {
+    if (!terminalCommand.trim()) {
+      toast.error('Please enter a command');
+      return;
+    }
+
+    setIsExecutingCommand(true);
+    try {
+      const response = await axios.post('/api/admin/terminal/execute', {
+        command: terminalCommand.trim()
+      }, { withCredentials: true });
+      
+      if (response.data.success) {
+        setTerminalOutput(response.data.output);
+        setTerminalCommand('');
+      } else {
+        setTerminalOutput(`Error: ${response.data.error || 'Command failed'}`);
+      }
+    } catch (error: any) {
+      setTerminalOutput(`Error: ${error.response?.data?.message || 'Failed to execute command'}`);
+      console.error('Error executing command:', error);
+    } finally {
+      setIsExecutingCommand(false);
+    }
+  };
+
+  const clearMFA = async () => {
+    try {
+      await axios.post('/api/admin/terminal/clear-mfa', {}, { withCredentials: true });
+      setMfaVerified(false);
+      setDiscordCode('');
+      setTelegramCode('');
+      toast.success('MFA verification cleared');
+    } catch (error: any) {
+      toast.error('Failed to clear MFA verification');
+      console.error('Error clearing MFA:', error);
+    }
+  };
+
+  const requestMFACodes = async () => {
+    setIsRequestingCodes(true);
+    try {
+      const response = await axios.post('/api/admin/terminal/request-codes', {}, { withCredentials: true });
+      
+      if (response.data.success) {
+        toast.success('MFA codes have been sent to your Discord and Telegram. Please check your DMs.');
+      } else {
+        toast.error('Failed to request MFA codes');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to request MFA codes');
+      console.error('Error requesting MFA codes:', error);
+    } finally {
+      setIsRequestingCodes(false);
+    }
+  };
+
   const handleLogout = async () => {
     await logout();
     toast.success('Logged out successfully');
@@ -456,12 +665,17 @@ const AdminDashboardPage: React.FC = () => {
               { id: 'logs', label: 'Logs', icon: FileText },
               { id: 'tools', label: 'Tools', icon: Settings },
               { id: 'progress', label: 'Progress', icon: Monitor },
+              { id: 'screenshots', label: 'Screenshots', icon: Camera },
+              { id: 'terminal', label: 'Terminal', icon: Terminal },
               { id: 'vps', label: 'VPS Monitor', icon: Server },
             ].map((tab) => {
               const Icon = tab.icon;
               const handleTabClick = () => {
                 if (tab.id === 'vps' && !vpsAccessGranted) {
                   setShowVPSAuthModal(true);
+                } else if (tab.id === 'terminal') {
+                  // Check terminal access before allowing access
+                  checkTerminalAccess();
                 } else {
                   setActiveTab(tab.id);
                 }
@@ -1118,6 +1332,692 @@ const AdminDashboardPage: React.FC = () => {
               </div>
             </div>
           </motion.div>
+        )}
+
+        {/* Screenshots Tab */}
+        {activeTab === 'screenshots' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-6">
+                Screenshot Management
+              </h2>
+              <p className="text-text-secondary dark:text-text-dark-secondary mb-6">
+                Manage screenshots taken during the claiming process. Clear specific user screenshots or all screenshots at once.
+              </p>
+
+              {/* Clear Specific User Screenshots */}
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">
+                  Clear Specific User Screenshots
+                </h3>
+                <p className="text-text-secondary dark:text-text-dark-secondary mb-4">
+                  Enter a user ID or username to clear all screenshots for that specific user.
+                </p>
+                
+                <div className="flex gap-4 items-end">
+                  <div className="flex-1">
+                    <label className="label">User ID or Username</label>
+                    <input
+                      type="text"
+                      value={screenshotUserQuery}
+                      onChange={(e) => setScreenshotUserQuery(e.target.value)}
+                      placeholder="Enter user ID or username..."
+                      className="input"
+                      disabled={isClearingScreenshots}
+                    />
+                  </div>
+                  <button
+                    onClick={clearUserScreenshots}
+                    disabled={isClearingScreenshots || !screenshotUserQuery.trim()}
+                    className="btn btn-primary inline-flex items-center space-x-2"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>{isClearingScreenshots ? 'Clearing...' : 'Clear User Screenshots'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Clear All Screenshots */}
+              <div className="border-t border-gray-200 dark:border-dark-accent-navy pt-6">
+                <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">
+                  Clear All Screenshots
+                </h3>
+                <p className="text-text-secondary dark:text-text-dark-secondary mb-4">
+                  <span className="text-red-500 font-medium">Warning:</span> This will delete ALL screenshots from all users. This action cannot be undone.
+                </p>
+                
+                <button
+                  onClick={clearAllScreenshots}
+                  disabled={isClearingScreenshots}
+                  className="btn btn-outline border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 inline-flex items-center space-x-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isClearingScreenshots ? 'Clearing All...' : 'Clear All Screenshots'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Screenshot Folders Display */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">
+                  Screenshot Folders
+                </h2>
+                <div className="flex items-center space-x-3">
+                  {/* Search by User ID */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={screenshotSearchQuery}
+                      onChange={(e) => handleScreenshotSearch(e.target.value)}
+                      placeholder="Search by user ID..."
+                      className="input pr-10 w-48"
+                      disabled={isLoadingScreenshots}
+                    />
+                    {screenshotSearchQuery && (
+                      <button
+                        onClick={() => handleScreenshotSearch('')}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                        title="Clear search"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={fetchScreenshotFolders}
+                    disabled={isLoadingScreenshots}
+                    className="btn btn-outline inline-flex items-center space-x-2"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingScreenshots ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Search Results Info */}
+              {screenshotSearchQuery && (
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    <Search className="w-4 h-4 inline mr-1" />
+                    Showing screenshots for user ID: <span className="font-medium">{screenshotSearchQuery}</span>
+                    <button
+                      onClick={() => handleScreenshotSearch('')}
+                      className="ml-2 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline"
+                    >
+                      Clear filter
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {isLoadingScreenshots ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto"></div>
+                  <p className="text-text-secondary dark:text-text-dark-secondary mt-2">Loading screenshots...</p>
+                </div>
+              ) : screenshotFolders.length === 0 ? (
+                <div className="text-center py-8">
+                  <Camera className="w-12 h-12 text-text-secondary dark:text-text-dark-secondary mx-auto mb-4" />
+                  <p className="text-text-secondary dark:text-text-dark-secondary">
+                    {screenshotSearchQuery ? `No screenshots found for user ID: ${screenshotSearchQuery}` : 'No screenshots found'}
+                  </p>
+                  {screenshotSearchQuery && (
+                    <button
+                      onClick={() => handleScreenshotSearch('')}
+                      className="mt-2 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline text-sm"
+                    >
+                      View all screenshots
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {screenshotFolders.map((folder) => (
+                    <div key={folder.name} className="border border-gray-200 dark:border-dark-accent-navy rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">
+                          {folder.displayName}
+                        </h3>
+                        <span className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                          {folder.files.length} files
+                        </span>
+                      </div>
+                      
+                      {folder.files.length === 0 ? (
+                        <p className="text-text-secondary dark:text-text-dark-secondary text-sm">No screenshots in this folder</p>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                          {folder.files.map((file: any) => (
+                            <div key={file.name} className="group relative">
+                              <div className="aspect-video bg-gray-100 dark:bg-background-dark-tertiary rounded-lg overflow-hidden border border-gray-200 dark:border-dark-accent-navy">
+                                {file.base64Data ? (
+                                  <img
+                                    src={file.base64Data}
+                                    alt={file.name}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-background-dark-tertiary">
+                                    <div className="text-center text-gray-500 dark:text-gray-400">
+                                      <Camera className="w-8 h-8 mx-auto mb-2" />
+                                      <p className="text-sm">Image not found</p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="mt-2">
+                                <p className="text-xs text-text-secondary dark:text-text-dark-secondary truncate">
+                                  {file.name}
+                                </p>
+                                <p className="text-xs text-text-secondary dark:text-text-dark-secondary">
+                                  {file.size}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Terminal Tab */}
+        {activeTab === 'terminal' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            {terminalAccess === null ? (
+              <div className="card text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto mb-4"></div>
+                <p className="text-text-secondary dark:text-text-dark-secondary">Checking terminal access...</p>
+              </div>
+            ) : !terminalAccess ? (
+              <div className="card text-center py-8">
+                <Shield className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">Access Denied</h2>
+                <p className="text-text-secondary dark:text-text-dark-secondary mb-4">
+                  You do not have permission to access the Terminal.
+                </p>
+                <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                  Only users listed in VPS_OWNERS environment variable can access this feature.
+                </p>
+              </div>
+            ) : !mfaVerified ? (
+              <div className="card">
+                <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-6">
+                  Multi-Factor Authentication Required
+                </h2>
+                <p className="text-text-secondary dark:text-text-dark-secondary mb-6">
+                  Please verify both your Discord and Telegram codes to access the Terminal. 
+                  You need 16-digit codes sent by the Discord and Telegram bots.
+                </p>
+                
+                {/* Request Codes Button */}
+                <div className="mb-6">
+                  <button
+                    onClick={requestMFACodes}
+                    disabled={isRequestingCodes}
+                    className="btn btn-outline inline-flex items-center space-x-2"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>{isRequestingCodes ? 'Requesting Codes...' : 'Request MFA Codes'}</span>
+                  </button>
+                  <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-2">
+                    Click this button to receive 16-digit verification codes via Discord and Telegram bots.
+                  </p>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="label">Discord Code (16 digits)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={discordCode}
+                        onChange={(e) => setDiscordCode(e.target.value)}
+                        placeholder="Enter 16-digit Discord code..."
+                        className="input flex-1"
+                        maxLength={16}
+                      />
+                      <button
+                        onClick={() => {
+                          // Individual Discord code request
+                          requestMFACodes();
+                        }}
+                        disabled={isRequestingCodes}
+                        className="btn btn-outline px-3"
+                        title="Request Discord code"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="label">Telegram Code (16 digits)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={telegramCode}
+                        onChange={(e) => setTelegramCode(e.target.value)}
+                        placeholder="Enter 16-digit Telegram code..."
+                        className="input flex-1"
+                        maxLength={16}
+                      />
+                      <button
+                        onClick={() => {
+                          // Individual Telegram code request
+                          requestMFACodes();
+                        }}
+                        disabled={isRequestingCodes}
+                        className="btn btn-outline px-3"
+                        title="Request Telegram code"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={verifyMFA}
+                    disabled={!discordCode.trim() || !telegramCode.trim() || discordCode.length !== 16 || telegramCode.length !== 16}
+                    className="btn btn-primary inline-flex items-center space-x-2"
+                  >
+                    <Shield className="w-4 h-4" />
+                    <span>Verify MFA</span>
+                  </button>
+                  
+                  {(discordCode.length > 0 && discordCode.length !== 16) || (telegramCode.length > 0 && telegramCode.length !== 16) ? (
+                    <div className="text-sm text-red-600 dark:text-red-400">
+                      ⚠️ Both codes must be exactly 16 digits
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Terminal Header */}
+                <div className="card">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">
+                      Terminal
+                    </h2>
+                    <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1 text-green-600 dark:text-green-400">
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        <span className="text-sm">MFA Verified</span>
+                      </div>
+                      <button
+                        onClick={clearMFA}
+                        className="btn btn-outline text-sm"
+                      >
+                        Clear MFA
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
+                    <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">What This Terminal Can Do:</h3>
+                    <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                      <li>• Monitor system status (CPU, memory, disk usage)</li>
+                      <li>• Check running processes and services</li>
+                      <li>• Manage Docker containers and images</li>
+                      <li>• View logs and system information</li>
+                      <li>• Navigate directories and view files</li>
+                      <li>• Monitor application status (Node.js, databases)</li>
+                      <li>• Check network connections and ports</li>
+                    </ul>
+                  </div>
+                  
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
+                    <h3 className="font-semibold text-red-800 dark:text-red-200 mb-2">⚠️ Important Risks & Limitations:</h3>
+                    <ul className="text-sm text-red-700 dark:text-red-300 space-y-1">
+                      <li>• <strong>Commands execute on the live VPS server</strong> - any mistakes can affect the entire system</li>
+                      <li>• <strong>Only safe commands are allowed</strong> - dangerous commands like rm, sudo, shutdown are blocked</li>
+                      <li>• <strong>30-second timeout</strong> - long-running commands will be terminated</li>
+                      <li>• <strong>All commands are logged</strong> - your actions are recorded for security</li>
+                      <li>• <strong>MFA expires after 1 hour</strong> - you'll need to re-verify periodically</li>
+                      <li>• <strong>No file modification</strong> - commands are read-only for safety</li>
+                    </ul>
+                  </div>
+                  
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                    <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                      <strong>Security Note:</strong> This terminal is restricted to Discord user IDs listed in VPS_OWNERS environment variable and requires multi-factor authentication.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Real Terminal Interface */}
+                <div className="card p-0 overflow-hidden">
+                  {/* Terminal Header */}
+                  <div className="bg-gray-900 text-green-400 font-mono p-4 rounded-t-lg">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center">
+                        <div className="flex space-x-2">
+                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                          <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                        </div>
+                        <span className="ml-4 text-sm text-gray-300">Terminal - 8BP VPS</span>
+                      </div>
+                      <div className="flex items-center space-x-4">
+                        <div className="text-xs text-gray-400">
+                          {new Date().toLocaleTimeString()}
+                        </div>
+                        <button
+                          onClick={() => setShowCommandHelp(true)}
+                          className="text-xs text-blue-400 hover:text-blue-300"
+                        >
+                          help
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Terminal Content */}
+                    <div className="space-y-1 min-h-80 max-h-96 overflow-y-auto">
+                      {/* Welcome message */}
+                      <div className="text-blue-400 mb-2">
+                        Welcome to 8BP VPS Terminal
+                      </div>
+                      <div className="text-gray-400 text-sm mb-4">
+                        Type 'help' for available commands. Use 'clear' to clear the terminal.
+                      </div>
+                      
+                      {/* Command history and output */}
+                      {terminalOutput && (
+                        <div className="whitespace-pre-wrap text-sm">
+                          {terminalOutput}
+                        </div>
+                      )}
+                      
+                      {/* Current command line */}
+                      <div className="flex items-center mt-2">
+                        <span className="text-blue-400">blake@8bp-vps</span>
+                        <span className="text-white mx-1">:</span>
+                        <span className="text-yellow-400">~</span>
+                        <span className="text-white mx-1">$</span>
+                        <span className="text-white">{terminalCommand}</span>
+                        <span className="animate-pulse bg-green-400 w-2 h-4 ml-1"></span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Command input */}
+                  <div className="bg-gray-800 p-4 rounded-b-lg">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-green-400 font-mono">$</span>
+                      <input
+                        type="text"
+                        value={terminalCommand}
+                        onChange={(e) => setTerminalCommand(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            executeTerminalCommand();
+                          }
+                        }}
+                        placeholder="Enter command..."
+                        className="flex-1 bg-transparent text-green-400 font-mono outline-none placeholder-gray-500"
+                        disabled={isExecutingCommand}
+                        autoFocus
+                      />
+                      {isExecutingCommand && (
+                        <span className="text-yellow-400 text-sm">Executing...</span>
+                      )}
+                    </div>
+                    
+                    <div className="mt-3 text-xs text-gray-400">
+                      <p><strong>Allowed commands:</strong> ls, pwd, whoami, date, uptime, df, free, ps, top, htop, systemctl, docker, git, npm, node, pm2, nginx, apache2, tail, head, grep, find, cat, less, more</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Command Help Modal */}
+        {showCommandHelp && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-background-dark-primary rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-dark-accent-navy">
+                <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
+                  Command Help Reference
+                </h2>
+                <button
+                  onClick={() => setShowCommandHelp(false)}
+                  className="text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div className="space-y-6">
+                  {/* System Information */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <Server className="w-5 h-5 mr-2" />
+                      System Information
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">whoami</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show current user</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">pwd</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show current directory</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">date</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show current date/time</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">uptime</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show system uptime</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* File System */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <HardDrive className="w-5 h-5 mr-2" />
+                      File System & Navigation
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">ls</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">List directory contents</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">ls -la</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">List with details</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">df -h</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show disk usage</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">find . -name "*.log"</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Find log files</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* System Resources */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <Cpu className="w-5 h-5 mr-2" />
+                      System Resources
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">free -h</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show memory usage</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">ps aux</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show running processes</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">top</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Interactive process monitor</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">htop</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Enhanced process monitor</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Docker Commands */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <Terminal className="w-5 h-5 mr-2" />
+                      Docker Management
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">docker ps</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show running containers</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">docker ps -a</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show all containers</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">docker images</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show Docker images</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">docker logs [container]</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show container logs</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Service Management */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <Settings className="w-5 h-5 mr-2" />
+                      Service Management
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">systemctl status nginx</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Check nginx status</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">systemctl status docker</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Check Docker status</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">pm2 status</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Check PM2 processes</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">pm2 logs</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show PM2 logs</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Database Management */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <Database className="w-5 h-5 mr-2" />
+                      Database Management
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">clear-failed-claims</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Remove all failed claim records from database</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Log Viewing */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <FileText className="w-5 h-5 mr-2" />
+                      Log Viewing
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">tail -f backend.log</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Follow backend logs</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">tail -n 50 backend.log</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Last 50 lines</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">grep "ERROR" backend.log</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Find error messages</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">cat package.json</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">View file contents</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Network & Ports */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3 flex items-center">
+                      <Wifi className="w-5 h-5 mr-2" />
+                      Network & Ports
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">netstat -tulpn</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show listening ports</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">ss -tulpn</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Modern port listing</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">curl localhost:2600</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Test backend API</p>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
+                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">ping google.com</code>
+                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Test connectivity</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Tips */}
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">💡 Quick Tips:</h3>
+                    <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                      <li>• Use <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">Tab</code> for command completion</li>
+                      <li>• Press <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">Ctrl+C</code> to cancel long-running commands</li>
+                      <li>• Use <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">|</code> to pipe output between commands</li>
+                      <li>• Add <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">-h</code> flag for human-readable output</li>
+                      <li>• Use <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">grep</code> to filter command output</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* VPS Monitor Tab */}

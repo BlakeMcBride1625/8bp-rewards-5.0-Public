@@ -28,7 +28,7 @@ export class EightBallPoolClaimer {
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
         '--window-size=1920,1080',
-        '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       ],
       timeout: 60000,
       protocolTimeout: 60000
@@ -498,7 +498,82 @@ export class EightBallPoolClaimer {
                 contextText = contextText.substring(0, 100).replace(/\s+/g, ' ').trim();
               }
               
-              await button.click();
+              // Store original button text for validation
+              const originalButtonText = await button.evaluate(el => el.textContent || '');
+              (button as any)._originalText = originalButtonText;
+              
+              // Try to dismiss Privacy Settings modal by clicking outside or using aggressive dismissal
+              try {
+                // Check if Privacy Settings modal is present
+                const privacyModal = await page.$('text="Privacy Settings"');
+                if (privacyModal) {
+                  this.logger.info('🍪 Privacy Settings modal detected - attempting aggressive dismissal');
+                  
+                  // Try multiple dismissal strategies
+                  const dismissalSuccess = await page.evaluate(() => {
+                    try {
+                      // Strategy 1: Click outside the modal (on backdrop)
+                      const modal = (globalThis as any).document.querySelector('[class*="modal"], [role="dialog"]');
+                      if (modal) {
+                        const backdrop = modal.parentElement;
+                        if (backdrop && backdrop !== modal) {
+                          backdrop.click();
+                          return true;
+                        }
+                      }
+                      
+                      // Strategy 2: Press Escape key
+                      const keyEvent = new (globalThis as any).KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 });
+                      (globalThis as any).document.dispatchEvent(keyEvent);
+                      return true;
+                      
+                      // Strategy 3: Try to find and click any close button
+                      const closeButtons = (globalThis as any).document.querySelectorAll('button, [role="button"]');
+                      for (const btn of closeButtons) {
+                        const text = btn.textContent || '';
+                        if (text.toLowerCase().includes('save') || 
+                            text.toLowerCase().includes('exit') || 
+                            text.toLowerCase().includes('close') ||
+                            text.toLowerCase().includes('dismiss')) {
+                          btn.click();
+                          return true;
+                        }
+                      }
+                      
+                      return false;
+                    } catch (error) {
+                      return false;
+                    }
+                  });
+                  
+                  if (dismissalSuccess) {
+                    this.logger.info('✅ Modal dismissal successful');
+                    await page.waitForTimeout(2000);
+                    // Now try normal click
+                    await button.click();
+                  } else {
+                    this.logger.info('⚠️ Modal dismissal failed, trying JavaScript click');
+                    // Fallback to JavaScript click
+                    try {
+                      await button.evaluate((el: any) => el.click());
+                      this.logger.info('✅ JavaScript click successful');
+                    } catch (forceError) {
+                      this.logger.warn(`⚠️ JavaScript click failed: ${forceError instanceof Error ? forceError.message : 'Unknown error'}`);
+                    }
+                  }
+                } else {
+                  // No modal detected, proceed with normal click
+                  await button.click();
+                }
+              } catch (error) {
+                this.logger.warn(`⚠️ Error with modal bypass: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                // Fallback to normal click
+                try {
+                  await button.click();
+                } catch (clickError) {
+                  this.logger.warn(`⚠️ Normal click failed: ${clickError instanceof Error ? clickError.message : 'Unknown error'}`);
+                }
+              }
               
               // Use standardized claim validation logic
               const isValidNewClaim = await validateClaimResult(button, 'Unknown Item', this.logger);

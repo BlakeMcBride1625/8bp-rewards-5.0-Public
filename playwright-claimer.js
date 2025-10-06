@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const DatabaseService = require('./services/database-service');
 const Registration = require('./models/Registration');
 const mongoose = require('mongoose');
+const BrowserPool = require('./browser-pool');
 require('dotenv').config();
 
 // ClaimRecord schema for saving claim results (matching backend TypeScript model)
@@ -78,6 +79,8 @@ async function claimRewardsForUser(userId) {
   // Ensure screenshot directories exist
   await ensureScreenshotDirectories();
   
+  const claimedItems = [];
+  
   const shopUrl = 'https://8ballpool.com/en/shop';
   
   let browser;
@@ -92,9 +95,9 @@ async function claimRewardsForUser(userId) {
     const page = await browser.newPage();
     console.log('📄 Created new page');
     
-    // Set realistic user agent
+    // Set proper User-Agent to avoid 403 Forbidden
     await page.setExtraHTTPHeaders({
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     });
     
     // Navigate to Daily Reward section first
@@ -344,136 +347,275 @@ async function claimRewardsForUser(userId) {
       console.log('⚠️ No login modal found - user might already be logged in');
     }
     
-    // Look for FREE buttons - try multiple approaches
-    console.log('🎁 Looking for FREE buttons...');
+    // Advanced FREE button detection with sophisticated logic
+    console.log('🎁 Looking for all FREE and CLAIM buttons...');
     
     // Wait a bit for any dynamic content to load
     await page.waitForTimeout(3000);
     
-    // Try different selectors for FREE buttons
-    const freeButtonSelectors = [
-      'button:has-text("FREE")',
-      'button:has-text("Free")',
-      'button:has-text("free")',
-      '[class*="free"] button',
-      '[class*="claim"] button',
-      'button[class*="free"]'
+    // Specific target keywords to identify rewards we care about
+    // ORDER MATTERS! Check more specific items first
+    const targetKeywords = [
+      // Free Daily Cue Piece FIRST (most specific - check before individual cue names)
+      'Free Daily Cue Piece', 'FREE DAILY CUE PIECE', 'DAILY CUE PIECE', 'Daily Cue Piece',
+      'Free Cue Piece', 'FREE CUE PIECE',
+      // Black Diamond (special item)
+      'Black Diamond', 'BLACK DIAMOND',
+      // Daily Rewards
+      'Daily Reward', 'DAILY REWARD', 'WEBSHOP EXCLUSIVE',
+      // 7 Random Cues (check AFTER Free Daily Cue Piece)
+      'Opti Shot', 'Spin Wizard', 'Power Break', 'Strike Zone', 
+      'Trickster', 'Gamechanger', 'Legacy Strike',
+      // Other items
+      'Cash', 'Coins', 'Box', 'Boxes', 'FREE CASH', 'FREE COINS'
     ];
     
+    // Find all FREE/CLAIM buttons first
+    console.log('🔍 Scanning for all FREE and CLAIM buttons...');
+    const freeButtonSelectors = [
+      'button:has-text("FREE")',
+      'button:has-text("free")',
+      'a:has-text("FREE")',
+      'a:has-text("free")',
+      '[class*="free"]:has-text("FREE")',
+      '[class*="free"]:has-text("free")'
+    ];
+
     let allFreeButtons = [];
-    
     for (const selector of freeButtonSelectors) {
       try {
         const buttons = await page.locator(selector).all();
         allFreeButtons = allFreeButtons.concat(buttons);
       } catch (error) {
-        console.log(`⚠️ Error with selector ${selector}: ${error.message}`);
+        // Continue with next selector
       }
     }
-    
+
     // Remove duplicates
     const uniqueButtons = [];
     for (const button of allFreeButtons) {
-      const isDuplicate = uniqueButtons.some(existing => existing === button);
-      if (!isDuplicate) {
-        uniqueButtons.push(button);
+      try {
+        const isVisible = await button.isVisible();
+        if (isVisible) {
+          const buttonText = await button.textContent();
+          const buttonId = await button.evaluate(el => el.id || el.className || el.textContent);
+          
+          // Check if we already have this button
+          const alreadyExists = uniqueButtons.some(existing => {
+            return existing.id === buttonId;
+          });
+          
+          if (!alreadyExists) {
+            uniqueButtons.push({
+              element: button,
+              text: buttonText,
+              id: buttonId
+            });
+          }
+        }
+      } catch (error) {
+        // Skip this button
       }
     }
-    
+
     console.log(`Found ${uniqueButtons.length} unique FREE buttons`);
     
     if (uniqueButtons.length > 0) {
       console.log('🎯 Clicking all FREE buttons...');
       
       for (let i = 0; i < uniqueButtons.length; i++) {
+        const buttonInfo = uniqueButtons[i];
         try {
-          const button = uniqueButtons[i];
-          const isVisible = await button.isVisible();
-          
-          if (isVisible) {
-            // Get context about what this button is for
-            const buttonText = await button.textContent().catch(() => '');
-            
-            // Skip if button says "CLAIMED" (case insensitive)
-            if (buttonText && buttonText.toLowerCase().includes('claimed')) {
-              console.log(`⏭️ Skipping button ${i + 1} - already CLAIMED: "${buttonText}"`);
-              continue;
-            }
-            
-            // Check multiple indicators that an item was already claimed
-            const alreadyClaimedIndicators = [
-              'claimed', 'already', 'collected', '✓', 'checkmark', 
-              'disabled', 'greyed out', 'unavailable', 'completed'
-            ];
-            
-            const isAlreadyClaimedBeforeClick = alreadyClaimedIndicators.some(indicator => 
-              buttonText && buttonText.toLowerCase().includes(indicator.toLowerCase())
-            );
-            
-            if (isAlreadyClaimedBeforeClick) {
-              console.log(`⏭️ Skipping button ${i + 1} - already claimed indicator: "${buttonText}"`);
-              continue;
-            }
-            
-            // Check if button is disabled
-            const isDisabled = await button.isDisabled().catch(() => false);
-            if (isDisabled) {
-              console.log(`⏭️ Skipping button ${i + 1} - disabled/greyed out`);
-              continue;
-            }
-            
-            // Check if button is actually clickable
-            const isClickable = await button.isEnabled().catch(() => false);
-            if (!isClickable) {
-              console.log(`⏭️ Skipping button ${i + 1} - not clickable`);
-              continue;
-            }
-            
-            const parentText = await button.locator('xpath=ancestor::*[contains(@class, "daily") or contains(@class, "reward") or contains(@class, "cue") or contains(@class, "piece") or contains(@class, "card")]').first().textContent().catch(() => '');
-            
-            console.log(`🖱️ Clicking FREE button ${i + 1}/${uniqueButtons.length}`);
-            console.log(`   Button text: ${buttonText}`);
-            if (parentText) {
-              console.log(`   Context: ${parentText.substring(0, 100)}...`);
-            }
-            
-            // Hover over button first
-            await button.hover();
-            await page.waitForTimeout(500);
-            
-              // Check if button should be clicked (for actual claiming)
-              const shouldClick = await shouldClickButton(button, buttonText, console);
-              if (!shouldClick) {
-                continue;
-              }
-              
-              // Check if button should be skipped for counting (already claimed indicators)
-              const shouldSkipForCounting = shouldSkipButtonForCounting(buttonText, console);
-              
-              // Click the button
-              await button.click();
-              
-              // Use standardized claim validation logic
-              const isValidNewClaim = await validateClaimResult(button, 'Unknown Item', console);
-              
-              // Only count if it wasn't already skipped for counting AND it's a valid new claim
-              if (!shouldSkipForCounting && isValidNewClaim) {
-                // Count as successful claim
-              }
-            
-            // Wait between clicks
-            if (i < uniqueButtons.length - 1) {
-              await page.waitForTimeout(3000);
-            }
-          } else {
-            console.log(`⚠️ FREE button ${i + 1} is not visible`);
+          // Check if button should be clicked (for actual claiming)
+          const shouldClick = await shouldClickButton(buttonInfo.element, buttonInfo.text, console);
+          if (!shouldClick) {
+            continue;
           }
+          
+          // Check if button should be skipped for counting (already claimed indicators)
+          const shouldSkipForCounting = shouldSkipButtonForCounting(buttonInfo.text, console);
+          
+          // Check if button is disabled
+          const isDisabled = await buttonInfo.element.isDisabled().catch(() => false);
+          if (isDisabled) {
+            console.log(`⏭️ Skipping button ${i + 1} - disabled/greyed out`);
+            continue;
+          }
+          
+          // Check if button is actually clickable
+          const isClickable = await buttonInfo.element.evaluate(el => !el.disabled && el.offsetParent !== null).catch(() => false);
+          if (!isClickable) {
+            console.log(`⏭️ Skipping button ${i + 1} - not clickable`);
+            continue;
+          }
+          
+          // Try to identify what item this button is for
+          let itemName = 'Unknown Item';
+          try {
+            // Look for text in multiple parent levels
+            let parentText = '';
+            
+            // Try to get text from several ancestor levels
+            for (let level = 1; level <= 5; level++) {
+              try {
+                const parent = await buttonInfo.element.locator(`xpath=ancestor::div[${level}]`).first();
+                const text = await parent.textContent().catch(() => '');
+                parentText += ' ' + text;
+              } catch (e) {
+                // Continue with next level
+              }
+            }
+            
+            console.log(`📝 Parent text snippet: ${parentText.substring(0, 200)}...`);
+            
+            // Check if it matches any of our target keywords
+            for (const keyword of targetKeywords) {
+              if (parentText.includes(keyword)) {
+                itemName = keyword;
+                console.log(`🎯 Identified item: ${keyword}`);
+                break;
+              }
+            }
+          } catch (error) {
+            // Use button text if we can't find parent
+            itemName = buttonInfo.text || 'Unknown';
+          }
+          
+          console.log(`🎁 Clicking FREE button ${i + 1} for "${itemName}" (button text: "${buttonInfo.text}")`);
+          
+          // Scroll button into view
+          await buttonInfo.element.scrollIntoViewIfNeeded();
+          await page.waitForTimeout(500);
+          
+          // Force-hide interfering overlays using JavaScript
+          try {
+            await page.evaluate(() => {
+              // Hide all consent overlays and sidebars that might interfere
+              const selectors = [
+                '[class*="mc-consents"]',
+                '[class*="mc-sidebar"]', 
+                '[class*="consent"]',
+                '[class*="cookie"]',
+                '[class*="policy"]',
+                '[role="dialog"]',
+                '[class*="modal"]',
+                '[class*="popup"]'
+              ];
+              
+              selectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                  if (el) {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.opacity = '0';
+                    el.style.pointerEvents = 'none';
+                  }
+                });
+              });
+              
+              console.log('🔧 Force-hid all interfering overlays');
+            });
+            
+            // Wait for any animations to complete
+            await page.waitForTimeout(1000);
+          } catch (error) {
+            console.log('⚠️ Could not force-hide overlays, continuing...');
+          }
+          
+          // Store original button text for validation
+          const originalButtonText = await buttonInfo.element.evaluate(el => el.textContent || '');
+          buttonInfo.element._originalText = originalButtonText;
+          
+          // Try to dismiss Privacy Settings modal by clicking outside or using aggressive dismissal
+          try {
+            // Check if Privacy Settings modal is present
+            const privacyModal = await page.$('text="Privacy Settings"');
+            if (privacyModal) {
+              console.log('🍪 Privacy Settings modal detected - attempting aggressive dismissal');
+              
+              // Try multiple dismissal strategies
+              const dismissalSuccess = await page.evaluate(() => {
+                try {
+                  // Strategy 1: Click outside the modal (on backdrop)
+                  const modal = document.querySelector('[class*="modal"], [role="dialog"]');
+                  if (modal) {
+                    const backdrop = modal.parentElement;
+                    if (backdrop && backdrop !== modal) {
+                      backdrop.click();
+                      return true;
+                    }
+                  }
+                  
+                  // Strategy 2: Press Escape key
+                  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
+                  return true;
+                  
+                  // Strategy 3: Try to find and click any close button
+                  const closeButtons = document.querySelectorAll('button, [role="button"]');
+                  for (const btn of closeButtons) {
+                    const text = btn.textContent || '';
+                    if (text.toLowerCase().includes('save') || 
+                        text.toLowerCase().includes('exit') || 
+                        text.toLowerCase().includes('close') ||
+                        text.toLowerCase().includes('dismiss')) {
+                      btn.click();
+                      return true;
+                    }
+                  }
+                  
+                  return false;
+                } catch (error) {
+                  return false;
+                }
+              });
+              
+              if (dismissalSuccess) {
+                console.log('✅ Modal dismissal successful');
+                await page.waitForTimeout(2000);
+                // Now try normal click
+                await buttonInfo.element.click();
+              } else {
+                console.log('⚠️ Modal dismissal failed, trying force click');
+                // Fallback to force click
+                try {
+                  await buttonInfo.element.click({ force: true });
+                  console.log('✅ Force click successful');
+                } catch (forceError) {
+                  console.log(`⚠️ Force click failed: ${forceError.message}`);
+                }
+              }
+            } else {
+              // No modal detected, proceed with normal click
+              await buttonInfo.element.click();
+            }
+          } catch (error) {
+            console.log(`⚠️ Error with modal bypass: ${error.message}`);
+            // Fallback to normal click
+            try {
+              await buttonInfo.element.click();
+            } catch (clickError) {
+              console.log(`⚠️ Normal click failed: ${clickError.message}`);
+            }
+          }
+          
+          // Use standardized claim validation logic
+          const isValidNewClaim = await validateClaimResult(buttonInfo.element, itemName, console);
+          
+          // Only count if it wasn't already skipped for counting AND it's a valid new claim
+          if (!shouldSkipForCounting && isValidNewClaim) {
+            claimedItems.push(itemName);
+          }
+          
+          // Wait between clicks
+          await page.waitForTimeout(2000);
+          
         } catch (error) {
-          console.log(`⚠️ Failed to click FREE button ${i + 1}: ${error.message}`);
+          console.log(`⚠️ Error clicking FREE button ${i + 1}: ${error.message}`);
         }
       }
       
-      console.log(`🎉 Successfully clicked ${uniqueButtons.length} FREE buttons!`);
+      console.log(`🎉 Claimed ${claimedItems.length} items: ${claimedItems.join(', ')}`);
     } else {
       console.log('❌ No FREE buttons found - may already be claimed or not available');
       
@@ -678,13 +820,22 @@ async function claimRewards() {
   let failureCount = 0;
   const schedulerRunTime = new Date();
   
-  // Process all users in parallel for speed! 🚀
-  console.log(`\n🚀 Running ${users.length} claims in PARALLEL for maximum speed!`);
+  // Create browser pool with max 20 concurrent browsers
+  const browserPool = new BrowserPool(20);
+  
+  // Process all users with browser pool limiting! 🚀
+  console.log(`\n🚀 Running ${users.length} claims with BROWSER POOL (max 20 concurrent browsers)!`);
+  console.log(`📊 Browser Pool Status: ${browserPool.getStatus().activeBrowsers}/${browserPool.getStatus().maxConcurrent} active, ${browserPool.getStatus().queued} queued`);
   
   const claimPromises = users.map(async (user, index) => {
     console.log(`\n📋 Starting user ${index + 1}/${users.length}: ${user.username} (${user.eightBallPoolId})`);
     
     try {
+      // Wait for browser pool slot
+      console.log(`⏳ Waiting for browser slot for ${user.username}...`);
+      await browserPool.acquire();
+      console.log(`✅ Browser slot acquired for ${user.username}`);
+      
       await claimRewardsForUser(user.eightBallPoolId);
       console.log(`✅ Successfully processed user: ${user.username}`);
       
@@ -718,6 +869,10 @@ async function claimRewards() {
       console.log(`💾 Saved failed claim record for ${user.username} to database`);
       
       return { success: false, user: user.username, error: error.message };
+    } finally {
+      // Release browser pool slot
+      browserPool.release();
+      console.log(`🔄 Browser slot released for ${user.username}`);
     }
   });
   

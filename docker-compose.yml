@@ -47,7 +47,7 @@ services:
       SCHEDULER_CHANNEL_ID: ${SCHEDULER_CHANNEL_ID}
       REWARDS_CHANNEL_ID: ${REWARDS_CHANNEL_ID}
       
-      # Server Configuration
+      # Server Configuration (Standardized Ports)
       BACKEND_PORT: ${BACKEND_PORT:-2600}
       FRONTEND_PORT: ${FRONTEND_PORT:-2500}
       NODE_ENV: production

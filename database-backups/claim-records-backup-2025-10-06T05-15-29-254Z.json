@@ -1,0 +1,1958 @@
+{
+  "timestamp": "2025-10-06T05:15:29.307Z",
+  "totalRecords": 156,
+  "totalUsers": 40,
+  "records": [
+    {
+      "_id": "68e31a2b2801a7d5cbf42dfb",
+      "eightBallPoolId": "31597069",
+      "websiteUserId": "31597069",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:23:55.673Z",
+      "schedulerRun": "2025-10-06T01:23:55.673Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a2f2801a7d5cbf42dfd",
+      "eightBallPoolId": "4074000337",
+      "websiteUserId": "4074000337",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:23:59.198Z",
+      "schedulerRun": "2025-10-06T01:23:59.198Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a2f2801a7d5cbf42dff",
+      "eightBallPoolId": "2184547630",
+      "websiteUserId": "2184547630",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:23:59.767Z",
+      "schedulerRun": "2025-10-06T01:23:59.767Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e01",
+      "eightBallPoolId": "4014680882",
+      "websiteUserId": "4014680882",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.349Z",
+      "schedulerRun": "2025-10-06T01:24:00.349Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e03",
+      "eightBallPoolId": "2811111711",
+      "websiteUserId": "2811111711",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.444Z",
+      "schedulerRun": "2025-10-06T01:24:00.444Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e05",
+      "eightBallPoolId": "3485555555",
+      "websiteUserId": "3485555555",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.530Z",
+      "schedulerRun": "2025-10-06T01:24:00.530Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e07",
+      "eightBallPoolId": "1937295559",
+      "websiteUserId": "1937295559",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.538Z",
+      "schedulerRun": "2025-10-06T01:24:00.538Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e09",
+      "eightBallPoolId": "3417777776",
+      "websiteUserId": "3417777776",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.591Z",
+      "schedulerRun": "2025-10-06T01:24:00.591Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e0b",
+      "eightBallPoolId": "3213334533",
+      "websiteUserId": "3213334533",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.695Z",
+      "schedulerRun": "2025-10-06T01:24:00.695Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e0d",
+      "eightBallPoolId": "4926672516",
+      "websiteUserId": "4926672516",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.779Z",
+      "schedulerRun": "2025-10-06T01:24:00.779Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e0f",
+      "eightBallPoolId": "4069824470",
+      "websiteUserId": "4069824470",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.789Z",
+      "schedulerRun": "2025-10-06T01:24:00.789Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e11",
+      "eightBallPoolId": "4175261019",
+      "websiteUserId": "4175261019",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.897Z",
+      "schedulerRun": "2025-10-06T01:24:00.897Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a302801a7d5cbf42e13",
+      "eightBallPoolId": "2409322815",
+      "websiteUserId": "2409322815",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:00.921Z",
+      "schedulerRun": "2025-10-06T01:24:00.921Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a312801a7d5cbf42e15",
+      "eightBallPoolId": "110141",
+      "websiteUserId": "110141",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:01.003Z",
+      "schedulerRun": "2025-10-06T01:24:01.003Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a312801a7d5cbf42e17",
+      "eightBallPoolId": "19723455",
+      "websiteUserId": "19723455",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:01.035Z",
+      "schedulerRun": "2025-10-06T01:24:01.035Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a312801a7d5cbf42e19",
+      "eightBallPoolId": "2813420254",
+      "websiteUserId": "2813420254",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:01.108Z",
+      "schedulerRun": "2025-10-06T01:24:01.108Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a312801a7d5cbf42e1b",
+      "eightBallPoolId": "1543016560",
+      "websiteUserId": "1543016560",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:01.189Z",
+      "schedulerRun": "2025-10-06T01:24:01.189Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e1d",
+      "eightBallPoolId": "3411092263",
+      "websiteUserId": "3411092263",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.029Z",
+      "schedulerRun": "2025-10-06T01:24:02.029Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e1f",
+      "eightBallPoolId": "7902",
+      "websiteUserId": "7902",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.037Z",
+      "schedulerRun": "2025-10-06T01:24:02.037Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e21",
+      "eightBallPoolId": "574047",
+      "websiteUserId": "574047",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.042Z",
+      "schedulerRun": "2025-10-06T01:24:02.042Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e23",
+      "eightBallPoolId": "1195368689",
+      "websiteUserId": "1195368689",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.233Z",
+      "schedulerRun": "2025-10-06T01:24:02.233Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e25",
+      "eightBallPoolId": "3411766218",
+      "websiteUserId": "3411766218",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.240Z",
+      "schedulerRun": "2025-10-06T01:24:02.240Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e27",
+      "eightBallPoolId": "2133913807",
+      "websiteUserId": "2133913807",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.241Z",
+      "schedulerRun": "2025-10-06T01:24:02.241Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e29",
+      "eightBallPoolId": "1852427833",
+      "websiteUserId": "1852427833",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.418Z",
+      "schedulerRun": "2025-10-06T01:24:02.418Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e2b",
+      "eightBallPoolId": "9984415",
+      "websiteUserId": "9984415",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.421Z",
+      "schedulerRun": "2025-10-06T01:24:02.421Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e2d",
+      "eightBallPoolId": "4931685486",
+      "websiteUserId": "4931685486",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.491Z",
+      "schedulerRun": "2025-10-06T01:24:02.491Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e2f",
+      "eightBallPoolId": "1826254746",
+      "websiteUserId": "1826254746",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.520Z",
+      "schedulerRun": "2025-10-06T01:24:02.520Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e31",
+      "eightBallPoolId": "3132133520",
+      "websiteUserId": "3132133520",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.669Z",
+      "schedulerRun": "2025-10-06T01:24:02.669Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e33",
+      "eightBallPoolId": "3057211056",
+      "websiteUserId": "3057211056",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.914Z",
+      "schedulerRun": "2025-10-06T01:24:02.914Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a322801a7d5cbf42e35",
+      "eightBallPoolId": "2130294000",
+      "websiteUserId": "2130294000",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:02.981Z",
+      "schedulerRun": "2025-10-06T01:24:02.981Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e37",
+      "eightBallPoolId": "2660625144",
+      "websiteUserId": "2660625144",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.118Z",
+      "schedulerRun": "2025-10-06T01:24:03.118Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e39",
+      "eightBallPoolId": "2222430702",
+      "websiteUserId": "2222430702",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.225Z",
+      "schedulerRun": "2025-10-06T01:24:03.225Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e3b",
+      "eightBallPoolId": "2357661125",
+      "websiteUserId": "2357661125",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.243Z",
+      "schedulerRun": "2025-10-06T01:24:03.243Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e3d",
+      "eightBallPoolId": "4714098502",
+      "websiteUserId": "4714098502",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.367Z",
+      "schedulerRun": "2025-10-06T01:24:03.367Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e3f",
+      "eightBallPoolId": "3199929992",
+      "websiteUserId": "3199929992",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.484Z",
+      "schedulerRun": "2025-10-06T01:24:03.484Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e41",
+      "eightBallPoolId": "1028645630",
+      "websiteUserId": "1028645630",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.495Z",
+      "schedulerRun": "2025-10-06T01:24:03.495Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e43",
+      "eightBallPoolId": "4070842330",
+      "websiteUserId": "4070842330",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.499Z",
+      "schedulerRun": "2025-10-06T01:24:03.499Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e47",
+      "eightBallPoolId": "4361367039",
+      "websiteUserId": "4361367039",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.534Z",
+      "schedulerRun": "2025-10-06T01:24:03.534Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e49",
+      "eightBallPoolId": "4143936427",
+      "websiteUserId": "4143936427",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.566Z",
+      "schedulerRun": "2025-10-06T01:24:03.566Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31a332801a7d5cbf42e45",
+      "eightBallPoolId": "3247684699",
+      "websiteUserId": "3247684699",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:24:03.500Z",
+      "schedulerRun": "2025-10-06T01:24:03.500Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31b3485fb00f792d0c134",
+      "eightBallPoolId": "1",
+      "websiteUserId": "1",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T01:28:20.408Z",
+      "schedulerRun": "2025-10-06T01:28:20.408Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b2a",
+      "eightBallPoolId": "3417777776",
+      "websiteUserId": "tango",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.498Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.777Z",
+      "updatedAt": "2025-10-06T01:34:19.777Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b2c",
+      "eightBallPoolId": "110141",
+      "websiteUserId": "GBR (EH | ERROR)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.809Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.810Z",
+      "updatedAt": "2025-10-06T01:34:19.810Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b2e",
+      "eightBallPoolId": "3213334533",
+      "websiteUserId": "8bp.ryan 2nd",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.814Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.815Z",
+      "updatedAt": "2025-10-06T01:34:19.815Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b30",
+      "eightBallPoolId": "4361367039",
+      "websiteUserId": "Polar",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.961Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.980Z",
+      "updatedAt": "2025-10-06T01:34:19.980Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b32",
+      "eightBallPoolId": "3411092263",
+      "websiteUserId": "Ethan",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.981Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.983Z",
+      "updatedAt": "2025-10-06T01:34:19.983Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b34",
+      "eightBallPoolId": "1937295559",
+      "websiteUserId": "Ash",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.985Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.987Z",
+      "updatedAt": "2025-10-06T01:34:19.987Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b3a",
+      "eightBallPoolId": "4931685486",
+      "websiteUserId": "AK Tiktok",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.992Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.994Z",
+      "updatedAt": "2025-10-06T01:34:19.994Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b3c",
+      "eightBallPoolId": "2130294000",
+      "websiteUserId": "GBR (Harry Lee)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.995Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.996Z",
+      "updatedAt": "2025-10-06T01:34:19.996Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b3e",
+      "eightBallPoolId": "4069824470",
+      "websiteUserId": "AT’nerb",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.997Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.997Z",
+      "updatedAt": "2025-10-06T01:34:19.997Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b40",
+      "eightBallPoolId": "4070842330",
+      "websiteUserId": "Anthony",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.997Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.998Z",
+      "updatedAt": "2025-10-06T01:34:19.998Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b42",
+      "eightBallPoolId": "4143936427",
+      "websiteUserId": "RM",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.998Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.999Z",
+      "updatedAt": "2025-10-06T01:34:19.999Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b44",
+      "eightBallPoolId": "7902",
+      "websiteUserId": "DREAMZR1 TT",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.999Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.000Z",
+      "updatedAt": "2025-10-06T01:34:20.000Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b46",
+      "eightBallPoolId": "3411766218",
+      "websiteUserId": "GBR (King Luke)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.000Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.000Z",
+      "updatedAt": "2025-10-06T01:34:20.000Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b48",
+      "eightBallPoolId": "9984415",
+      "websiteUserId": "tao",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.001Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.002Z",
+      "updatedAt": "2025-10-06T01:34:20.002Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b4a",
+      "eightBallPoolId": "1028645630",
+      "websiteUserId": "queen x Qman",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.006Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.007Z",
+      "updatedAt": "2025-10-06T01:34:20.007Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b4c",
+      "eightBallPoolId": "19723455",
+      "websiteUserId": "vx’s 8id",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.007Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.008Z",
+      "updatedAt": "2025-10-06T01:34:20.008Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b4e",
+      "eightBallPoolId": "1543016560",
+      "websiteUserId": "Lewisblive0 TT",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.008Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.009Z",
+      "updatedAt": "2025-10-06T01:34:20.009Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b50",
+      "eightBallPoolId": "3485555555",
+      "websiteUserId": "GBR (Josh)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.010Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.010Z",
+      "updatedAt": "2025-10-06T01:34:20.010Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b52",
+      "eightBallPoolId": "3199929992",
+      "websiteUserId": "IG Joshjdev",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.011Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.011Z",
+      "updatedAt": "2025-10-06T01:34:20.011Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b54",
+      "eightBallPoolId": "1195368689",
+      "websiteUserId": "Lei eds",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.012Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.012Z",
+      "updatedAt": "2025-10-06T01:34:20.012Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b56",
+      "eightBallPoolId": "574047",
+      "websiteUserId": "dan666 TT",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.013Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.013Z",
+      "updatedAt": "2025-10-06T01:34:20.013Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b58",
+      "eightBallPoolId": "2357661125",
+      "websiteUserId": "GBR (Karol)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.014Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.014Z",
+      "updatedAt": "2025-10-06T01:34:20.014Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b5a",
+      "eightBallPoolId": "2222430702",
+      "websiteUserId": "XT OTILIA 🦋",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.014Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.015Z",
+      "updatedAt": "2025-10-06T01:34:20.015Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b5c",
+      "eightBallPoolId": "2184547630",
+      "websiteUserId": "Mr8ballking",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.019Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.020Z",
+      "updatedAt": "2025-10-06T01:34:20.020Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9c5b5b11c4cda64b5e",
+      "eightBallPoolId": "4014680882",
+      "websiteUserId": "GBR (Chris)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:20.021Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:20.021Z",
+      "updatedAt": "2025-10-06T01:34:20.021Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b38",
+      "eightBallPoolId": "2813420254",
+      "websiteUserId": "TT Meg",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.990Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.991Z",
+      "updatedAt": "2025-10-06T01:34:19.991Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31c9b5b5b11c4cda64b36",
+      "eightBallPoolId": "2133913807",
+      "websiteUserId": "GBR (NATH)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:19.987Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:19.988Z",
+      "updatedAt": "2025-10-06T01:34:19.988Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b60",
+      "eightBallPoolId": "3057211056",
+      "websiteUserId": "vx",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.368Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.369Z",
+      "updatedAt": "2025-10-06T01:34:24.369Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b62",
+      "eightBallPoolId": "1852427833",
+      "websiteUserId": "Elise",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.442Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.443Z",
+      "updatedAt": "2025-10-06T01:34:24.443Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b64",
+      "eightBallPoolId": "3132133520",
+      "websiteUserId": "GBR (Olly)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.444Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.444Z",
+      "updatedAt": "2025-10-06T01:34:24.444Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b66",
+      "eightBallPoolId": "2811111711",
+      "websiteUserId": "tao",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.481Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.482Z",
+      "updatedAt": "2025-10-06T01:34:24.482Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b68",
+      "eightBallPoolId": "4714098502",
+      "websiteUserId": "ROSS 8BP TIKTOK",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.489Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.489Z",
+      "updatedAt": "2025-10-06T01:34:24.489Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b6a",
+      "eightBallPoolId": "1826254746",
+      "websiteUserId": "GamingWithBlake",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.492Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.492Z",
+      "updatedAt": "2025-10-06T01:34:24.492Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b6c",
+      "eightBallPoolId": "4074000337",
+      "websiteUserId": "DΔяēDє∇!ʟ",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.502Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.503Z",
+      "updatedAt": "2025-10-06T01:34:24.503Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca05b5b11c4cda64b6e",
+      "eightBallPoolId": "2409322815",
+      "websiteUserId": "Dan666__tt",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:24.758Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:24.759Z",
+      "updatedAt": "2025-10-06T01:34:24.759Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca15b5b11c4cda64b70",
+      "eightBallPoolId": "2660625144",
+      "websiteUserId": "GBR (Osman)",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:25.168Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:25.168Z",
+      "updatedAt": "2025-10-06T01:34:25.168Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca15b5b11c4cda64b72",
+      "eightBallPoolId": "4175261019",
+      "websiteUserId": "MÅSIAH 8BP",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:25.197Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:25.197Z",
+      "updatedAt": "2025-10-06T01:34:25.197Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca25b5b11c4cda64b74",
+      "eightBallPoolId": "4926672516",
+      "websiteUserId": "Blake",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:26.120Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:26.121Z",
+      "updatedAt": "2025-10-06T01:34:26.121Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca25b5b11c4cda64b76",
+      "eightBallPoolId": "3247684699",
+      "websiteUserId": "Ems TT",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:26.190Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:26.190Z",
+      "updatedAt": "2025-10-06T01:34:26.190Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31ca25b5b11c4cda64b78",
+      "eightBallPoolId": "31597069",
+      "websiteUserId": "Osman",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:34:26.226Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:34:26.226Z",
+      "updatedAt": "2025-10-06T01:34:26.226Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31cc75b5b11c4cda64b7a",
+      "eightBallPoolId": "1",
+      "websiteUserId": "Rob",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Items"
+      ],
+      "claimedAt": "2025-10-06T01:35:03.385Z",
+      "schedulerRun": "2025-10-06T01:28:48.039Z",
+      "createdAt": "2025-10-06T01:35:03.385Z",
+      "updatedAt": "2025-10-06T01:35:03.385Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e31f162aad66373042a4df",
+      "eightBallPoolId": "123456789",
+      "websiteUserId": "TestUser",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T01:44:54.412Z",
+      "createdAt": "2025-10-06T01:44:54.420Z",
+      "updatedAt": "2025-10-06T01:44:54.420Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e321ffd807c72752e46c7c",
+      "eightBallPoolId": "999999999",
+      "websiteUserId": "TestAccount",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T01:57:19.014Z",
+      "createdAt": "2025-10-06T01:57:19.021Z",
+      "updatedAt": "2025-10-06T01:57:19.021Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e323027636dee750e714e4",
+      "eightBallPoolId": "888888888",
+      "websiteUserId": "RealTest",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:01:38.371Z",
+      "createdAt": "2025-10-06T02:01:38.379Z",
+      "updatedAt": "2025-10-06T02:01:38.379Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e323610b8dbf1b094596de",
+      "eightBallPoolId": "3057211056",
+      "websiteUserId": "Blake",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:03:13.151Z",
+      "createdAt": "2025-10-06T02:03:13.158Z",
+      "updatedAt": "2025-10-06T02:03:13.158Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e323ab6cdf9f088923fde7",
+      "eightBallPoolId": "2",
+      "websiteUserId": "RealUser",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:04:27.630Z",
+      "createdAt": "2025-10-06T02:04:27.637Z",
+      "updatedAt": "2025-10-06T02:04:27.637Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3248595589debde7f7518",
+      "eightBallPoolId": "3",
+      "websiteUserId": "tester daddy 1",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:08:05.525Z",
+      "createdAt": "2025-10-06T02:08:05.533Z",
+      "updatedAt": "2025-10-06T02:08:05.533Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e324a029eafd4c9c3cc1e1",
+      "eightBallPoolId": "2",
+      "websiteUserId": "2",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:08:32.084Z",
+      "schedulerRun": "2025-10-06T02:08:32.084Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e324f571eba73549fa507a",
+      "eightBallPoolId": "3",
+      "websiteUserId": "User3",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:09:57.084Z",
+      "createdAt": "2025-10-06T02:09:57.093Z",
+      "updatedAt": "2025-10-06T02:09:57.093Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3250933b1a66b2b2f5e46",
+      "eightBallPoolId": "1",
+      "websiteUserId": "TestUser1",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:10:17.567Z",
+      "createdAt": "2025-10-06T02:10:17.575Z",
+      "updatedAt": "2025-10-06T02:10:17.575Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e326d7e14062b643a441ed",
+      "eightBallPoolId": "3",
+      "websiteUserId": "User3Test",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:17:59.623Z",
+      "createdAt": "2025-10-06T02:17:59.633Z",
+      "updatedAt": "2025-10-06T02:17:59.633Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd9864414e",
+      "eightBallPoolId": "4070842330",
+      "websiteUserId": "4070842330",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.201Z",
+      "schedulerRun": "2025-10-06T02:25:09.201Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd98644150",
+      "eightBallPoolId": "4714098502",
+      "websiteUserId": "4714098502",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.250Z",
+      "schedulerRun": "2025-10-06T02:25:09.250Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd98644152",
+      "eightBallPoolId": "2133913807",
+      "websiteUserId": "2133913807",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.391Z",
+      "schedulerRun": "2025-10-06T02:25:09.391Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd98644154",
+      "eightBallPoolId": "19723455",
+      "websiteUserId": "19723455",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.687Z",
+      "schedulerRun": "2025-10-06T02:25:09.687Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd98644156",
+      "eightBallPoolId": "9984415",
+      "websiteUserId": "9984415",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.689Z",
+      "schedulerRun": "2025-10-06T02:25:09.689Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd9864415a",
+      "eightBallPoolId": "1195368689",
+      "websiteUserId": "1195368689",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.721Z",
+      "schedulerRun": "2025-10-06T02:25:09.721Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd98644158",
+      "eightBallPoolId": "1852427833",
+      "websiteUserId": "1852427833",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.699Z",
+      "schedulerRun": "2025-10-06T02:25:09.699Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd9864415c",
+      "eightBallPoolId": "3057211056",
+      "websiteUserId": "3057211056",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.905Z",
+      "schedulerRun": "2025-10-06T02:25:09.905Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288570d673bd9864415e",
+      "eightBallPoolId": "3199929992",
+      "websiteUserId": "3199929992",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:09.979Z",
+      "schedulerRun": "2025-10-06T02:25:09.979Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644160",
+      "eightBallPoolId": "2222430702",
+      "websiteUserId": "2222430702",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.019Z",
+      "schedulerRun": "2025-10-06T02:25:10.019Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644162",
+      "eightBallPoolId": "4014680882",
+      "websiteUserId": "4014680882",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.054Z",
+      "schedulerRun": "2025-10-06T02:25:10.054Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644164",
+      "eightBallPoolId": "2357661125",
+      "websiteUserId": "2357661125",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.149Z",
+      "schedulerRun": "2025-10-06T02:25:10.149Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644166",
+      "eightBallPoolId": "1543016560",
+      "websiteUserId": "1543016560",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.188Z",
+      "schedulerRun": "2025-10-06T02:25:10.188Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644168",
+      "eightBallPoolId": "2813420254",
+      "websiteUserId": "2813420254",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.283Z",
+      "schedulerRun": "2025-10-06T02:25:10.283Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd9864416a",
+      "eightBallPoolId": "574047",
+      "websiteUserId": "574047",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.296Z",
+      "schedulerRun": "2025-10-06T02:25:10.296Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd9864416c",
+      "eightBallPoolId": "2130294000",
+      "websiteUserId": "2130294000",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.305Z",
+      "schedulerRun": "2025-10-06T02:25:10.305Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd9864416e",
+      "eightBallPoolId": "2184547630",
+      "websiteUserId": "2184547630",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.339Z",
+      "schedulerRun": "2025-10-06T02:25:10.339Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644170",
+      "eightBallPoolId": "1937295559",
+      "websiteUserId": "1937295559",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.429Z",
+      "schedulerRun": "2025-10-06T02:25:10.429Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644172",
+      "eightBallPoolId": "3247684699",
+      "websiteUserId": "3247684699",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.511Z",
+      "schedulerRun": "2025-10-06T02:25:10.511Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644174",
+      "eightBallPoolId": "4361367039",
+      "websiteUserId": "4361367039",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.512Z",
+      "schedulerRun": "2025-10-06T02:25:10.512Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644176",
+      "eightBallPoolId": "4074000337",
+      "websiteUserId": "4074000337",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.670Z",
+      "schedulerRun": "2025-10-06T02:25:10.670Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288670d673bd98644178",
+      "eightBallPoolId": "3485555555",
+      "websiteUserId": "3485555555",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:10.756Z",
+      "schedulerRun": "2025-10-06T02:25:10.756Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288770d673bd9864417a",
+      "eightBallPoolId": "110141",
+      "websiteUserId": "110141",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:11.507Z",
+      "schedulerRun": "2025-10-06T02:25:11.507Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288770d673bd9864417c",
+      "eightBallPoolId": "4931685486",
+      "websiteUserId": "4931685486",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:11.755Z",
+      "schedulerRun": "2025-10-06T02:25:11.755Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288770d673bd9864417e",
+      "eightBallPoolId": "3411766218",
+      "websiteUserId": "3411766218",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:11.885Z",
+      "schedulerRun": "2025-10-06T02:25:11.885Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288770d673bd98644180",
+      "eightBallPoolId": "7902",
+      "websiteUserId": "7902",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:11.894Z",
+      "schedulerRun": "2025-10-06T02:25:11.894Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288770d673bd98644182",
+      "eightBallPoolId": "4069824470",
+      "websiteUserId": "4069824470",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:11.985Z",
+      "schedulerRun": "2025-10-06T02:25:11.985Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288770d673bd98644184",
+      "eightBallPoolId": "4175261019",
+      "websiteUserId": "4175261019",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:11.995Z",
+      "schedulerRun": "2025-10-06T02:25:11.995Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288870d673bd98644186",
+      "eightBallPoolId": "3411092263",
+      "websiteUserId": "3411092263",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:12.632Z",
+      "schedulerRun": "2025-10-06T02:25:12.632Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288870d673bd98644188",
+      "eightBallPoolId": "2811111711",
+      "websiteUserId": "2811111711",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:12.662Z",
+      "schedulerRun": "2025-10-06T02:25:12.662Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd9864418a",
+      "eightBallPoolId": "1826254746",
+      "websiteUserId": "1826254746",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.067Z",
+      "schedulerRun": "2025-10-06T02:25:13.067Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd9864418c",
+      "eightBallPoolId": "4926672516",
+      "websiteUserId": "4926672516",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.111Z",
+      "schedulerRun": "2025-10-06T02:25:13.111Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd9864418e",
+      "eightBallPoolId": "2409322815",
+      "websiteUserId": "2409322815",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.182Z",
+      "schedulerRun": "2025-10-06T02:25:13.182Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd98644190",
+      "eightBallPoolId": "31597069",
+      "websiteUserId": "31597069",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.201Z",
+      "schedulerRun": "2025-10-06T02:25:13.201Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd98644192",
+      "eightBallPoolId": "3417777776",
+      "websiteUserId": "3417777776",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.235Z",
+      "schedulerRun": "2025-10-06T02:25:13.235Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd98644194",
+      "eightBallPoolId": "3213334533",
+      "websiteUserId": "3213334533",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.312Z",
+      "schedulerRun": "2025-10-06T02:25:13.312Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd98644196",
+      "eightBallPoolId": "1028645630",
+      "websiteUserId": "1028645630",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.316Z",
+      "schedulerRun": "2025-10-06T02:25:13.316Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3288970d673bd98644198",
+      "eightBallPoolId": "4143936427",
+      "websiteUserId": "4143936427",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:13.325Z",
+      "schedulerRun": "2025-10-06T02:25:13.325Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3289670d673bd9864419a",
+      "eightBallPoolId": "2660625144",
+      "websiteUserId": "2660625144",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:26.673Z",
+      "schedulerRun": "2025-10-06T02:25:26.673Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3289670d673bd9864419c",
+      "eightBallPoolId": "3132133520",
+      "websiteUserId": "3132133520",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:25:26.824Z",
+      "schedulerRun": "2025-10-06T02:25:26.824Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e328c670d673bd9864419e",
+      "eightBallPoolId": "4",
+      "websiteUserId": "4",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:26:14.261Z",
+      "schedulerRun": "2025-10-06T02:26:14.261Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3291a40bd9b05af8ed15c",
+      "eightBallPoolId": "3",
+      "websiteUserId": "User3Refresh",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:27:38.502Z",
+      "createdAt": "2025-10-06T02:27:38.510Z",
+      "updatedAt": "2025-10-06T02:27:38.510Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32a458882dfe1c1fc3bd4",
+      "eightBallPoolId": "4",
+      "websiteUserId": "4",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:32:37.396Z",
+      "schedulerRun": "2025-10-06T02:32:37.396Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32b4a1beb1a64f565c501",
+      "eightBallPoolId": "4",
+      "websiteUserId": "User4Test",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:36:58.448Z",
+      "createdAt": "2025-10-06T02:36:58.455Z",
+      "updatedAt": "2025-10-06T02:36:58.455Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32bf27b6ef13acc010d00",
+      "eightBallPoolId": "4",
+      "websiteUserId": "User4Test2",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:39:46.151Z",
+      "createdAt": "2025-10-06T02:39:46.160Z",
+      "updatedAt": "2025-10-06T02:39:46.160Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32c9c0d30c1f7166cd884",
+      "eightBallPoolId": "4",
+      "websiteUserId": "User4ScrollTest",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:42:36.961Z",
+      "createdAt": "2025-10-06T02:42:36.968Z",
+      "updatedAt": "2025-10-06T02:42:36.968Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32d86e8cdc0daf754c971",
+      "eightBallPoolId": "4",
+      "websiteUserId": "User4DebugTest",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:46:30.421Z",
+      "createdAt": "2025-10-06T02:46:30.429Z",
+      "updatedAt": "2025-10-06T02:46:30.429Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32e733a700d668dfe625a",
+      "eightBallPoolId": "4",
+      "websiteUserId": "User4ImprovedTest",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:50:27.377Z",
+      "createdAt": "2025-10-06T02:50:27.386Z",
+      "updatedAt": "2025-10-06T02:50:27.386Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e32f6a92b831cb2a66129d",
+      "eightBallPoolId": "4",
+      "websiteUserId": "User4ForceTest",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T02:54:34.299Z",
+      "createdAt": "2025-10-06T02:54:34.306Z",
+      "updatedAt": "2025-10-06T02:54:34.306Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3303d8882dfe1c1fc3d3d",
+      "eightBallPoolId": "5",
+      "websiteUserId": "5",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T02:58:05.716Z",
+      "schedulerRun": "2025-10-06T02:58:05.716Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e332c8f3b139593aa374e1",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T03:08:56.115Z",
+      "createdAt": "2025-10-06T03:08:56.124Z",
+      "updatedAt": "2025-10-06T03:08:56.124Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e33352280799ba1c715a21",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5Bypass",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T03:11:14.629Z",
+      "createdAt": "2025-10-06T03:11:14.637Z",
+      "updatedAt": "2025-10-06T03:11:14.637Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e333c34a9c9131efdf5a44",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5TextBypass",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T03:13:07.022Z",
+      "createdAt": "2025-10-06T03:13:07.029Z",
+      "updatedAt": "2025-10-06T03:13:07.029Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3342ca795791c2ae4476e",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5Aggressive",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T03:14:52.885Z",
+      "createdAt": "2025-10-06T03:14:52.892Z",
+      "updatedAt": "2025-10-06T03:14:52.892Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e334a1972c81e1acd32ccd",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5Validation",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T03:16:49.845Z",
+      "createdAt": "2025-10-06T03:16:49.852Z",
+      "updatedAt": "2025-10-06T03:16:49.852Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3350ac9fd26f671dc395c",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5Debug",
+      "status": "success",
+      "itemsClaimed": [
+        "First time claim completed"
+      ],
+      "claimedAt": "2025-10-06T03:18:34.344Z",
+      "createdAt": "2025-10-06T03:18:34.351Z",
+      "updatedAt": "2025-10-06T03:18:34.351Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3357588a525c1b0dd6b4b",
+      "eightBallPoolId": "5",
+      "websiteUserId": "TestUser5Optimistic",
+      "status": "success",
+      "itemsClaimed": [
+        "Free Daily Cue Piece",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:20:21.507Z",
+      "createdAt": "2025-10-06T03:20:21.516Z",
+      "updatedAt": "2025-10-06T03:20:21.516Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e335ee7517ea9deb7f8f22",
+      "eightBallPoolId": "5",
+      "websiteUserId": "FinalTest",
+      "status": "success",
+      "itemsClaimed": [
+        "Free Daily Cue Piece",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:22:22.385Z",
+      "createdAt": "2025-10-06T03:22:22.392Z",
+      "updatedAt": "2025-10-06T03:22:22.392Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e337944bde5aea7be23a97",
+      "eightBallPoolId": "6",
+      "websiteUserId": "6",
+      "status": "success",
+      "itemsClaimed": [],
+      "error": null,
+      "claimedAt": "2025-10-06T03:29:24.898Z",
+      "schedulerRun": "2025-10-06T03:29:24.898Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e3388cedd902bf882227a4",
+      "eightBallPoolId": "6",
+      "websiteUserId": "TestUser6Debug",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Daily Cue Piece",
+        "Power Break",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:33:32.858Z",
+      "createdAt": "2025-10-06T03:33:32.865Z",
+      "updatedAt": "2025-10-06T03:33:32.865Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e339ef494685e2930e2fcb",
+      "eightBallPoolId": "8",
+      "websiteUserId": "TestUser8Manual2",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Daily Cue Piece",
+        "Daily Reward",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:39:27.945Z",
+      "createdAt": "2025-10-06T03:39:27.952Z",
+      "updatedAt": "2025-10-06T03:39:27.952Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e33adc9cd094d3609b2627",
+      "eightBallPoolId": "9",
+      "websiteUserId": "TestUser9Fresh",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Daily Cue Piece",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:43:24.702Z",
+      "createdAt": "2025-10-06T03:43:24.709Z",
+      "updatedAt": "2025-10-06T03:43:24.709Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e33bb76529f7bf93938a53",
+      "eightBallPoolId": "10",
+      "websiteUserId": "TestUser10API",
+      "status": "success",
+      "itemsClaimed": [
+        "Daily Reward",
+        "Free Daily Cue Piece",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:47:03.293Z",
+      "createdAt": "2025-10-06T03:47:03.301Z",
+      "updatedAt": "2025-10-06T03:47:03.301Z",
+      "__v": 0
+    },
+    {
+      "_id": "68e33c3065cc24387e2d1eaa",
+      "eightBallPoolId": "10",
+      "websiteUserId": "TestUser10Manual2",
+      "status": "success",
+      "itemsClaimed": [
+        "Free Daily Cue Piece",
+        "Free Daily Cue Piece"
+      ],
+      "claimedAt": "2025-10-06T03:49:04.486Z",
+      "createdAt": "2025-10-06T03:49:04.493Z",
+      "updatedAt": "2025-10-06T03:49:04.493Z",
+      "__v": 0
+    }
+  ]
+}

@@ -26,6 +26,8 @@ import contactRoutes from './routes/contact';
 import statusRoutes from './routes/status';
 import leaderboardRoutes from './routes/leaderboard';
 import vpsMonitorRoutes from './routes/vps-monitor';
+import screenshotsRoutes from './routes/screenshots';
+import adminTerminalRoutes from './routes/admin-terminal';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -157,6 +159,8 @@ class Server {
     this.app.use('/api/status', statusRoutes);
     this.app.use('/api/leaderboard', leaderboardRoutes);
     this.app.use('/api/vps-monitor', vpsMonitorRoutes);
+    this.app.use('/api/admin/screenshots', screenshotsRoutes);
+    this.app.use('/api/admin/terminal', adminTerminalRoutes);
     
     // Also register API routes under /8bp-rewards prefix for frontend
     this.app.use('/8bp-rewards/api/auth', authRoutes);
@@ -166,6 +170,8 @@ class Server {
     this.app.use('/8bp-rewards/api/status', statusRoutes);
     this.app.use('/8bp-rewards/api/leaderboard', leaderboardRoutes);
     this.app.use('/8bp-rewards/api/vps-monitor', vpsMonitorRoutes);
+    this.app.use('/8bp-rewards/api/admin/screenshots', screenshotsRoutes);
+    this.app.use('/8bp-rewards/api/admin/terminal', adminTerminalRoutes);
 
     // Serve static files from React build
     if (process.env.NODE_ENV === 'production') {
