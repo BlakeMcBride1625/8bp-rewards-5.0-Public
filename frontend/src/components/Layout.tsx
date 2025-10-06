@@ -41,7 +41,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <div className="absolute left-0">
                 <Link to="/home" className="flex items-center space-x-2">
                   <img 
-                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    src="/assets/logos/8logo.png" 
                     alt="8BP Rewards Logo" 
                     className="w-8 h-8 rounded-lg object-cover shadow-lg"
                   />
@@ -101,7 +101,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <div className="absolute left-0">
                 <Link to="/home" className="flex items-center space-x-2">
                   <img 
-                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    src="/assets/logos/8logo.png" 
                     alt="8BP Rewards Logo" 
                     className="w-8 h-8 rounded-lg object-cover shadow-lg"
                   />

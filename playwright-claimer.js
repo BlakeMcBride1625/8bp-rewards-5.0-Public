@@ -820,11 +820,11 @@ async function claimRewards() {
   let failureCount = 0;
   const schedulerRunTime = new Date();
   
-  // Create browser pool with max 20 concurrent browsers
-  const browserPool = new BrowserPool(20);
+  // Create browser pool with max 6 concurrent browsers
+  const browserPool = new BrowserPool(6);
   
   // Process all users with browser pool limiting! 🚀
-  console.log(`\n🚀 Running ${users.length} claims with BROWSER POOL (max 20 concurrent browsers)!`);
+  console.log(`\n🚀 Running ${users.length} claims with BROWSER POOL (max 6 concurrent browsers)!`);
   console.log(`📊 Browser Pool Status: ${browserPool.getStatus().activeBrowsers}/${browserPool.getStatus().maxConcurrent} active, ${browserPool.getStatus().queued} queued`);
   
   const claimPromises = users.map(async (user, index) => {

@@ -10,7 +10,7 @@ const BrowserPool = require('./browser-pool');
 // ImageGenerator is optional
 let ImageGenerator;
 try {
-  ImageGenerator = require('./image-generator');
+  ImageGenerator = require('./archive/image-generator');
 } catch (error) {
   console.log('ℹ️ ImageGenerator not available - screenshots will be used instead');
   ImageGenerator = null;
@@ -34,7 +34,7 @@ class EightBallPoolClaimer {
     this.timeout = parseInt(process.env.TIMEOUT || '60000', 10);
     this.headless = process.env.HEADLESS !== 'false';
     this.dbConnected = false;
-    this.browserPool = new BrowserPool(20); // Max 20 concurrent browsers
+    this.browserPool = new BrowserPool(6); // Max 6 concurrent browsers
   }
 
   async connectToDatabase() {
@@ -975,7 +975,7 @@ class EightBallPoolClaimer {
     // Connect to database
     await this.connectToDatabase();
     
-    console.log(`\n🚀 Running ${this.userIds.length} claims with BROWSER POOL (max 20 concurrent browsers)!`);
+    console.log(`\n🚀 Running ${this.userIds.length} claims with BROWSER POOL (max 6 concurrent browsers)!`);
     console.log(`📊 Browser Pool Status: ${this.browserPool.getStatus().activeBrowsers}/${this.browserPool.getStatus().maxConcurrent} active, ${this.browserPool.getStatus().queued} queued`);
 
     // Process all users with browser pool limiting! 🚀

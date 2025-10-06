@@ -17,7 +17,7 @@ class ImageGenerator {
       // Fallback to simple copy if canvas fails
       if (screenshotPath && fs.existsSync(screenshotPath)) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const newImagePath = `confirmation-${bpAccountId}-${timestamp}.png`;
+        const newImagePath = `screenshots/confirmation/confirmation-${bpAccountId}-${timestamp}.png`;
         fs.copyFileSync(screenshotPath, newImagePath);
         console.log(`📸 Created fallback confirmation image: ${newImagePath}`);
         return newImagePath;
@@ -62,7 +62,7 @@ class ImageGenerator {
   async createCanvasImage(bpAccountId, username, claimedItems = [], screenshotPath = null) {
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const outputPath = `confirmation-${bpAccountId}-${timestamp}.png`;
+      const outputPath = `screenshots/confirmation/confirmation-${bpAccountId}-${timestamp}.png`;
       
       let backgroundImage = null;
       let canvasWidth = 800;

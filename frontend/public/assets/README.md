@@ -1,3 +1,6 @@
+Logo path used by header: /assets/logos/8logo.png
+Favicon  PWA icons: /favicon.ico, /logo192.png, /logo512.png
+
 # Assets Folder
 
 This folder contains all the static assets for the 8BP Rewards application.

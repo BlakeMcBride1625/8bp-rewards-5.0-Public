@@ -11,12 +11,13 @@ router.get('/folders', async (req, res) => {
   try {
     const screenshotsDir = path.join(__dirname, '../../../screenshots');
     const folders = [
-      { name: 'final-page', displayName: 'Final Page Screenshots' },
+      { name: 'confirmation', displayName: 'Confirmation Images' },
       { name: 'shop-page', displayName: 'Shop Page Screenshots' },
       { name: 'id-entry', displayName: 'After ID Entry Screenshots' },
       { name: 'go-click', displayName: 'After Go Click Screenshots' },
       { name: 'login', displayName: 'After Login Screenshots' },
-      { name: 'initial', displayName: 'Initial Screenshots' }
+      { name: 'initial', displayName: 'Initial Screenshots' },
+      { name: 'final-page', displayName: 'Final Page Screenshots' }
     ];
 
     const folderData: Array<{
@@ -106,7 +107,7 @@ router.get('/view/:folder/:filename', async (req, res) => {
     const { folder, filename } = req.params;
     
     // Validate folder name to prevent directory traversal
-    const allowedFolders = ['final-page', 'shop-page', 'id-entry', 'go-click', 'login', 'initial'];
+    const allowedFolders = ['final-page', 'shop-page', 'id-entry', 'go-click', 'login', 'confirmation', 'initial'];
     if (!allowedFolders.includes(folder)) {
       return res.status(400).json({
         success: false,
@@ -200,6 +201,7 @@ router.post('/clear-user', async (req, res) => {
       'id-entry',
       'go-click',
       'login',
+      'confirmation',
       'initial'
     ];
 
@@ -269,6 +271,7 @@ router.post('/clear-all', async (req, res) => {
       'id-entry',
       'go-click',
       'login',
+      'confirmation',
       'initial'
     ];
 
