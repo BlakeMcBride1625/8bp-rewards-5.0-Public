@@ -16,7 +16,8 @@ router.get('/', async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get claim statistics grouped by user
+    // LAYER 4: Get claim statistics grouped by user with deduplication
+    // Group by user AND date to prevent same-day duplicates from inflating counts
     const leaderboardData = await ClaimRecord.aggregate([
       {
         $match: {
@@ -24,14 +25,29 @@ router.get('/', async (req, res) => {
         }
       },
       {
+        // First group by user AND date to deduplicate same-day claims
         $group: {
-          _id: '$eightBallPoolId',
+          _id: {
+            userId: '$eightBallPoolId',
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
+          },
           totalClaims: { $sum: 1 },
           successfulClaims: {
             $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
           },
-          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
+          itemsClaimed: { $first: '$itemsClaimed' }, // Take first claim of the day
           lastClaimed: { $max: '$claimedAt' }
+        }
+      },
+      {
+        // Now group by user to get totals (counting unique days)
+        $group: {
+          _id: '$_id.userId',
+          totalClaims: { $sum: 1 }, // Count unique days
+          successfulClaims: { $sum: '$successfulClaims' },
+          failedClaims: { $sum: { $subtract: ['$totalClaims', '$successfulClaims'] } },
+          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
+          lastClaimed: { $max: '$lastClaimed' }
         }
       },
       {
@@ -52,6 +68,7 @@ router.get('/', async (req, res) => {
           username: registration?.username || 'Unknown',
           totalClaims: entry.totalClaims,
           successfulClaims: entry.successfulClaims,
+          failedClaims: entry.failedClaims || 0,
           totalItemsClaimed: entry.totalItemsClaimed,
           successRate: entry.totalClaims > 0 
             ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
@@ -96,7 +113,7 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get user's stats
+    // Get user's stats with deduplication
     const userStats = await ClaimRecord.aggregate([
       {
         $match: {
@@ -105,14 +122,29 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
         }
       },
       {
+        // Group by date to deduplicate same-day claims
         $group: {
-          _id: '$eightBallPoolId',
+          _id: {
+            userId: '$eightBallPoolId',
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
+          },
           totalClaims: { $sum: 1 },
           successfulClaims: {
             $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
           },
-          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
+          itemsClaimed: { $first: '$itemsClaimed' },
           lastClaimed: { $max: '$claimedAt' }
+        }
+      },
+      {
+        // Aggregate to user level
+        $group: {
+          _id: '$_id.userId',
+          totalClaims: { $sum: 1 }, // Count unique days
+          successfulClaims: { $sum: '$successfulClaims' },
+          failedClaims: { $sum: { $subtract: ['$totalClaims', '$successfulClaims'] } },
+          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
+          lastClaimed: { $max: '$lastClaimed' }
         }
       }
     ]);
@@ -126,7 +158,7 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
 
     const userStat = userStats[0];
     
-    // Get user's rank
+    // Get user's rank with deduplication
     const usersWithMoreItems = await ClaimRecord.aggregate([
       {
         $match: {
@@ -134,8 +166,19 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
         }
       },
       {
+        // Group by user AND date to deduplicate
         $group: {
-          _id: '$eightBallPoolId',
+          _id: {
+            userId: '$eightBallPoolId',
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
+          },
+          itemsClaimed: { $first: '$itemsClaimed' }
+        }
+      },
+      {
+        // Group by user
+        $group: {
+          _id: '$_id.userId',
           totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } }
         }
       },
@@ -160,6 +203,7 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
       username: registration?.username || 'Unknown',
       totalClaims: userStat.totalClaims,
       successfulClaims: userStat.successfulClaims,
+      failedClaims: userStat.failedClaims || 0,
       totalItemsClaimed: userStat.totalItemsClaimed,
       successRate: userStat.totalClaims > 0 
         ? Math.round((userStat.successfulClaims / userStat.totalClaims) * 100) 
@@ -190,7 +234,7 @@ router.get('/stats', async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get overall statistics
+    // Get overall statistics with deduplication
     const stats = await ClaimRecord.aggregate([
       {
         $match: {
@@ -198,14 +242,29 @@ router.get('/stats', async (req, res) => {
         }
       },
       {
+        // Group by user AND date to deduplicate
         $group: {
-          _id: null,
+          _id: {
+            userId: '$eightBallPoolId',
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
+          },
           totalClaims: { $sum: 1 },
           successfulClaims: {
             $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
           },
+          itemsClaimed: { $first: '$itemsClaimed' },
+          userId: { $first: '$eightBallPoolId' }
+        }
+      },
+      {
+        // Group to overall stats
+        $group: {
+          _id: null,
+          totalClaims: { $sum: 1 }, // Count unique user-days
+          successfulClaims: { $sum: '$successfulClaims' },
+          failedClaims: { $sum: { $subtract: ['$totalClaims', '$successfulClaims'] } },
           totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
-          uniqueUsers: { $addToSet: '$eightBallPoolId' }
+          uniqueUsers: { $addToSet: '$userId' }
         }
       },
       {
@@ -213,6 +272,7 @@ router.get('/stats', async (req, res) => {
           _id: 0,
           totalClaims: 1,
           successfulClaims: 1,
+          failedClaims: 1,
           totalItemsClaimed: 1,
           uniqueUsers: { $size: '$uniqueUsers' },
           successRate: {
@@ -229,6 +289,7 @@ router.get('/stats', async (req, res) => {
     const result = stats[0] || {
       totalClaims: 0,
       successfulClaims: 0,
+      failedClaims: 0,
       totalItemsClaimed: 0,
       uniqueUsers: 0,
       successRate: 0

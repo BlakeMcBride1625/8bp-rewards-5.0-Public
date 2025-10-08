@@ -46,7 +46,3 @@ class BrowserPool {
 }
 
 module.exports = BrowserPool;
-
-
-
-

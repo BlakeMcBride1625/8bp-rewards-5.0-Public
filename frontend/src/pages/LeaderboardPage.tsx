@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import axios from 'axios';
-import { Trophy, Medal, TrendingUp, Clock, Filter, Search } from 'lucide-react';
+import { Trophy, Medal, TrendingUp, Clock, Filter, Search, AlertTriangle } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 
 interface LeaderboardEntry {
@@ -10,6 +10,7 @@ interface LeaderboardEntry {
   username: string;
   totalClaims: number;
   successfulClaims: number;
+  failedClaims: number;
   totalItemsClaimed: number;
   successRate: number;
   lastClaimed: string;
@@ -204,7 +205,7 @@ const LeaderboardPage: React.FC = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"
+            className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8"
           >
             <div className="card text-center">
               <div className="flex items-center justify-center mb-3">
@@ -237,6 +238,18 @@ const LeaderboardPage: React.FC = () => {
               <h3 className="text-lg font-semibold text-text-primary mb-1">Total Items</h3>
               <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
                 {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalItemsClaimed, 0)}
+              </p>
+            </div>
+
+            <div className="card text-center">
+              <div className="flex items-center justify-center mb-3">
+                <div className="w-12 h-12 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center">
+                  <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Failed Claims</h3>
+              <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                {totalStats.leaderboard.reduce((sum, entry) => sum + (entry.failedClaims || 0), 0)}
               </p>
             </div>
           </motion.div>
@@ -320,7 +333,7 @@ const LeaderboardPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
                           <div className="text-center">
                             <div className="font-semibold text-text-primary dark:text-text-dark-primary">
                               {entry.totalItemsClaimed}
@@ -329,17 +342,24 @@ const LeaderboardPage: React.FC = () => {
                           </div>
                           
                           <div className="text-center">
-                            <div className="font-semibold text-text-primary dark:text-text-dark-primary">
-                              {entry.successRate}%
+                            <div className="font-semibold text-green-600 dark:text-green-400">
+                              {entry.successfulClaims}
                             </div>
                             <div className="text-text-secondary dark:text-text-dark-secondary">Success</div>
                           </div>
                           
                           <div className="text-center">
-                            <div className="font-semibold text-text-primary dark:text-text-dark-primary">
-                              {entry.totalClaims}
+                            <div className="font-semibold text-red-600 dark:text-red-400">
+                              {entry.failedClaims || 0}
                             </div>
-                            <div className="text-text-secondary dark:text-text-dark-secondary">Claims</div>
+                            <div className="text-text-secondary dark:text-text-dark-secondary">Failed</div>
+                          </div>
+                          
+                          <div className="text-center">
+                            <div className="font-semibold text-text-primary dark:text-text-dark-primary">
+                              {entry.successRate}%
+                            </div>
+                            <div className="text-text-secondary dark:text-text-dark-secondary">Rate</div>
                           </div>
                           
                           <div className="text-center">

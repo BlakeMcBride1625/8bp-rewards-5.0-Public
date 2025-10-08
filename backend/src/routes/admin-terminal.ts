@@ -5,6 +5,20 @@ import { promisify } from 'util';
 import { Registration } from '../models/Registration';
 import TelegramNotificationService from '../services/TelegramNotificationService';
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
+import session from 'express-session';
+
+// Extend session type for MFA verification
+declare module 'express-session' {
+  interface SessionData {
+    mfaVerified?: boolean;
+    mfaVerifiedAt?: Date;
+    mfaCodes?: {
+      discord: string;
+      telegram: string;
+      generatedAt: number;
+    };
+  }
+}
 
 const router = express.Router();
 const execAsync = promisify(exec);
@@ -29,19 +43,6 @@ const initDiscordClient = () => {
   
   return discordClient;
 };
-
-// Extend session type for MFA verification
-declare module 'express-session' {
-  interface SessionData {
-    mfaVerified?: boolean;
-    mfaVerifiedAt?: Date;
-    mfaCodes?: {
-      discord: string;
-      telegram: string;
-      generatedAt: number;
-    };
-  }
-}
 
 // Check if user has VPS access
 const checkVPSAccess = (userId: string): boolean => {

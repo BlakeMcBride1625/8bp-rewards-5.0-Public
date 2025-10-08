@@ -60,10 +60,26 @@ class EightBallPoolClaimer {
   async saveClaimRecord(userId, claimedItems, success, error = null) {
     if (!this.dbConnected) {
       console.log('⚠️ Database not connected - skipping claim record save');
-      return;
+      return { saved: false, reason: 'no_db' };
     }
 
     try {
+      // LAYER 1: Check if this user already has a successful claim today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Start of today
+      
+      const existingClaim = await ClaimRecord.findOne({
+        eightBallPoolId: userId,
+        status: 'success',
+        claimedAt: { $gte: today }
+      });
+
+      // If already claimed successfully today, skip saving
+      if (existingClaim && success) {
+        console.log(`⏭️ Duplicate prevented (DB check) - user ${userId} already claimed today at ${existingClaim.claimedAt.toLocaleTimeString()}`);
+        return { saved: false, reason: 'duplicate', existingClaim };
+      }
+
       const claimRecord = new ClaimRecord({
         eightBallPoolId: userId,
         websiteUserId: userId, // Use the same ID for both fields
@@ -76,8 +92,10 @@ class EightBallPoolClaimer {
 
       await claimRecord.save();
       console.log(`💾 Saved claim record to database for user ${userId}`);
+      return { saved: true, record: claimRecord };
     } catch (error) {
       console.error(`❌ Failed to save claim record for ${userId}:`, error.message);
+      return { saved: false, reason: 'error', error: error.message };
     }
   }
 
@@ -303,14 +321,37 @@ class EightBallPoolClaimer {
 
       console.log(`✅ Claim process completed for user: ${userId}`);
       
-      // Save claim record to database
-      await this.saveClaimRecord(userId, claimedItems, true);
+      // LAYER 3: Pre-save validation - check if any items were actually claimed
+      if (claimedItems.length === 0) {
+        console.log(`⏭️ No new items claimed for user ${userId} - skipping database save`);
+        
+        // Cleanup old screenshots
+        await this.cleanupOldScreenshots();
+        
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
+      }
+
+      // Save claim record to database (with Layer 1 duplicate check)
+      const saveResult = await this.saveClaimRecord(userId, claimedItems, true);
+
+      // Handle duplicate detection from Layer 1
+      if (saveResult && !saveResult.saved && saveResult.reason === 'duplicate') {
+        console.log(`⏭️ Duplicate detected by database layer - claim already recorded today`);
+        
+        // Still send Discord confirmation if needed (showing existing claim)
+        if (this.discordService && this.discordService.isReady) {
+          console.log('📤 Sending Discord notification (duplicate claim attempt)...');
+          await this.sendDiscordConfirmation(userId, screenshotPath, []);
+        }
+        
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
+      }
       
       // Cleanup old screenshots
       await this.cleanupOldScreenshots();
       
       // Send Discord confirmation
-      if (this.discordService.isReady) {
+      if (this.discordService && this.discordService.isReady) {
         console.log('📤 Sending Discord confirmation...');
         await this.sendDiscordConfirmation(userId, screenshotPath, claimedItems);
       }
@@ -1065,6 +1106,9 @@ class EightBallPoolClaimer {
     });
   }
 }
+
+// LAYER 2: Helper functions are imported from claimer-utils.js
+// See: const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
 
 // Main execution
 async function main() {

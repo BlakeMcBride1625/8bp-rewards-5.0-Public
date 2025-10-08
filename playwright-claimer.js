@@ -21,6 +21,44 @@ const ClaimRecordSchema = new mongoose.Schema({
 
 const ClaimRecord = mongoose.models.ClaimRecord || mongoose.model('ClaimRecord', ClaimRecordSchema);
 
+// LAYER 1: Database-level duplicate prevention
+async function saveClaimRecord(userId, username, claimedItems, success, error = null, schedulerRunTime = null) {
+  try {
+    // Check if this user already has a successful claim today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Start of today
+    
+    const existingClaim = await ClaimRecord.findOne({
+      eightBallPoolId: userId,
+      status: 'success',
+      claimedAt: { $gte: today }
+    });
+
+    // If already claimed successfully today, skip saving
+    if (existingClaim && success) {
+      console.log(`⏭️ Duplicate prevented (DB check) - user ${username} already claimed today at ${existingClaim.claimedAt.toLocaleTimeString()}`);
+      return { saved: false, reason: 'duplicate', existingClaim };
+    }
+
+    const claimRecord = new ClaimRecord({
+      eightBallPoolId: userId,
+      websiteUserId: username,
+      status: success ? 'success' : 'failed',
+      itemsClaimed: claimedItems || [],
+      error: error,
+      schedulerRun: schedulerRunTime,
+      claimedAt: new Date()
+    });
+
+    await claimRecord.save();
+    console.log(`💾 Saved claim record for ${username} to database`);
+    return { saved: true, record: claimRecord };
+  } catch (error) {
+    console.error(`❌ Failed to save claim record for ${username}:`, error.message);
+    return { saved: false, reason: 'error', error: error.message };
+  }
+}
+
 // Get user IDs from database instead of environment
 async function getUserIdsFromDatabase() {
   try {
@@ -836,37 +874,46 @@ async function claimRewards() {
       await browserPool.acquire();
       console.log(`✅ Browser slot acquired for ${user.username}`);
       
-      await claimRewardsForUser(user.eightBallPoolId);
+      const claimResult = await claimRewardsForUser(user.eightBallPoolId);
       console.log(`✅ Successfully processed user: ${user.username}`);
       
-      // Save successful claim to database
-      const claimRecord = new ClaimRecord({
-        eightBallPoolId: user.eightBallPoolId,
-        websiteUserId: user.username, // Added to match backend model
-        status: 'success',
-        itemsClaimed: ['Daily Reward', 'Free Items'], // TODO: Parse actual items from claim result
-        schedulerRun: schedulerRunTime,
-        claimedAt: new Date()
-      });
-      await claimRecord.save();
-      console.log(`💾 Saved claim record for ${user.username} to database`);
+      // LAYER 3: Pre-save validation - check if any items were actually claimed
+      const claimedItems = claimResult?.claimedItems || ['Daily Reward', 'Free Items'];
+      
+      if (claimedItems.length === 0) {
+        console.log(`⏭️ No new items claimed for user ${user.username} - skipping database save`);
+        return { success: true, user: user.username, alreadyClaimed: true };
+      }
+      
+      // Save successful claim to database (with Layer 1 duplicate check)
+      const saveResult = await saveClaimRecord(
+        user.eightBallPoolId, 
+        user.username, 
+        claimedItems, 
+        true, 
+        null, 
+        schedulerRunTime
+      );
+      
+      // Handle duplicate detection from Layer 1
+      if (saveResult && !saveResult.saved && saveResult.reason === 'duplicate') {
+        console.log(`⏭️ Duplicate detected by database layer - claim already recorded today`);
+        return { success: true, user: user.username, alreadyClaimed: true };
+      }
       
       return { success: true, user: user.username };
     } catch (error) {
       console.log(`❌ Failed to process user ${user.username}: ${error.message}`);
       
       // Save failed claim to database
-      const claimRecord = new ClaimRecord({
-        eightBallPoolId: user.eightBallPoolId,
-        websiteUserId: user.username, // Added to match backend model
-        status: 'failed',
-        itemsClaimed: [],
-        error: error.message,
-        schedulerRun: schedulerRunTime,
-        claimedAt: new Date()
-      });
-      await claimRecord.save();
-      console.log(`💾 Saved failed claim record for ${user.username} to database`);
+      await saveClaimRecord(
+        user.eightBallPoolId, 
+        user.username, 
+        [], 
+        false, 
+        error.message, 
+        schedulerRunTime
+      );
       
       return { success: false, user: user.username, error: error.message };
     } finally {

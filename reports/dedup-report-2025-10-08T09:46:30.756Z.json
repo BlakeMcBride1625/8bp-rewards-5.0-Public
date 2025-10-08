@@ -1,0 +1,14 @@
+{
+  "deletionDate": "2025-10-08T09:46:30.756Z",
+  "before": {
+    "total": 1325,
+    "successful": 1325
+  },
+  "after": {
+    "total": 132,
+    "successful": 132
+  },
+  "deleted": 1193,
+  "expected": 1193,
+  "backupFile": "backups/pre-dedup-backup-2025-10-08T09:46:28.894Z.json"
+}
