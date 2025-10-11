@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { Registration } from '../models/Registration';
 import TelegramNotificationService from '../services/TelegramNotificationService';
+import { EmailNotificationService } from '../services/EmailNotificationService';
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import session from 'express-session';
 
@@ -15,6 +16,8 @@ declare module 'express-session' {
     mfaCodes?: {
       discord: string;
       telegram: string;
+      email: string;
+      userEmail: string;
       generatedAt: number;
     };
   }
@@ -50,35 +53,35 @@ const checkVPSAccess = (userId: string): boolean => {
   return vpsOwners.includes(userId);
 };
 
+// Generate 6-digit PIN code
+function generate6DigitPin(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Check if email is allowed for authentication
+function isAllowedForEmail(userEmail: string): boolean {
+  if (!userEmail) return false;
+  const allowedEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim().toLowerCase()) || [];
+  if (allowedEmails.length === 0) return false; // No emails configured
+  return allowedEmails.includes(userEmail.toLowerCase());
+}
+
 // Verify multi-factor authentication
-const verifyMFA = async (discordCode: string, telegramCode: string, userId: string, session: any): Promise<boolean> => {
+const verifyMFA = async (discordCode: string, telegramCode: string, emailCode: string, userId: string, session: any): Promise<boolean> => {
   try {
-    // Check if codes are provided and not empty
-    if (!discordCode || !telegramCode) {
-      return false;
-    }
+    // User must provide either (Discord + Telegram) OR (Email)
+    const hasDiscordTelegram = discordCode && telegramCode;
+    const hasEmail = emailCode;
     
-    // Validate code format - should be 16 digits
-    const isValidFormat = (code: string) => {
-      return /^\d{16}$/.test(code.trim());
-    };
-    
-    const isValidDiscord = isValidFormat(discordCode);
-    const isValidTelegram = isValidFormat(telegramCode);
-    
-    if (!isValidDiscord || !isValidTelegram) {
-      logger.warn('Invalid MFA code format', {
-        action: 'mfa_invalid_format',
-        userId,
-        discordCodeLength: discordCode.length,
-        telegramCodeLength: telegramCode.length,
-        discordFormat: isValidDiscord,
-        telegramFormat: isValidTelegram
+    if (!hasDiscordTelegram && !hasEmail) {
+      logger.warn('No MFA codes provided', {
+        action: 'mfa_no_codes',
+        userId
       });
       return false;
     }
     
-    // Check if codes are stored in session and match
+    // Check if codes are stored in session
     const storedCodes = session.mfaCodes;
     if (!storedCodes) {
       logger.warn('No MFA codes found in session', {
@@ -88,10 +91,10 @@ const verifyMFA = async (discordCode: string, telegramCode: string, userId: stri
       return false;
     }
     
-    // Check if codes have expired (10 minutes)
+    // Check if codes have expired (5 minutes)
     const now = new Date().getTime();
-    const tenMinutes = 10 * 60 * 1000; // 10 minutes in milliseconds
-    if (now - storedCodes.generatedAt > tenMinutes) {
+    const fiveMinutes = 5 * 60 * 1000; // 5 minutes in milliseconds
+    if (now - storedCodes.generatedAt > fiveMinutes) {
       logger.warn('MFA codes expired', {
         action: 'mfa_codes_expired',
         userId,
@@ -102,20 +105,68 @@ const verifyMFA = async (discordCode: string, telegramCode: string, userId: stri
       return false;
     }
     
-    // Verify codes match
-    const discordMatch = discordCode === storedCodes.discord;
-    const telegramMatch = telegramCode === storedCodes.telegram;
+    let verificationMethod = '';
     
-    if (!discordMatch || !telegramMatch) {
-      logger.warn('MFA codes do not match', {
-        action: 'mfa_codes_no_match',
-        userId,
-        discordMatch,
-        telegramMatch,
-        providedDiscord: discordCode.substring(0, 4) + '****',
-        providedTelegram: telegramCode.substring(0, 4) + '****'
-      });
-      return false;
+    // Verify Email code if provided
+    if (hasEmail && !hasDiscordTelegram) {
+      const isValidEmailFormat = /^\d{6}$/.test(emailCode.trim());
+      if (!isValidEmailFormat) {
+        logger.warn('Invalid email code format', {
+          action: 'mfa_invalid_email_format',
+          userId,
+          emailCodeLength: emailCode.length
+        });
+        return false;
+      }
+      
+      if (emailCode.trim() !== storedCodes.email) {
+        logger.warn('Email code does not match', {
+          action: 'mfa_email_no_match',
+          userId,
+          providedEmail: emailCode.substring(0, 2) + '****'
+        });
+        return false;
+      }
+      
+      verificationMethod = 'email';
+    }
+    // Verify Discord + Telegram codes if provided
+    else if (hasDiscordTelegram) {
+      const isValidFormat = (code: string) => {
+        return /^\d{16}$/.test(code.trim());
+      };
+      
+      const isValidDiscord = isValidFormat(discordCode);
+      const isValidTelegram = isValidFormat(telegramCode);
+      
+      if (!isValidDiscord || !isValidTelegram) {
+        logger.warn('Invalid MFA code format', {
+          action: 'mfa_invalid_format',
+          userId,
+          discordCodeLength: discordCode.length,
+          telegramCodeLength: telegramCode.length,
+          discordFormat: isValidDiscord,
+          telegramFormat: isValidTelegram
+        });
+        return false;
+      }
+      
+      const discordMatch = discordCode === storedCodes.discord;
+      const telegramMatch = telegramCode === storedCodes.telegram;
+      
+      if (!discordMatch || !telegramMatch) {
+        logger.warn('MFA codes do not match', {
+          action: 'mfa_codes_no_match',
+          userId,
+          discordMatch,
+          telegramMatch,
+          providedDiscord: discordCode.substring(0, 4) + '****',
+          providedTelegram: telegramCode.substring(0, 4) + '****'
+        });
+        return false;
+      }
+      
+      verificationMethod = 'discord+telegram';
     }
     
     // Clear stored codes after successful verification
@@ -124,8 +175,10 @@ const verifyMFA = async (discordCode: string, telegramCode: string, userId: stri
     logger.info('MFA verification successful', {
       action: 'mfa_verification_success',
       userId,
-      discordCode: discordCode.substring(0, 4) + '****',
-      telegramCode: telegramCode.substring(0, 4) + '****'
+      method: verificationMethod,
+      discordCode: discordCode ? discordCode.substring(0, 4) + '****' : 'N/A',
+      telegramCode: telegramCode ? telegramCode.substring(0, 4) + '****' : 'N/A',
+      emailCode: emailCode ? emailCode.substring(0, 2) + '****' : 'N/A'
     });
     
     return true;
@@ -276,6 +329,7 @@ const executeCommand = async (command: string, userId: string): Promise<{ succes
 router.post('/request-codes', async (req, res) => {
   try {
     const userId = (req.user as any)?.id;
+    const { channel, userEmail } = req.body;
     
     if (!userId) {
       return res.status(401).json({
@@ -291,105 +345,184 @@ router.post('/request-codes', async (req, res) => {
       });
     }
     
-    // Generate 16-digit codes
+    // Generate codes
     const discordCode = Math.floor(1000000000000000 + Math.random() * 9000000000000000).toString();
     const telegramCode = Math.floor(1000000000000000 + Math.random() * 9000000000000000).toString();
+    const emailCode = generate6DigitPin();
     
     logger.info('MFA codes generated', {
       action: 'mfa_codes_generated',
       userId,
       discordCode: discordCode.substring(0, 4) + '****',
-      telegramCode: telegramCode.substring(0, 4) + '****'
+      telegramCode: telegramCode.substring(0, 4) + '****',
+      emailCode: emailCode.substring(0, 2) + '****'
     });
     
+    let discordSent = false;
+    let telegramSent = false;
+    let emailSent = false;
+    
     // Send Discord code - only to the logged-in user
-    try {
-      const discordClient = initDiscordClient();
-      if (discordClient && !discordClient.isReady()) {
-        await discordClient.login(process.env.DISCORD_TOKEN);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for login
-      }
-      
-      if (discordClient?.isReady()) {
-        // Send only to the logged-in user's Discord ID
-        const user = await discordClient.users.fetch(userId);
-        if (user) {
-          const embed = new EmbedBuilder()
-            .setTitle('🔐 Admin Terminal MFA Code')
-            .setDescription(`Your Admin Terminal verification code is:\n\n**${discordCode}**\n\nThis code expires in 10 minutes.`)
-            .setColor(0x00FF00)
-            .setTimestamp();
-          
-          await user.send({ embeds: [embed] });
-          
-          logger.info('Discord MFA code sent', {
-            action: 'discord_mfa_sent',
-            userId,
-            code: discordCode.substring(0, 4) + '****'
-          });
+    if (!channel || channel === 'discord') {
+      try {
+        const discordClient = initDiscordClient();
+        if (discordClient && !discordClient.isReady()) {
+          await discordClient.login(process.env.DISCORD_TOKEN);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for login
         }
+        
+        if (discordClient?.isReady()) {
+          // Send only to the logged-in user's Discord ID
+          const user = await discordClient.users.fetch(userId);
+          if (user) {
+            const embed = new EmbedBuilder()
+              .setTitle('🔐 Admin Terminal MFA Code')
+              .setDescription(`Your Admin Terminal verification code is:\n\n**${discordCode}**\n\nThis code expires in 5 minutes.`)
+              .setColor(0x00FF00)
+              .setTimestamp();
+            
+            await user.send({ embeds: [embed] });
+            discordSent = true;
+            
+            logger.info('Discord MFA code sent', {
+              action: 'discord_mfa_sent',
+              userId,
+              code: discordCode.substring(0, 4) + '****'
+            });
+          }
+        }
+      } catch (discordError) {
+        logger.error('Failed to send Discord MFA code', {
+          action: 'discord_mfa_error',
+          userId,
+          error: discordError instanceof Error ? discordError.message : 'Unknown error'
+        });
       }
-    } catch (discordError) {
-      logger.error('Failed to send Discord MFA code', {
-        action: 'discord_mfa_error',
-        userId,
-        error: discordError instanceof Error ? discordError.message : 'Unknown error'
-      });
     }
     
     // Send Telegram code - only to the logged-in user
-    try {
-        // Map Discord user ID to Telegram user ID for the logged-in user only
-        // Read mapping from environment variable: DISCORD_TO_TELEGRAM_MAPPING=discord_id1:telegram_id1,discord_id2:telegram_id2
-        const mappingEnv = process.env.DISCORD_TO_TELEGRAM_MAPPING || '';
-        const userMapping: Record<string, string> = {};
+    if (!channel || channel === 'telegram') {
+      try {
+          // Map Discord user ID to Telegram user ID for the logged-in user only
+          // Read mapping from environment variable: DISCORD_TO_TELEGRAM_MAPPING=discord_id1:telegram_id1,discord_id2:telegram_id2
+          const mappingEnv = process.env.DISCORD_TO_TELEGRAM_MAPPING || '';
+          const userMapping: Record<string, string> = {};
+          
+          if (mappingEnv) {
+            mappingEnv.split(',').forEach(mapping => {
+              const [discordId, telegramId] = mapping.trim().split(':');
+              if (discordId && telegramId) {
+                userMapping[discordId] = telegramId;
+              }
+            });
+          }
+          
+          const telegramUserId = userMapping[userId];
         
-        if (mappingEnv) {
-          mappingEnv.split(',').forEach(mapping => {
-            const [discordId, telegramId] = mapping.trim().split(':');
-            if (discordId && telegramId) {
-              userMapping[discordId] = telegramId;
-            }
+        if (telegramUserId) {
+          const message = `🔐 *Admin Terminal MFA Code*\n\nYour verification code is:\n\n*${telegramCode}*\n\nThis code expires in 5 minutes.`;
+          
+          await telegramService.sendDirectMessage(telegramUserId, message);
+          telegramSent = true;
+          
+          logger.info('Telegram MFA code sent', {
+            action: 'telegram_mfa_sent',
+            userId,
+            telegramUserId,
+            code: telegramCode.substring(0, 4) + '****'
+          });
+        } else {
+          logger.warn('No Telegram mapping found for Discord user', {
+            action: 'telegram_mapping_not_found',
+            userId
           });
         }
-        
-        const telegramUserId = userMapping[userId];
-      
-      if (telegramUserId) {
-        const message = `🔐 *Admin Terminal MFA Code*\n\nYour verification code is:\n\n*${telegramCode}*\n\nThis code expires in 10 minutes.`;
-        
-        await telegramService.sendDirectMessage(telegramUserId, message);
-        
-        logger.info('Telegram MFA code sent', {
-          action: 'telegram_mfa_sent',
+      } catch (telegramError) {
+        logger.error('Failed to send Telegram MFA code', {
+          action: 'telegram_mfa_error',
           userId,
-          telegramUserId,
-          code: telegramCode.substring(0, 4) + '****'
-        });
-      } else {
-        logger.warn('No Telegram mapping found for Discord user', {
-          action: 'telegram_mapping_not_found',
-          userId
+          error: telegramError instanceof Error ? telegramError.message : 'Unknown error'
         });
       }
-    } catch (telegramError) {
-      logger.error('Failed to send Telegram MFA code', {
-        action: 'telegram_mfa_error',
-        userId,
-        error: telegramError instanceof Error ? telegramError.message : 'Unknown error'
-      });
+    }
+    
+    // Send Email code if requested
+    if ((!channel || channel === 'email') && userEmail) {
+      // Check if user's email is in the allowed list
+      if (!isAllowedForEmail(userEmail)) {
+        logger.warn('Email not in ADMIN_EMAILS whitelist', {
+          action: 'email_not_whitelisted',
+          userId,
+          email: userEmail
+        });
+        if (channel === 'email') {
+          return res.status(403).json({
+            error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
+          });
+        }
+      } else {
+        try {
+          const emailService = new EmailNotificationService();
+          if (emailService.isConfigured()) {
+            emailSent = await emailService.sendPinCode(
+              userEmail,
+              emailCode,
+              'Terminal Access'
+            );
+            logger.info('Email MFA code sent', {
+              action: 'email_mfa_sent',
+              userId,
+              userEmail,
+              code: emailCode.substring(0, 2) + '****'
+            });
+          } else {
+            logger.warn('Email service not configured', {
+              action: 'email_service_not_configured',
+              userId,
+              userEmail
+            });
+          }
+        } catch (emailError) {
+          logger.error('Failed to send email MFA code', {
+            action: 'email_mfa_error',
+            userId,
+            userEmail,
+            error: emailError instanceof Error ? emailError.message : 'Unknown error'
+          });
+        }
+      }
     }
     
     // Store codes temporarily for verification (in production, use Redis or database)
     req.session.mfaCodes = {
       discord: discordCode,
       telegram: telegramCode,
+      email: emailCode,
+      userEmail: userEmail || '',
       generatedAt: new Date().getTime()
     };
     
+    // Determine response message based on what was sent
+    let message = 'MFA codes generated. ';
+    if (discordSent && telegramSent) {
+      message += 'Codes sent to Discord and Telegram. Please check your DMs.';
+    } else if (discordSent) {
+      message += 'Code sent to Discord. Please check your DMs.';
+    } else if (telegramSent) {
+      message += 'Code sent to Telegram. Please check your DMs.';
+    } else if (emailSent) {
+      message += `Code sent to ${userEmail}. Please check your email.`;
+    } else {
+      message += 'Please use the codes provided.';
+    }
+    
     return res.json({
       success: true,
-      message: 'MFA codes have been sent to your Discord and Telegram. Please check your DMs.'
+      message,
+      discordSent,
+      telegramSent,
+      emailSent,
+      userEmail: userEmail || ''
     });
     
   } catch (error) {
@@ -447,7 +580,7 @@ router.get('/check-access', async (req, res) => {
 // Verify MFA
 router.post('/verify-mfa', async (req, res) => {
   try {
-    const { discordCode, telegramCode } = req.body;
+    const { discordCode, telegramCode, emailCode } = req.body;
     const userId = (req.user as any)?.id;
     
     if (!userId) {
@@ -464,21 +597,38 @@ router.post('/verify-mfa', async (req, res) => {
       });
     }
     
-    const isValid = await verifyMFA(discordCode, telegramCode, userId, req.session);
+    // User must provide either (Discord + Telegram) OR (Email)
+    const hasDiscordTelegram = discordCode && telegramCode;
+    const hasEmail = emailCode;
+    
+    if (!hasDiscordTelegram && !hasEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide either Discord code (and Telegram if applicable) OR email code'
+      });
+    }
+    
+    const isValid = await verifyMFA(discordCode || '', telegramCode || '', emailCode || '', userId, req.session);
     
     if (isValid) {
       // Store MFA verification in session
       req.session.mfaVerified = true;
       req.session.mfaVerifiedAt = new Date();
       
+      const verificationMethod = hasEmail ? 'email' : 'discord+telegram';
+      const successMessage = hasEmail 
+        ? 'Email code verified successfully. MFA verification complete.'
+        : 'Discord and Telegram codes verified successfully. MFA verification complete.';
+      
       logger.info('MFA verification successful', {
         action: 'mfa_success',
-        userId
+        userId,
+        method: verificationMethod
       });
       
       return res.json({
         success: true,
-        message: 'MFA verification successful'
+        message: successMessage
       });
     } else {
       logger.warn('MFA verification failed', {
