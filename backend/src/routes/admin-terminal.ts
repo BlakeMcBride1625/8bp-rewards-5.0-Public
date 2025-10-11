@@ -446,47 +446,77 @@ router.post('/request-codes', async (req, res) => {
       }
     }
     
-    // Send Email code if requested
-    if ((!channel || channel === 'email') && userEmail) {
-      // Check if user's email is in the allowed list
-      if (!isAllowedForEmail(userEmail)) {
-        logger.warn('Email not in ADMIN_EMAILS whitelist', {
-          action: 'email_not_whitelisted',
-          userId,
-          email: userEmail
-        });
-        if (channel === 'email') {
-          return res.status(403).json({
-            error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
+    // Send Email code if requested or if no specific channel (try to send to all configured emails)
+    const allowedEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim()) || [];
+    if ((!channel || channel === 'email')) {
+      
+      if (userEmail) {
+        // Single email provided
+        if (!isAllowedForEmail(userEmail)) {
+          logger.warn('Email not in ADMIN_EMAILS whitelist', {
+            action: 'email_not_whitelisted',
+            userId,
+            email: userEmail
           });
+          if (channel === 'email') {
+            return res.status(403).json({
+              error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
+            });
+          }
+        } else {
+          try {
+            const emailService = new EmailNotificationService();
+            if (emailService.isConfigured()) {
+              emailSent = await emailService.sendPinCode(
+                userEmail,
+                emailCode,
+                'Terminal Access'
+              );
+              logger.info('Email MFA code sent', {
+                action: 'email_mfa_sent',
+                userId,
+                userEmail,
+                code: emailCode.substring(0, 2) + '****'
+              });
+            } else {
+              logger.warn('Email service not configured', {
+                action: 'email_service_not_configured',
+                userId,
+                userEmail
+              });
+            }
+          } catch (emailError) {
+            logger.error('Failed to send email MFA code', {
+              action: 'email_mfa_error',
+              userId,
+              userEmail,
+              error: emailError instanceof Error ? emailError.message : 'Unknown error'
+            });
+          }
         }
-      } else {
+      } else if (!channel && allowedEmails.length > 0) {
+        // No specific channel requested and we have allowed emails - send to first one
+        const firstAllowedEmail = allowedEmails[0];
         try {
           const emailService = new EmailNotificationService();
           if (emailService.isConfigured()) {
             emailSent = await emailService.sendPinCode(
-              userEmail,
+              firstAllowedEmail,
               emailCode,
               'Terminal Access'
             );
-            logger.info('Email MFA code sent', {
+            logger.info('Email MFA code sent to first allowed email', {
               action: 'email_mfa_sent',
               userId,
-              userEmail,
+              userEmail: firstAllowedEmail,
               code: emailCode.substring(0, 2) + '****'
-            });
-          } else {
-            logger.warn('Email service not configured', {
-              action: 'email_service_not_configured',
-              userId,
-              userEmail
             });
           }
         } catch (emailError) {
-          logger.error('Failed to send email MFA code', {
+          logger.error('Failed to send email MFA code to first allowed email', {
             action: 'email_mfa_error',
             userId,
-            userEmail,
+            userEmail: firstAllowedEmail,
             error: emailError instanceof Error ? emailError.message : 'Unknown error'
           });
         }
@@ -522,7 +552,7 @@ router.post('/request-codes', async (req, res) => {
       discordSent,
       telegramSent,
       emailSent,
-      userEmail: userEmail || ''
+      userEmail: userEmail || (emailSent ? allowedEmails[0] : '')
     });
     
   } catch (error) {

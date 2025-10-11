@@ -606,28 +606,39 @@ const AdminDashboardPage: React.FC = () => {
     }
   };
 
-  const requestMFACodes = async (channel?: string, userEmail?: string) => {
+  const requestMFACodes = async () => {
     setIsRequestingCodes(true);
     try {
-      const response = await axios.post('/api/admin/terminal/request-codes', { 
-        channel: channel || undefined,
-        userEmail: userEmail || undefined
-      }, { withCredentials: true });
+      const response = await axios.post('/api/admin/terminal/request-codes', {}, { withCredentials: true });
       
       if (response.data.success) {
+        let codesSentCount = 0;
+        let message = 'MFA codes sent: ';
+        const sentMethods = [];
+        
+        if (response.data.discordSent) {
+          setCodesSent(prev => ({ ...prev, discord: true }));
+          sentMethods.push('Discord');
+          codesSentCount++;
+        }
+        
+        if (response.data.telegramSent) {
+          setCodesSent(prev => ({ ...prev, telegram: true }));
+          sentMethods.push('Telegram');
+          codesSentCount++;
+        }
+        
         if (response.data.emailSent) {
           setCodesSent(prev => ({ ...prev, email: true }));
           setUserEmail(response.data.userEmail);
-          toast.success(`Email access code sent to ${response.data.userEmail}!`);
-        } else if (response.data.discordSent && response.data.telegramSent) {
-          setCodesSent(prev => ({ ...prev, discord: true, telegram: true }));
-          toast.success('MFA codes have been sent to your Discord and Telegram. Please check your DMs.');
-        } else if (response.data.discordSent) {
-          setCodesSent(prev => ({ ...prev, discord: true }));
-          toast.success('Discord access code sent!');
-        } else if (response.data.telegramSent) {
-          setCodesSent(prev => ({ ...prev, telegram: true }));
-          toast.success('Telegram access code sent!');
+          sentMethods.push('Email');
+          codesSentCount++;
+        }
+        
+        if (codesSentCount > 0) {
+          message += sentMethods.join(', ');
+          message += '. Please check your messages and enter the codes below.';
+          toast.success(message);
         } else {
           toast.success('MFA codes generated. Please use the codes provided.');
         }
@@ -635,21 +646,10 @@ const AdminDashboardPage: React.FC = () => {
         toast.error('Failed to request MFA codes');
       }
     } catch (error: any) {
-      if (error.response?.status === 403) {
-        toast.error('Your email is not authorized for email authentication. Please use Discord/Telegram authentication.');
-      } else {
-        toast.error(error.response?.data?.message || 'Failed to request MFA codes');
-      }
+      toast.error(error.response?.data?.message || 'Failed to request MFA codes');
       console.error('Error requesting MFA codes:', error);
     } finally {
       setIsRequestingCodes(false);
-    }
-  };
-
-  const requestEmailCode = async () => {
-    const email = prompt('Enter your email address for authentication:');
-    if (email && email.trim()) {
-      await requestMFACodes('email', email.trim());
     }
   };
 
@@ -1632,141 +1632,92 @@ const AdminDashboardPage: React.FC = () => {
                   Please verify your codes to access the Terminal. You can use either Discord/Telegram codes OR email code.
                 </p>
                 
-                <div className="space-y-6">
-                  {/* Discord/Telegram Section */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-text-primary dark:text-text-dark-primary">
-                      Discord & Telegram Authentication
-                    </h3>
-                    
-                    {/* Request Codes Button */}
-                    <div className="mb-4">
-                      <button
-                        onClick={() => requestMFACodes()}
-                        disabled={isRequestingCodes}
-                        className="btn btn-outline inline-flex items-center space-x-2"
-                      >
-                        <Send className="w-4 h-4" />
-                        <span>{isRequestingCodes ? 'Requesting Codes...' : 'Request Discord & Telegram Codes'}</span>
-                      </button>
-                      <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-2">
-                        Click this button to receive 16-digit verification codes via Discord and Telegram bots.
-                      </p>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      <div>
-                        <label className="label">Discord Code (16 digits)</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={discordCode}
-                            onChange={(e) => setDiscordCode(e.target.value)}
-                            placeholder="Enter 16-digit Discord code..."
-                            className="input flex-1"
-                            maxLength={16}
-                          />
-                        </div>
-                      </div>
-                      
-                      <div>
-                        <label className="label">Telegram Code (16 digits)</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={telegramCode}
-                            onChange={(e) => setTelegramCode(e.target.value)}
-                            placeholder="Enter 16-digit Telegram code..."
-                            className="input flex-1"
-                            maxLength={16}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Divider */}
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
-                    </div>
-                    <div className="relative flex justify-center text-sm">
-                      <span className="px-2 bg-white dark:bg-background-dark-secondary text-text-secondary dark:text-text-dark-secondary">
-                        or
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {/* Email Section */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-text-primary dark:text-text-dark-primary">
-                      Email Authentication
-                    </h3>
-                    
+                <div className="space-y-4">
+                  {/* Request Codes Button */}
+                  <div className="mb-6">
                     <button
-                      onClick={requestEmailCode}
-                      disabled={isRequestingCodes || codesSent.email}
-                      className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center space-x-2"
+                      onClick={() => requestMFACodes()}
+                      disabled={isRequestingCodes}
+                      className="btn btn-outline inline-flex items-center space-x-2"
                     >
-                      {isRequestingCodes ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          <span>Sending...</span>
-                        </>
-                      ) : codesSent.email ? (
-                        <>
-                          <CheckCircle className="w-4 h-4" />
-                          <span>Email Code Sent ✓</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" />
-                          <span>Send Email Code (6-Digit PIN)</span>
-                        </>
-                      )}
+                      <Send className="w-4 h-4" />
+                      <span>{isRequestingCodes ? 'Requesting Codes...' : 'Request MFA Codes'}</span>
                     </button>
-                    
-                    {codesSent.email && userEmail && (
-                      <div className="space-y-2">
-                        <div className="text-xs text-text-secondary dark:text-text-dark-secondary text-center">
-                          📧 Code sent to: <span className="font-medium">{userEmail}</span>
-                        </div>
-                        <label className="label">Email Access Code (6 digits)</label>
-                        <input
-                          type="text"
-                          value={emailCode}
-                          onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ''))}
-                          placeholder="Enter 6-digit code"
-                          className="input text-center text-2xl tracking-widest font-mono"
-                          maxLength={6}
-                        />
-                      </div>
-                    )}
+                    <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-2">
+                      Click this button to receive verification codes via Discord, Telegram, or Email.
+                    </p>
                   </div>
+                  
+                  {/* Discord Code Input */}
+                  {codesSent.discord && (
+                    <div>
+                      <label className="label">Discord Code (16 digits)</label>
+                      <input
+                        type="text"
+                        value={discordCode}
+                        onChange={(e) => setDiscordCode(e.target.value)}
+                        placeholder="Enter 16-digit Discord code..."
+                        className="input"
+                        maxLength={16}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Telegram Code Input */}
+                  {codesSent.telegram && (
+                    <div>
+                      <label className="label">Telegram Code (16 digits)</label>
+                      <input
+                        type="text"
+                        value={telegramCode}
+                        onChange={(e) => setTelegramCode(e.target.value)}
+                        placeholder="Enter 16-digit Telegram code..."
+                        className="input"
+                        maxLength={16}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Email Code Input */}
+                  {codesSent.email && userEmail && (
+                    <div>
+                      <div className="text-xs text-text-secondary dark:text-text-dark-secondary text-center mb-2">
+                        📧 Code sent to: <span className="font-medium">{userEmail}</span>
+                      </div>
+                      <label className="label">Email Access Code (6 digits)</label>
+                      <input
+                        type="text"
+                        value={emailCode}
+                        onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Enter 6-digit code"
+                        className="input text-center text-2xl tracking-widest font-mono"
+                        maxLength={6}
+                      />
+                    </div>
+                  )}
                   
                   {/* Verify Button */}
                   {(codesSent.discord || codesSent.telegram || codesSent.email) && (
-                    <div className="pt-4">
-                      <button
-                        onClick={verifyMFA}
-                        disabled={
-                          isRequestingCodes || 
-                          (codesSent.email && emailCode.trim().length !== 6) ||
-                          (!codesSent.email && (!discordCode.trim() || (codesSent.telegram && !telegramCode.trim())))
-                        }
-                        className="btn btn-primary inline-flex items-center space-x-2"
-                      >
-                        <Shield className="w-4 h-4" />
-                        <span>Verify MFA</span>
-                      </button>
-                      
-                      {(discordCode.length > 0 && discordCode.length !== 16) || (telegramCode.length > 0 && telegramCode.length !== 16) || (emailCode.length > 0 && emailCode.length !== 6) ? (
-                        <div className="text-sm text-red-600 dark:text-red-400 mt-2">
-                          ⚠️ {codesSent.email ? 'Email code must be exactly 6 digits' : 'Discord and Telegram codes must be exactly 16 digits'}
-                        </div>
-                      ) : null}
-                    </div>
+                    <button
+                      onClick={verifyMFA}
+                      disabled={
+                        isRequestingCodes || 
+                        (codesSent.email && emailCode.trim().length !== 6) ||
+                        (!codesSent.email && (!discordCode.trim() || (codesSent.telegram && !telegramCode.trim())))
+                      }
+                      className="btn btn-primary inline-flex items-center space-x-2"
+                    >
+                      <Shield className="w-4 h-4" />
+                      <span>Verify MFA</span>
+                    </button>
                   )}
+                  
+                  {/* Error Messages */}
+                  {(discordCode.length > 0 && discordCode.length !== 16) || (telegramCode.length > 0 && telegramCode.length !== 16) || (emailCode.length > 0 && emailCode.length !== 6) ? (
+                    <div className="text-sm text-red-600 dark:text-red-400">
+                      ⚠️ {codesSent.email ? 'Email code must be exactly 6 digits' : 'Discord and Telegram codes must be exactly 16 digits'}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : (
