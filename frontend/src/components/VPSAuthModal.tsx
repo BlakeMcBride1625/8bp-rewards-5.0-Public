@@ -241,7 +241,7 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
                   VPS Monitor Access
                 </h2>
                 <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
-                  Dual-channel authentication required
+                  Secure authentication required
                 </p>
               </div>
             </div>
