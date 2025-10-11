@@ -328,8 +328,10 @@ const executeCommand = async (command: string, userId: string): Promise<{ succes
 // Request MFA codes
 router.post('/request-codes', async (req, res) => {
   try {
-    const userId = (req.user as any)?.id;
-    const { channel, userEmail } = req.body;
+    const user = req.user as any;
+    const userId = user?.id;
+    const { channel } = req.body;
+    const userEmail = user?.email || ''; // Get email from Discord session
     
     if (!userId) {
       return res.status(401).json({

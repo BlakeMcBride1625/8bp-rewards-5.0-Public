@@ -677,10 +677,7 @@ const AdminDashboardPage: React.FC = () => {
   };
 
   const requestEmailCode = async () => {
-    const email = prompt('Enter your email address for authentication:');
-    if (email && email.trim()) {
-      await requestMFACodes('email');
-    }
+    await requestMFACodes('email');
   };
 
   const handleLogout = async () => {
