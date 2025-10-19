@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { logger } from './LoggerService';
 import { Registration } from '../models/Registration';
 import { ClaimRecord } from '../models/ClaimRecord';
-const DiscordService = require('../../../discord-service');
+const DiscordService = require('../../../services/discord-service');
 
 interface ClaimResult {
   eightBallPoolId: string;

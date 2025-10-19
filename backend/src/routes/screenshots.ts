@@ -1,10 +1,14 @@
 import express from 'express';
 import { logger } from '../services/LoggerService';
 import { Registration } from '../models/Registration';
+import { authenticateAdmin } from '../middleware/auth';
 import fs from 'fs';
 import path from 'path';
 
 const router = express.Router();
+
+// Apply admin authentication to all routes
+router.use(authenticateAdmin);
 
 // Get screenshot folders and their contents
 router.get('/folders', async (req, res) => {
@@ -27,7 +31,6 @@ router.get('/folders', async (req, res) => {
         name: string;
         size: string;
         modified: Date;
-        base64Data: string;
       }>;
     }> = [];
 
@@ -37,7 +40,6 @@ router.get('/folders', async (req, res) => {
         name: string;
         size: string;
         modified: Date;
-        base64Data: string;
       }> = [];
 
       if (fs.existsSync(folderPath)) {
@@ -48,23 +50,10 @@ router.get('/folders', async (req, res) => {
             const filePath = path.join(folderPath, file);
             const stats = fs.statSync(filePath);
             
-            // Convert image to base64 for direct display
-            let base64Data = '';
-            try {
-              const imageBuffer = fs.readFileSync(filePath);
-              const ext = path.extname(file).toLowerCase();
-              const mimeType = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
-              base64Data = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
-            } catch (error) {
-              // If we can't read the file, leave base64Data empty
-              console.warn(`Could not read image file: ${filePath}`);
-            }
-            
             return {
               name: file,
               size: formatFileSize(stats.size),
-              modified: stats.mtime,
-              base64Data: base64Data
+              modified: stats.mtime
             };
           })
           .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());

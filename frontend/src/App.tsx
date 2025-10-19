@@ -10,9 +10,9 @@ import AdminDashboardPage from './pages/AdminDashboardPage';
 import ContactPage from './pages/ContactPage';
 import SystemStatusPage from './pages/SystemStatusPage';
 import LeaderboardPage from './pages/LeaderboardPage';
+import SocialsPage from './pages/SocialsPage';
 import TermsOfServicePage from './pages/TermsOfServicePage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
-import SocialsPage from './pages/SocialsPage';
 
 function App() {
   return (

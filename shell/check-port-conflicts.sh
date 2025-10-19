@@ -46,7 +46,7 @@ echo ""
 
 # Check for known conflicting services
 check_port 3000 "Zipline (CONFLICT)"
-check_port 3001 "Uptime Kuma (CONFLICT)"
+check_port 2700 "Discord Bot API"
 check_port 3300 "Nginx (CONFLICT)"
 check_port 3356 "MySQL (CONFLICT)"
 check_port 8000 "Portainer (CONFLICT)"

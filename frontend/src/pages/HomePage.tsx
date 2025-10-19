@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Users, Clock, Shield, Trophy } from 'lucide-react';
+import { ArrowRight, Users, Clock, Shield, Trophy, ExternalLink } from 'lucide-react';
 
 const HomePage: React.FC = () => {
   return (
@@ -114,6 +114,105 @@ const HomePage: React.FC = () => {
                 </motion.div>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      {/* Featured Creators Section */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.3 }}
+            className="text-center mb-12"
+          >
+            <h2 className="text-3xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
+              Featured Creators
+            </h2>
+            <p className="text-lg text-text-secondary dark:text-text-dark-secondary max-w-2xl mx-auto">
+              Check out these amazing 8 Ball Pool content creators!
+            </p>
+          </motion.div>
+
+          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            {/* Lewis Shoutout */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.4 }}
+              className="card text-center hover:shadow-lg transition-shadow"
+            >
+              <div className="w-20 h-20 rounded-full mx-auto mb-4 shadow-lg overflow-hidden bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center">
+                <img 
+                  src="/8bp-rewards/api/tiktok-profiles/lewisblive0/image"
+                  alt="Lewisblive0 TT Profile"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                    if (nextElement) {
+                      nextElement.style.display = 'flex';
+                    }
+                  }}
+                />
+                <span className="text-white font-bold text-2xl hidden">L</span>
+              </div>
+              <h3 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-2">
+                Lewisblive0 TT
+              </h3>
+              <p className="text-text-secondary dark:text-text-dark-secondary mb-4">
+                8 Ball Pool community manager and TikTok creator dropping daily gameplay, tricks, and exclusive reward updates.
+              </p>
+              <a
+                href="https://www.tiktok.com/@lewisblive0"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-outline inline-flex items-center space-x-2"
+              >
+                <span>Follow on TikTok</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </motion.div>
+
+            {/* VX Shoutout */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.5 }}
+              className="card text-center hover:shadow-lg transition-shadow"
+            >
+              <div className="w-20 h-20 rounded-full mx-auto mb-4 shadow-lg overflow-hidden bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
+                <img 
+                  src="/8bp-rewards/api/tiktok-profiles/of.zk0/image"
+                  alt="VX Profile"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                    if (nextElement) {
+                      nextElement.style.display = 'flex';
+                    }
+                  }}
+                />
+                <span className="text-white font-bold text-2xl hidden">V</span>
+              </div>
+              <h3 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-2">
+                VX
+              </h3>
+              <p className="text-text-secondary dark:text-text-dark-secondary mb-4">
+                Community Project Manager overseeing 8 Ball Pool rewards, engagement initiatives, and player support.
+              </p>
+              <a
+                href="https://www.tiktok.com/@of.zk0?_t=ZN-90boQEdieuM&_r=1"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-outline inline-flex items-center space-x-2"
+              >
+                <span>Follow on TikTok</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </motion.div>
           </div>
         </div>
       </section>

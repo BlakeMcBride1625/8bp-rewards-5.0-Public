@@ -87,27 +87,54 @@ async function getUserIdsFromDatabase() {
 }
 
 async function ensureScreenshotDirectories() {
-  try {
-    const fs = require('fs');
-    const path = require('path');
+  const directories = [
+    'screenshots',
+    'screenshots/shop-page',
+    'screenshots/login',
+    'screenshots/id-entry',
+    'screenshots/go-click',
+    'screenshots/final-page'
+  ];
 
-    const directories = [
-      'screenshots',
-      'screenshots/shop-page',
-      'screenshots/login',
-      'screenshots/id-entry',
-      'screenshots/go-click',
-      'screenshots/final-page'
-    ];
-
-    for (const dir of directories) {
+  directories.forEach(dir => {
+    try {
       if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-        console.log(`📁 Created directory: ${dir}`);
+        fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+        console.log(`📁 Created screenshot directory: ${dir}`);
+      } else {
+        // Check if we can write to the directory
+        try {
+          const testFile = `${dir}/test-write.tmp`;
+          fs.writeFileSync(testFile, 'test');
+          fs.unlinkSync(testFile);
+          console.log(`✅ Screenshot directory ${dir} is writable`);
+        } catch (error) {
+          console.warn(`⚠️ Screenshot directory ${dir} may have permission issues: ${error.message}`);
+        }
       }
+    } catch (error) {
+      console.warn(`⚠️ Failed to initialize screenshot directory ${dir}: ${error.message}`);
     }
+  });
+}
+
+// Helper function to safely take screenshots with error handling
+async function takeScreenshot(page, path, description) {
+  try {
+    // Ensure directory exists
+    const dir = path.substring(0, path.lastIndexOf('/'));
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+      console.log(`📁 Created directory: ${dir}`);
+    }
+    
+    await page.screenshot({ path });
+    console.log(`📸 ${description}: ${path}`);
+    return true;
   } catch (error) {
-    console.error('❌ Error creating screenshot directories:', error.message);
+    console.warn(`⚠️ Screenshot failed for ${description}: ${error.message}`);
+    console.warn(`⚠️ This won't affect the claim process - continuing without screenshot`);
+    return false;
   }
 }
 
@@ -148,8 +175,7 @@ async function claimRewardsForUser(userId) {
     await page.waitForTimeout(5000);
     
     // Take a screenshot to see what we're working with
-    await page.screenshot({ path: 'screenshots/shop-page/daily-reward-page.png' });
-    console.log('📸 Screenshot saved as daily-reward-page.png');
+    await takeScreenshot(page, 'screenshots/shop-page/daily-reward-page.png', 'Initial daily reward page');
     
     // Look for login modal - it might appear after hovering or clicking
     console.log('🔍 Looking for login modal...');
@@ -378,8 +404,7 @@ async function claimRewardsForUser(userId) {
         }
         
         // Take screenshot after login
-        await page.screenshot({ path: 'screenshots/login/after-login.png' });
-        console.log('📸 Screenshot after login saved as after-login.png');
+        await takeScreenshot(page, 'screenshots/login/after-login.png', 'After login');
       }
     } else {
       console.log('⚠️ No login modal found - user might already be logged in');
@@ -753,8 +778,7 @@ async function claimRewardsForUser(userId) {
     }
     
     // Take final screenshot
-    await page.screenshot({ path: `screenshots/final-page/final-page-${userId}.png` });
-    console.log(`📸 Final screenshot saved as final-page-${userId}.png`);
+    await takeScreenshot(page, `screenshots/final-page/final-page-${userId}.png`, 'Final page');
     
     // Wait a bit to see results
     await page.waitForTimeout(3000);

@@ -10,6 +10,7 @@ import { EmailNotificationService } from '../services/EmailNotificationService';
 import { exec } from 'child_process';
 import path from 'path';
 import crypto from 'crypto';
+import axios from 'axios';
 
 // Global type declarations for in-memory storage
 declare global {
@@ -21,7 +22,47 @@ declare global {
 
 const router = express.Router();
 
-// Apply admin authentication to all routes
+// Public bot status endpoint (no auth required)
+router.get('/bot-status-public', async (req, res) => {
+  try {
+    // Make a request to the Discord bot service to get current status
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    
+    try {
+      const response = await axios.get(`${botServiceUrl}/api/bot-status`, {
+        timeout: 5000
+      });
+      
+      return res.json({
+        success: true,
+        data: response.data
+      });
+    } catch (botError) {
+      // If bot service is not available, return basic info
+      return res.json({
+        success: true,
+        data: {
+          success: true,
+          currentStatus: 'offline',
+          environmentStatus: 'dnd',
+          botReady: false,
+          botTag: null,
+          message: 'Bot service unavailable'
+        }
+      });
+    }
+    
+  } catch (error: any) {
+    logger.error('Error in bot status endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get bot status',
+      details: error.message
+    });
+  }
+});
+
+// Apply admin authentication to all remaining routes
 router.use(authenticateAdmin);
 
 // Get admin dashboard overview
@@ -1949,6 +1990,171 @@ router.post('/reset-leaderboard', async (req, res) => {
     });
   }
 });
+
+// Bot Status Management Endpoints
+
+// Get current bot status (admin endpoint - requires auth)
+router.get('/bot-status', async (req, res) => {
+  try {
+    // Make a request to the Discord bot service to get current status
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    
+    try {
+      const response = await axios.get(`${botServiceUrl}/api/bot-status`, {
+        timeout: 5000
+      });
+      
+      return res.json({
+        success: true,
+        data: response.data
+      });
+    } catch (botError) {
+      // If bot service is not available, return basic info
+      return res.json({
+        success: true,
+        data: {
+          botReady: false,
+          error: 'Discord bot service not available',
+          currentStatus: 'unknown',
+          environmentStatus: process.env.DISCORD_BOT_STATUS || 'dnd'
+        }
+      });
+    }
+    
+  } catch (error: any) {
+    logger.error('Error getting bot status:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get bot status',
+      details: error.message
+    });
+  }
+});
+
+// Change bot status
+router.post('/bot-status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const user = req.user as any;
+    
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: 'Status is required'
+      });
+    }
+    
+    // Validate status
+    const validStatuses = ['online', 'idle', 'dnd', 'invisible'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid status. Must be: online, idle, dnd, or invisible'
+      });
+    }
+    
+    // Make a request to the Discord bot service to change status
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    
+    try {
+      const response = await axios.post(`${botServiceUrl}/api/bot-status`, {
+        status: status
+      }, {
+        timeout: 10000
+      });
+      
+      logger.info(`Bot status changed to ${status} by admin ${user.username}`, {
+        action: 'bot_status_change',
+        adminUser: user.username,
+        newStatus: status,
+        result: response.data
+      });
+      
+      return res.json({
+        success: true,
+        message: `Bot status changed to ${status.toUpperCase()}`,
+        data: response.data
+      });
+      
+    } catch (botError: any) {
+      logger.error('Error changing bot status:', botError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to change bot status',
+        details: botError.response?.data?.error || botError.message
+      });
+    }
+    
+  } catch (error: any) {
+    logger.error('Error in bot status change endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to change bot status',
+      details: error.message
+    });
+  }
+});
+
+// Bot toggle endpoint (enable/disable bot)
+router.post('/bot-toggle', async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: 'enabled field must be a boolean'
+      });
+    }
+
+    // Make a request to the Discord bot service to toggle bot
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    
+    try {
+      const response = await axios.post(`${botServiceUrl}/api/bot-toggle`, {
+        enabled: enabled
+      }, {
+        timeout: 5000
+      });
+      
+      return res.json({
+        success: true,
+        data: response.data,
+        message: `Bot ${enabled ? 'enabled' : 'disabled'} successfully`
+      });
+      
+    } catch (botError: any) {
+      logger.error('Error toggling bot:', {
+        message: botError.message,
+        status: botError.response?.status,
+        statusText: botError.response?.statusText,
+        data: botError.response?.data
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to toggle bot',
+        details: botError.response?.data?.error || botError.message
+      });
+    }
+    
+  } catch (error: any) {
+    logger.error('Error in bot toggle endpoint:', {
+      message: error.message,
+      stack: error.stack
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to toggle bot',
+      details: error.message
+    });
+  }
+});
+
+
+import activeServicesRouter from './admin-active-services';
+
+// Use the active services router
+router.use('/', activeServicesRouter);
 
 export default router;
 

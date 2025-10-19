@@ -34,7 +34,12 @@ import {
   Camera,
   Terminal,
   HelpCircle,
-  Send
+  Send,
+  Bot,
+  Circle,
+  CircleDot,
+  Pause,
+  ChevronDown
 } from 'lucide-react';
 import ClaimProgressTracker from '../components/ClaimProgressTracker';
 import VPSAuthModal from '../components/VPSAuthModal';
@@ -174,6 +179,7 @@ const AdminDashboardPage: React.FC = () => {
   const [screenshotFolders, setScreenshotFolders] = useState<any[]>([]);
   const [allScreenshotFolders, setAllScreenshotFolders] = useState<any[]>([]);
   const [isLoadingScreenshots, setIsLoadingScreenshots] = useState(false);
+  const [screenshotFetchTimeout, setScreenshotFetchTimeout] = useState<NodeJS.Timeout | null>(null);
   const [screenshotSearchQuery, setScreenshotSearchQuery] = useState('');
   const [terminalAccess, setTerminalAccess] = useState<boolean | null>(null);
   const [terminalCommand, setTerminalCommand] = useState('');
@@ -183,7 +189,6 @@ const AdminDashboardPage: React.FC = () => {
   const [discordCode, setDiscordCode] = useState('');
   const [telegramCode, setTelegramCode] = useState('');
   const [emailCode, setEmailCode] = useState('');
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [codesSent, setCodesSent] = useState<{discord: boolean; telegram: boolean; email: boolean}>({discord: false, telegram: false, email: false});
   const [showCommandHelp, setShowCommandHelp] = useState(false);
   const [isRequestingCodes, setIsRequestingCodes] = useState(false);
@@ -204,6 +209,32 @@ const AdminDashboardPage: React.FC = () => {
   const [isResettingLeaderboard, setIsResettingLeaderboard] = useState(false);
   const [showResetAuthModal, setShowResetAuthModal] = useState(false);
   const [resetAccessGranted, setResetAccessGranted] = useState(false);
+  
+  // Active Services state
+  const [activeServicesData, setActiveServicesData] = useState<any>(null);
+  const [isLoadingActiveServices, setIsLoadingActiveServices] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<{ [key: string]: boolean }>({
+    'Claimers': true,
+    'Discord Services': true,
+    'Website': true,
+    'Other / System': false
+  });
+  const [expandedServices, setExpandedServices] = useState<{ [key: string]: boolean }>({});
+  
+  // Bot status state
+  const [botStatus, setBotStatus] = useState<{
+    currentStatus: string;
+    environmentStatus: string;
+    botReady: boolean;
+    botTag?: string;
+  } | null>(null);
+  const [isLoadingBotStatus, setIsLoadingBotStatus] = useState(false);
+  const [isChangingBotStatus, setIsChangingBotStatus] = useState(false);
+  const [botStatusFetchTimeout, setBotStatusFetchTimeout] = useState<NodeJS.Timeout | null>(null);
+  
+  // Bot on/off toggle state
+  const [isBotEnabled, setIsBotEnabled] = useState(true);
+  const [isTogglingBot, setIsTogglingBot] = useState(false);
 
   const fetchVpsStats = useCallback(async () => {
     setIsLoadingVpsStats(true);
@@ -242,10 +273,53 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, []);
 
+  // Bot status functions
+  const fetchBotStatus = useCallback(async () => {
+    // Clear any existing timeout
+    if (botStatusFetchTimeout) {
+      clearTimeout(botStatusFetchTimeout);
+    }
+    
+    // Debounce the API call by 1 second
+    const timeout = setTimeout(async () => {
+      console.log('🔄 Starting to fetch bot status...');
+      setIsLoadingBotStatus(true);
+      
+      try {
+        console.log('📡 Making API call to /api/admin/bot-status-public');
+        const response = await axios.get('/api/admin/bot-status-public');
+        console.log('✅ Bot status API response received:', response.data);
+        setBotStatus(response.data.data);
+      } catch (error: any) {
+        console.error('❌ Bot status API error:', error);
+        console.error('❌ Error details:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          url: error.config?.url
+        });
+        toast.error(`Failed to fetch bot status: ${error.response?.status || error.message}`);
+      } finally {
+        console.log('🏁 Setting isLoadingBotStatus to false');
+        setIsLoadingBotStatus(false);
+      }
+    }, 1000);
+    
+    setBotStatusFetchTimeout(timeout);
+  }, [botStatusFetchTimeout]);
+
   useEffect(() => {
+    console.log('🔄 useEffect triggered:', { isAuthenticated, isAdmin, activeTab });
     if (isAuthenticated && isAdmin) {
       fetchAdminData();
       fetchUserIp();
+      
+      // Only fetch bot status when on tools tab
+      if (activeTab === 'tools') {
+        fetchBotStatus();
+      }
+      
       if (activeTab === 'logs') {
         fetchLogs();
       }
@@ -253,13 +327,17 @@ const AdminDashboardPage: React.FC = () => {
         fetchVpsStats();
       }
       if (activeTab === 'screenshots') {
+        console.log('🔄 Calling fetchScreenshotFolders because activeTab is screenshots');
         fetchScreenshotFolders();
       }
       if (activeTab === 'terminal') {
         checkTerminalAccess();
       }
+      if (activeTab === 'active-services') {
+        fetchActiveServices();
+      }
     }
-  }, [isAuthenticated, isAdmin, activeTab, fetchVpsStats]);
+  }, [isAuthenticated, isAdmin, activeTab]);
 
   // Auto-refresh VPS stats when on VPS tab
   useEffect(() => {
@@ -355,6 +433,64 @@ const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  const changeBotStatus = async (status: string) => {
+    setIsChangingBotStatus(true);
+    try {
+      const response = await axios.post('/api/admin/bot-status', 
+        { status }, 
+        { withCredentials: true }
+      );
+      toast.success(`Bot status changed to ${status.toUpperCase()}`);
+      await fetchBotStatus(); // Refresh status
+    } catch (error: any) {
+      toast.error('Failed to change bot status');
+      console.error('Bot status change error:', error);
+    } finally {
+      setIsChangingBotStatus(false);
+    }
+  };
+
+  const toggleBot = async () => {
+    setIsTogglingBot(true);
+    try {
+      const newState = !isBotEnabled;
+      const response = await axios.post('/api/admin/bot-toggle', 
+        { enabled: newState }, 
+        { withCredentials: true }
+      );
+      setIsBotEnabled(newState);
+      toast.success(`Bot ${newState ? 'enabled' : 'disabled'} successfully`);
+      await fetchBotStatus(); // Refresh status
+    } catch (error: any) {
+      toast.error(`Failed to ${isBotEnabled ? 'disable' : 'enable'} bot`);
+      console.error('Bot toggle error:', error);
+    } finally {
+      setIsTogglingBot(false);
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    if (!status) return <Circle className="w-4 h-4 text-gray-400" />;
+    switch (status) {
+      case 'online': return <CircleDot className="w-4 h-4 text-green-500" />;
+      case 'idle': return <Circle className="w-4 h-4 text-yellow-500" />;
+      case 'dnd': return <Circle className="w-4 h-4 text-red-500" />;
+      case 'invisible': return <Circle className="w-4 h-4 text-gray-500" />;
+      default: return <Circle className="w-4 h-4 text-gray-400" />;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    if (!status) return 'text-gray-400';
+    switch (status) {
+      case 'online': return 'text-green-500';
+      case 'idle': return 'text-yellow-500';
+      case 'dnd': return 'text-red-500';
+      case 'invisible': return 'text-gray-500';
+      default: return 'text-gray-400';
+    }
+  };
+
   const handleResetLeaderboard = async () => {
     setIsResettingLeaderboard(true);
     try {
@@ -395,6 +531,66 @@ const AdminDashboardPage: React.FC = () => {
       console.error('Error fetching active processes:', error);
     } finally {
       setIsLoadingProcesses(false);
+    }
+  };
+
+  const fetchActiveServices = async () => {
+    setIsLoadingActiveServices(true);
+    try {
+      console.log('🔄 Fetching active services...');
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
+      const response = await axios.get(`${API_ENDPOINTS.ADMIN_ACTIVE_SERVICES}?t=${timestamp}`, {
+        withCredentials: true,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      console.log('✅ Active services response:', response.data);
+
+      if (response.data.success && response.data.data) {
+        setActiveServicesData(response.data.data);
+        console.log('✅ Active services data set:', response.data.data);
+      } else {
+        console.error('❌ Invalid response structure:', response.data);
+        toast.error('Invalid response from server');
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching active services:', error);
+      console.error('❌ Error response:', error.response?.data);
+      toast.error('Failed to fetch active services');
+    } finally {
+      setIsLoadingActiveServices(false);
+    }
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [category]: !prev[category]
+    }));
+  };
+
+  const toggleService = (serviceId: string) => {
+    setExpandedServices(prev => ({
+      ...prev,
+      [serviceId]: !prev[serviceId]
+    }));
+  };
+
+  const getLanguageIcon = (language: string) => {
+    // Return empty string to remove ugly emojis
+    return '';
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'running': return { text: 'Running', color: 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100' };
+      case 'idle': return { text: 'Idle', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100' };
+      case 'failed': return { text: 'Failed', color: 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100' };
+      default: return { text: 'Unknown', color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100' };
     }
   };
 
@@ -453,18 +649,44 @@ const AdminDashboardPage: React.FC = () => {
   };
 
   const fetchScreenshotFolders = async () => {
-    setIsLoadingScreenshots(true);
-    try {
-      const response = await axios.get('/api/admin/screenshots/folders', { withCredentials: true });
-      setAllScreenshotFolders(response.data.folders);
-      // Apply current search filter if any
-      filterScreenshotsByUser(response.data.folders, screenshotSearchQuery);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to fetch screenshot folders');
-      console.error('Error fetching screenshot folders:', error);
-    } finally {
-      setIsLoadingScreenshots(false);
+    // Clear any existing timeout
+    if (screenshotFetchTimeout) {
+      clearTimeout(screenshotFetchTimeout);
     }
+    
+    // Debounce the API call by 1 second
+    const timeout = setTimeout(async () => {
+      console.log('🔄 Starting to fetch screenshot folders...');
+      console.log('🔄 Current activeTab:', activeTab);
+      console.log('🔄 isAuthenticated:', isAuthenticated);
+      console.log('🔄 isAdmin:', isAdmin);
+      setIsLoadingScreenshots(true);
+      
+      try {
+        console.log('📡 Making API call to /api/admin/screenshots/folders');
+        const response = await axios.get('/api/admin/screenshots/folders', { withCredentials: true });
+        console.log('✅ API response received:', response.data);
+        setAllScreenshotFolders(response.data.folders);
+        // Apply current search filter if any
+        filterScreenshotsByUser(response.data.folders, screenshotSearchQuery);
+        console.log('📁 Screenshot folders set:', response.data.folders.length);
+      } catch (error: any) {
+        console.error('❌ Screenshots API error:', error);
+        console.error('❌ Error details:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          url: error.config?.url
+        });
+        toast.error(`Failed to fetch screenshot folders: ${error.response?.status || error.message}`);
+      } finally {
+        console.log('🏁 Setting isLoadingScreenshots to false');
+        setIsLoadingScreenshots(false);
+      }
+    }, 1000);
+    
+    setScreenshotFetchTimeout(timeout);
   };
 
   const filterScreenshotsByUser = (folders: any[], searchQuery: string) => {
@@ -597,7 +819,6 @@ const AdminDashboardPage: React.FC = () => {
       setDiscordCode('');
       setTelegramCode('');
       setEmailCode('');
-      setUserEmail(null);
       setCodesSent({discord: false, telegram: false, email: false});
       toast.success('MFA verification cleared');
     } catch (error: any) {
@@ -628,6 +849,13 @@ const AdminDashboardPage: React.FC = () => {
           } else {
             toast.error('Failed to send Telegram code');
           }
+        } else if (channel === 'email') {
+          if (response.data.emailSent) {
+            setCodesSent(prev => ({ ...prev, email: true }));
+            toast.success(`Email access code sent to ${response.data.adminEmailsCount} admin email(s)!`);
+          } else {
+            toast.error('Failed to send email code');
+          }
         } else {
           // Fallback to sending all codes
           let codesSentCount = 0;
@@ -648,8 +876,7 @@ const AdminDashboardPage: React.FC = () => {
           
           if (response.data.emailSent) {
             setCodesSent(prev => ({ ...prev, email: true }));
-            setUserEmail(response.data.userEmail);
-            sentMethods.push('Email');
+            sentMethods.push(`Email (${response.data.adminEmailsCount} recipients)`);
             codesSentCount++;
           }
           
@@ -763,6 +990,7 @@ const AdminDashboardPage: React.FC = () => {
               { id: 'screenshots', label: 'Screenshots', icon: Camera },
               { id: 'terminal', label: 'Terminal', icon: Terminal },
               { id: 'vps', label: 'VPS Monitor', icon: Server },
+              { id: 'active-services', label: 'Active Services', icon: Server },
             ].map((tab) => {
               const Icon = tab.icon;
               const handleTabClick = () => {
@@ -1281,6 +1509,111 @@ const AdminDashboardPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Bot Status Control */}
+              <div className="card">
+                <h3 className="text-lg font-semibold text-text-primary mb-4">
+                  Bot Status Control
+                </h3>
+                <div className="space-y-4">
+                  {/* Current Status Display */}
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <Bot className="w-5 h-5 text-text-secondary" />
+                      <div>
+                        <p className="text-sm text-text-secondary">Current Status</p>
+                        <div className="flex items-center space-x-2">
+                          {botStatus && botStatus.currentStatus ? (
+                            <>
+                              {getStatusIcon(botStatus.currentStatus)}
+                              <span className={`font-medium ${getStatusColor(botStatus.currentStatus)}`}>
+                                {botStatus.currentStatus.toUpperCase()}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-gray-400">Loading...</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {isLoadingBotStatus && (
+                      <RefreshCw className="w-4 h-4 animate-spin text-text-secondary" />
+                    )}
+                  </div>
+
+                  {/* Bot On/Off Toggle */}
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <Bot className="w-5 h-5 text-text-secondary" />
+                      <div>
+                        <p className="text-sm text-text-secondary">Bot Control</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {isBotEnabled ? 'Bot is enabled and running' : 'Bot is disabled'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={toggleBot}
+                      disabled={isTogglingBot}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                        isBotEnabled ? 'bg-green-600' : 'bg-gray-200 dark:bg-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          isBotEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Status Change Buttons */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => changeBotStatus('online')}
+                      disabled={isChangingBotStatus}
+                      className="btn-primary text-sm py-2 px-3 inline-flex items-center justify-center space-x-1"
+                    >
+                      <CircleDot className="w-3 h-3 text-green-500" />
+                      <span>Online</span>
+                    </button>
+                    <button
+                      onClick={() => changeBotStatus('idle')}
+                      disabled={isChangingBotStatus}
+                      className="btn-primary text-sm py-2 px-3 inline-flex items-center justify-center space-x-1"
+                    >
+                      <Circle className="w-3 h-3 text-yellow-500" />
+                      <span>Idle</span>
+                    </button>
+                    <button
+                      onClick={() => changeBotStatus('dnd')}
+                      disabled={isChangingBotStatus}
+                      className="btn-primary text-sm py-2 px-3 inline-flex items-center justify-center space-x-1"
+                    >
+                      <Circle className="w-3 h-3 text-red-500" />
+                      <span>DND</span>
+                    </button>
+                    <button
+                      onClick={() => changeBotStatus('invisible')}
+                      disabled={isChangingBotStatus}
+                      className="btn-primary text-sm py-2 px-3 inline-flex items-center justify-center space-x-1"
+                    >
+                      <Circle className="w-3 h-3 text-gray-500" />
+                      <span>Offline</span>
+                    </button>
+                  </div>
+
+                  {/* Refresh Button */}
+                  <button
+                    onClick={fetchBotStatus}
+                    disabled={isLoadingBotStatus}
+                    className="w-full btn-secondary text-sm py-2 inline-flex items-center justify-center space-x-2"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingBotStatus ? 'animate-spin' : ''}`} />
+                    <span>Refresh Status</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="card">
                 <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">
                   System Information
@@ -1591,20 +1924,23 @@ const AdminDashboardPage: React.FC = () => {
                           {folder.files.map((file: any) => (
                             <div key={file.name} className="group relative">
                               <div className="aspect-video bg-gray-100 dark:bg-background-dark-tertiary rounded-lg overflow-hidden border border-gray-200 dark:border-dark-accent-navy">
-                                {file.base64Data ? (
-                                  <img
-                                    src={file.base64Data}
-                                    alt={file.name}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-background-dark-tertiary">
-                                    <div className="text-center text-gray-500 dark:text-gray-400">
-                                      <Camera className="w-8 h-8 mx-auto mb-2" />
-                                      <p className="text-sm">Image not found</p>
-                                    </div>
+                                <img
+                                  src={`/api/admin/screenshots/view/${folder.name}/${file.name}`}
+                                  alt={file.name}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.style.display = 'none';
+                                    const fallback = target.nextElementSibling as HTMLElement;
+                                    if (fallback) fallback.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-background-dark-tertiary" style={{ display: 'none' }}>
+                                  <div className="text-center text-gray-500 dark:text-gray-400">
+                                    <Camera className="w-8 h-8 mx-auto mb-2" />
+                                    <p className="text-sm">Image not found</p>
                                   </div>
-                                )}
+                                </div>
                               </div>
                               <div className="mt-2">
                                 <p className="text-xs text-text-secondary dark:text-text-dark-secondary truncate">
@@ -1754,10 +2090,10 @@ const AdminDashboardPage: React.FC = () => {
                       )}
                       
                       {/* Email Code Input */}
-                      {codesSent.email && userEmail && (
+                      {codesSent.email && (
                         <div>
                           <div className="text-xs text-text-secondary dark:text-text-dark-secondary text-center mb-2">
-                            📧 Code sent to: <span className="font-medium">{userEmail}</span>
+                            📧 Code sent to admin email(s)
                           </div>
                           <label className="label">Email Access Code (6 digits)</label>
                           <input
@@ -2574,6 +2910,378 @@ const AdminDashboardPage: React.FC = () => {
                   <p className="text-text-secondary dark:text-text-dark-secondary">Failed to load VPS statistics</p>
                   <button
                     onClick={fetchVpsStats}
+                    className="btn-primary mt-4"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Active Services Tab */}
+        {activeTab === 'active-services' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">
+                  Active Services
+                </h2>
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => fetchActiveServices()}
+                    disabled={isLoadingActiveServices}
+                    className="btn-secondary text-sm px-3 py-1 inline-flex items-center space-x-1"
+                  >
+                    {isLoadingActiveServices ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    <span>Refresh</span>
+                  </button>
+                  <div className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                    Auto-refresh every 30s
+                  </div>
+                </div>
+              </div>
+              
+              {isLoadingActiveServices ? (
+                <div className="text-center py-8">
+                  <RefreshCw className="w-8 h-8 text-primary-500 mx-auto mb-4 animate-spin" />
+                  <p className="text-text-secondary dark:text-text-dark-secondary">
+                    Loading active services...
+                  </p>
+                </div>
+              ) : activeServicesData ? (
+                <div className="space-y-4">
+                  {/* Summary Stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                      <div className="flex items-center space-x-2">
+                        <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+                        <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                          Running Services
+                        </span>
+                      </div>
+                      <div className="text-2xl font-bold text-green-900 dark:text-green-100 mt-1">
+                        {activeServicesData.activeCount}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                      <div className="flex items-center space-x-2">
+                        <Pause className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                          Total Services
+                        </span>
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                        {activeServicesData.totalCount}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <div className="flex items-center space-x-2">
+                        <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                          Last Updated
+                        </span>
+                      </div>
+                      <div className="text-sm text-blue-900 dark:text-blue-100 mt-1">
+                        {new Date(activeServicesData.lastUpdated).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="mb-6">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search services..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full px-4 py-2 pl-10 bg-white dark:bg-background-dark-secondary border border-gray-200 dark:border-background-dark-quaternary rounded-lg text-text-primary dark:text-text-dark-primary placeholder-text-secondary dark:placeholder-text-dark-secondary focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                      <Search className="absolute left-3 top-2.5 w-4 h-4 text-text-secondary dark:text-text-dark-secondary" />
+                    </div>
+                  </div>
+
+                  {/* Categorized Services */}
+                  {activeServicesData.categorizedServices && (
+                    <div className="space-y-4">
+                      {Object.entries(activeServicesData.categorizedServices).map(([category, services], categoryIndex) => {
+                        if ((services as any[]).length === 0) return null;
+                        
+                        // Filter services based on search query
+                        const filteredServices = (services as any[]).filter(service => 
+                          service.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          service.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          service.language.toLowerCase().includes(searchQuery.toLowerCase())
+                        );
+                        
+                        if (filteredServices.length === 0 && searchQuery) return null;
+                        
+                        return (
+                          <motion.div
+                            key={category}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.5, delay: categoryIndex * 0.1 }}
+                            className="bg-white dark:bg-background-dark-secondary border border-gray-200 dark:border-background-dark-quaternary rounded-lg"
+                          >
+                            {/* Category Header */}
+                            <div 
+                              className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-background-dark-tertiary transition-colors"
+                              onClick={() => toggleCategory(category)}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-3">
+                                  <ChevronDown 
+                                    className={`w-5 h-5 text-text-secondary dark:text-text-dark-secondary transition-transform ${
+                                      expandedCategories[category] ? 'rotate-0' : '-rotate-90'
+                                    }`} 
+                                  />
+                                  <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">
+                                    {category}
+                                  </h3>
+                                  <span className="bg-primary-100 dark:bg-primary-900/30 text-primary-800 dark:text-primary-200 px-2 py-1 rounded-full text-xs">
+                                    {filteredServices.length}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                                  {expandedCategories[category] ? 'Collapse' : 'Expand'}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Services List */}
+                            {expandedCategories[category] && (
+                              <div className="border-t border-gray-200 dark:border-background-dark-quaternary">
+                                {filteredServices.map((service: any, index: number) => {
+                                  const serviceId = `${service.pid}-${index}`;
+                                  const isExpanded = expandedServices[serviceId];
+                                  const statusBadge = getStatusBadge(service.status);
+                                  
+                                  return (
+                                    <motion.div
+                                      key={serviceId}
+                                      initial={{ opacity: 0, x: -20 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      transition={{ duration: 0.3, delay: index * 0.05 }}
+                                      className="border-b border-gray-100 dark:border-background-dark-quaternary last:border-b-0"
+                                    >
+                                      {/* Service Header */}
+                                      <div 
+                                        className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-background-dark-tertiary transition-colors"
+                                        onClick={() => toggleService(serviceId)}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center space-x-3 flex-1 min-w-0">
+                                            <div className={`p-2 rounded-lg flex-shrink-0 ${
+                                              service.status === 'running' 
+                                                ? 'bg-green-100 dark:bg-green-900/30' 
+                                                : 'bg-gray-100 dark:bg-gray-800'
+                                            }`}>
+                                              {service.status === 'running' ? (
+                                                <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                              ) : (
+                                                <Pause className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                              )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center space-x-2">
+                                                <h4 className="font-semibold text-text-primary dark:text-text-dark-primary truncate">
+                                                  {service.filename}
+                                                </h4>
+                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusBadge.color}`}>
+                                                  {statusBadge.text}
+                                                </span>
+                                              </div>
+                                              <p className="text-sm text-text-secondary dark:text-text-dark-secondary truncate">
+                                                {service.description}
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center space-x-2">
+                                            <div className="text-right text-sm text-text-secondary dark:text-text-dark-secondary">
+                                              <div>PID: {service.pid}</div>
+                                              <div>CPU: {service.cpu}%</div>
+                                            </div>
+                                            <ChevronDown 
+                                              className={`w-4 h-4 text-text-secondary dark:text-text-dark-secondary transition-transform ${
+                                                isExpanded ? 'rotate-0' : '-rotate-90'
+                                              }`} 
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Expandable Details */}
+                                      {isExpanded && (
+                                        <motion.div
+                                          initial={{ opacity: 0, height: 0 }}
+                                          animate={{ opacity: 1, height: 'auto' }}
+                                          exit={{ opacity: 0, height: 0 }}
+                                          className="px-4 pb-4 bg-gray-50 dark:bg-background-dark-tertiary"
+                                        >
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {/* Basic Info */}
+                                            <div className="space-y-2">
+                                              <h5 className="font-medium text-text-primary dark:text-text-dark-primary">Basic Information</h5>
+                                              <div className="text-sm space-y-1">
+                                                <div><span className="font-medium">Language:</span> {service.language}</div>
+                                                <div><span className="font-medium">User:</span> {service.user}</div>
+                                                <div><span className="font-medium">Memory:</span> {service.memory}%</div>
+                                                <div><span className="font-medium">Last Run:</span> {new Date(service.lastRun).toLocaleString()}</div>
+                                              </div>
+                                            </div>
+                                            
+                                            {/* Category-specific Details */}
+                                            <div className="space-y-2">
+                                              <h5 className="font-medium text-text-primary dark:text-text-dark-primary">Details</h5>
+                                              <div className="text-sm space-y-1">
+                                                {category === 'Claimers' && (
+                                                  <>
+                                                    <div><span className="font-medium">Status:</span> {service.details.status}</div>
+                                                    <div><span className="font-medium">Logs:</span> {service.details.logs}</div>
+                                                    <div><span className="font-medium">Last Activity:</span> {new Date(service.details.lastActivity).toLocaleString()}</div>
+                                                  </>
+                                                )}
+                                                {category === 'Discord Services' && (
+                                                  <>
+                                                    <div><span className="font-medium">Bot Name:</span> {service.details.botName}</div>
+                                                    <div><span className="font-medium">Event Listeners:</span> {service.details.eventListeners.join(', ')}</div>
+                                                    <div><span className="font-medium">Command Types:</span> {service.details.commandTypes.join(', ')}</div>
+                                                  </>
+                                                )}
+                                                {category === 'Website' && (
+                                                  <>
+                                                    <div><span className="font-medium">Route Path:</span> {service.details.routePath}</div>
+                                                    <div><span className="font-medium">Module:</span> {service.details.moduleName}</div>
+                                                    <div><span className="font-medium">Type:</span> {service.details.isStatic ? 'Static' : 'Dynamic'}</div>
+                                                  </>
+                                                )}
+                                                {category === 'Other / System' && (
+                                                  <>
+                                                    <div><span className="font-medium">Role:</span> {service.details.role}</div>
+                                                    <div><span className="font-medium">Type:</span> {service.type}</div>
+                                                  </>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                          
+                                          {/* Full Command */}
+                                          <div className="mt-4">
+                                            <h5 className="font-medium text-text-primary dark:text-text-dark-primary mb-2">Full Command</h5>
+                                            <div className="bg-gray-100 dark:bg-background-dark-quaternary p-3 rounded-lg">
+                                              <code className="text-xs text-text-secondary dark:text-text-dark-secondary break-all">
+                                                {service.fullPath}
+                                              </code>
+                                            </div>
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  
+                  {/* Fallback for old format */}
+                  {!activeServicesData.categorizedServices && (
+                    <div className="space-y-3">
+                      {activeServicesData.services.map((service: any, index: number) => (
+                        <motion.div
+                          key={`${service.fileName}-${service.pid || index}`}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3, delay: index * 0.05 }}
+                          className="bg-white dark:bg-background-dark-secondary border border-gray-200 dark:border-background-dark-quaternary rounded-lg p-4"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className={`p-2 rounded-lg ${
+                                service.status === 'running' 
+                                  ? 'bg-green-100 dark:bg-green-900/30' 
+                                  : 'bg-gray-100 dark:bg-gray-900/30'
+                              }`}>
+                                {service.status === 'running' ? (
+                                  <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                ) : (
+                                  <Pause className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                                )}
+                              </div>
+                              
+                              <div>
+                                <h3 className="font-semibold text-text-primary dark:text-text-dark-primary">
+                                  {service.name}
+                                </h3>
+                                <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
+                                  {service.fileName}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center space-x-4 text-sm">
+                              {service.status === 'running' && service.pid && (
+                                <div className="text-text-secondary dark:text-text-dark-secondary">
+                                  PID: <span className="font-mono">{service.pid}</span>
+                                </div>
+                              )}
+                              {service.status === 'running' && service.cpu && (
+                                <div className="text-text-secondary dark:text-text-dark-secondary">
+                                  CPU: <span className="font-mono">{service.cpu}%</span>
+                                </div>
+                              )}
+                              {service.status === 'running' && service.memory && (
+                                <div className="text-text-secondary dark:text-text-dark-secondary">
+                                  RAM: <span className="font-mono">{service.memory}%</span>
+                                </div>
+                              )}
+                              <div className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                service.status === 'running'
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
+                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
+                              }`}>
+                                {service.status === 'running' ? 'Running' : 'Not Running'}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {service.status === 'running' && service.command && (
+                            <div className="mt-3 pt-3 border-t border-gray-200 dark:border-background-dark-quaternary">
+                              <p className="text-xs text-text-secondary dark:text-text-dark-secondary font-mono bg-gray-50 dark:bg-background-dark-tertiary p-2 rounded break-all">
+                                {service.command}
+                              </p>
+                            </div>
+                          )}
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+                  <p className="text-text-secondary dark:text-text-dark-secondary">
+                    Failed to load active services
+                  </p>
+                  <button
+                    onClick={() => fetchActiveServices()}
                     className="btn-primary mt-4"
                   >
                     Try Again

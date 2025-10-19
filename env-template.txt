@@ -11,6 +11,9 @@ SCHEDULER_CHANNEL_ID=your_scheduler_channel_id_here
 REWARDS_CHANNEL_ID=your_rewards_channel_id_here
 REGISTRATION_CHANNEL_ID=1422725910196518922
 
+# Discord Bot Status (online, idle, dnd, invisible)
+DISCORD_BOT_STATUS=dnd
+
 # Admin Email Whitelist (for email authentication)
 # Comma-separated list of emails allowed to receive authentication codes
 ADMIN_EMAILS=admin@example.com,admin2@example.com
@@ -22,6 +25,10 @@ ALLOWED_TELEGRAM_USERS=your_telegram_user_id_here,your_friend_telegram_user_id_h
 # Server Ports
 FRONTEND_PORT=2500
 BACKEND_PORT=2600
+DISCORD_API_PORT=2700
+
+# Service URLs (for internal communication)
+DISCORD_BOT_SERVICE_URL=http://8bp.epildevconnect.uk:2700
 
 # Public URLs
 PUBLIC_URL=https://8bp.epildevconnect.uk/8bp-rewards

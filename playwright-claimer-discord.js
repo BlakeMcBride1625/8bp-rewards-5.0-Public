@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
-const DiscordService = require('./discord-service');
+const DiscordService = require('./services/discord-service');
 const mongoose = require('mongoose');
 const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
 const BrowserPool = require('./browser-pool');
@@ -35,6 +35,43 @@ class EightBallPoolClaimer {
     this.headless = process.env.HEADLESS !== 'false';
     this.dbConnected = false;
     this.browserPool = new BrowserPool(6); // Max 6 concurrent browsers
+    
+    // Check and create screenshot directories with proper permissions
+    this.initializeScreenshotDirectories();
+  }
+
+  // Initialize screenshot directories with proper permissions
+  initializeScreenshotDirectories() {
+    const directories = [
+      'screenshots',
+      'screenshots/shop-page',
+      'screenshots/login',
+      'screenshots/final-page',
+      'screenshots/id-entry',
+      'screenshots/go-click',
+      'screenshots/confirmation'
+    ];
+
+    directories.forEach(dir => {
+      try {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+          console.log(`📁 Created screenshot directory: ${dir}`);
+        } else {
+          // Check if we can write to the directory
+          try {
+            const testFile = `${dir}/test-write.tmp`;
+            fs.writeFileSync(testFile, 'test');
+            fs.unlinkSync(testFile);
+            console.log(`✅ Screenshot directory ${dir} is writable`);
+          } catch (error) {
+            console.warn(`⚠️ Screenshot directory ${dir} may have permission issues: ${error.message}`);
+          }
+        }
+      } catch (error) {
+        console.warn(`⚠️ Failed to initialize screenshot directory ${dir}: ${error.message}`);
+      }
+    });
   }
 
   async connectToDatabase() {
@@ -53,6 +90,26 @@ class EightBallPoolClaimer {
       return true;
     } catch (error) {
       console.error('❌ Failed to connect to MongoDB:', error.message);
+      return false;
+    }
+  }
+
+  // Helper function to safely take screenshots with error handling
+  async takeScreenshot(page, path, description) {
+    try {
+      // Ensure directory exists
+      const dir = path.substring(0, path.lastIndexOf('/'));
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`📁 Created directory: ${dir}`);
+      }
+      
+      await page.screenshot({ path });
+      console.log(`📸 ${description}: ${path}`);
+      return true;
+    } catch (error) {
+      console.warn(`⚠️ Screenshot failed for ${description}: ${error.message}`);
+      console.warn(`⚠️ This won't affect the claim process - continuing without screenshot`);
       return false;
     }
   }
@@ -270,8 +327,7 @@ class EightBallPoolClaimer {
       console.log('✅ Successfully loaded Daily Reward page');
 
       // Take initial screenshot
-      await page.screenshot({ path: `screenshots/shop-page/shop-page-${userId}.png` });
-      console.log(`📸 Initial screenshot saved as shop-page-${userId}.png`);
+      await this.takeScreenshot(page, `screenshots/shop-page/shop-page-${userId}.png`, 'Initial shop page');
 
       // Look for login modal
       console.log('🔍 Looking for login modal...');
@@ -281,8 +337,7 @@ class EightBallPoolClaimer {
       await page.waitForTimeout(3000);
 
       // Take screenshot after login
-      await page.screenshot({ path: `screenshots/login/after-login-${userId}.png` });
-      console.log(`📸 Screenshot after login saved as after-login-${userId}.png`);
+      await this.takeScreenshot(page, `screenshots/login/after-login-${userId}.png`, 'After login');
 
       // Check for FREE buttons in Daily Reward section
       console.log('🎁 Checking Daily Reward section for FREE items...');
@@ -312,8 +367,7 @@ class EightBallPoolClaimer {
 
       // Take final screenshot
       screenshotPath = `screenshots/final-page/final-page-${userId}.png`;
-      await page.screenshot({ path: screenshotPath });
-      console.log(`📸 Final screenshot saved as ${screenshotPath}`);
+      await this.takeScreenshot(page, screenshotPath, 'Final page');
 
       // Logout
       console.log('🚪 Logging out...');
@@ -363,6 +417,12 @@ class EightBallPoolClaimer {
 
     } catch (error) {
       console.error(`❌ Error during claim process for ${userId}:`, error.message);
+      
+      // Check if it's a screenshot-related error
+      if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
+        console.warn(`⚠️ Permission error detected for ${userId} - this may be related to screenshot saving`);
+        console.warn(`⚠️ Consider checking screenshot directory permissions`);
+      }
       
       // Save failed claim record to database
       await this.saveClaimRecord(userId, [], false, error.message);
@@ -530,16 +590,14 @@ class EightBallPoolClaimer {
       console.log(`✅ Entered User ID: ${userId}`);
 
       // Take screenshot after entering ID
-      await page.screenshot({ path: `screenshots/id-entry/after-id-entry-${userId}.png` });
-      console.log(`📸 Screenshot after ID entry saved as after-id-entry-${userId}.png`);
+      await this.takeScreenshot(page, `screenshots/id-entry/after-id-entry-${userId}.png`, 'After ID entry');
 
       // Click Go button
       await this.clickGoButton(page, input);
       
       // Wait for login to complete and take another screenshot
       await page.waitForTimeout(3000);
-      await page.screenshot({ path: `screenshots/go-click/after-go-click-${userId}.png` });
-      console.log(`📸 Screenshot after Go click saved as after-go-click-${userId}.png`);
+      await this.takeScreenshot(page, `screenshots/go-click/after-go-click-${userId}.png`, 'After Go click');
 
     } catch (error) {
       console.error('❌ Error filling login form:', error.message);

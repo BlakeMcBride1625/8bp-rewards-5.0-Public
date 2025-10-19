@@ -17,7 +17,6 @@ declare module 'express-session' {
       discord: string;
       telegram: string;
       email: string;
-      userEmail: string;
       generatedAt: number;
     };
   }
@@ -331,7 +330,7 @@ router.post('/request-codes', async (req, res) => {
     const user = req.user as any;
     const userId = user?.id;
     const { channel } = req.body;
-    const userEmail = user?.email || ''; // Get email from Discord session
+    const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim()) || [];
     
     if (!userId) {
       return res.status(401).json({
@@ -449,53 +448,47 @@ router.post('/request-codes', async (req, res) => {
     }
     
     // Send Email code if requested
-    const allowedEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim()) || [];
     if (channel === 'email') {
+      if (adminEmails.length === 0) {
+        logger.warn('No admin emails configured', {
+          action: 'no_admin_emails',
+          userId
+        });
+        return res.status(400).json({
+          error: 'Email authentication not configured. Please contact an administrator.'
+        });
+      }
       
-      if (userEmail) {
-        // Single email provided
-        if (!isAllowedForEmail(userEmail)) {
-          logger.warn('Email not in ADMIN_EMAILS whitelist', {
-            action: 'email_not_whitelisted',
+      try {
+        const emailService = new EmailNotificationService();
+        if (emailService.isConfigured()) {
+          // Send to all admin emails
+          for (const adminEmail of adminEmails) {
+            await emailService.sendPinCode(
+              adminEmail,
+              emailCode,
+              'Terminal Access'
+            );
+          }
+          emailSent = true;
+          logger.info('Email MFA code sent to all admin emails', {
+            action: 'email_mfa_sent',
             userId,
-            email: userEmail
+            adminEmails: adminEmails.length,
+            code: emailCode.substring(0, 2) + '****'
           });
-          if (channel === 'email') {
-            return res.status(403).json({
-              error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
-            });
-          }
         } else {
-          try {
-            const emailService = new EmailNotificationService();
-            if (emailService.isConfigured()) {
-              emailSent = await emailService.sendPinCode(
-                userEmail,
-                emailCode,
-                'Terminal Access'
-              );
-              logger.info('Email MFA code sent', {
-                action: 'email_mfa_sent',
-                userId,
-                userEmail,
-                code: emailCode.substring(0, 2) + '****'
-              });
-            } else {
-              logger.warn('Email service not configured', {
-                action: 'email_service_not_configured',
-                userId,
-                userEmail
-              });
-            }
-          } catch (emailError) {
-            logger.error('Failed to send email MFA code', {
-              action: 'email_mfa_error',
-              userId,
-              userEmail,
-              error: emailError instanceof Error ? emailError.message : 'Unknown error'
-            });
-          }
+          logger.warn('Email service not configured', {
+            action: 'email_service_not_configured',
+            userId
+          });
         }
+      } catch (emailError) {
+        logger.error('Failed to send email MFA code', {
+          action: 'email_mfa_error',
+          userId,
+          error: emailError instanceof Error ? emailError.message : 'Unknown error'
+        });
       }
     }
     
@@ -504,7 +497,6 @@ router.post('/request-codes', async (req, res) => {
       discord: discordCode,
       telegram: telegramCode,
       email: emailCode,
-      userEmail: userEmail || '',
       generatedAt: new Date().getTime()
     };
     
@@ -517,7 +509,7 @@ router.post('/request-codes', async (req, res) => {
     } else if (telegramSent) {
       message += 'Code sent to Telegram. Please check your DMs.';
     } else if (emailSent) {
-      message += `Code sent to ${userEmail}. Please check your email.`;
+      message += `Code sent to admin emails (${adminEmails.length} recipients). Please check your email.`;
     } else {
       message += 'Please use the codes provided.';
     }
@@ -528,7 +520,7 @@ router.post('/request-codes', async (req, res) => {
       discordSent,
       telegramSent,
       emailSent,
-      userEmail: userEmail || ''
+      adminEmailsCount: adminEmails.length
     });
     
   } catch (error) {

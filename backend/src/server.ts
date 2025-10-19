@@ -28,6 +28,7 @@ import leaderboardRoutes from './routes/leaderboard';
 import vpsMonitorRoutes from './routes/vps-monitor';
 import screenshotsRoutes from './routes/screenshots';
 import adminTerminalRoutes from './routes/admin-terminal';
+import tiktokProfilesRoutes from './routes/tiktok-profiles';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -104,10 +105,14 @@ class Server {
     // Rate limiting
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
+      max: 1000, // limit each IP to 1000 requests per windowMs (increased for admin operations)
       message: 'Too many requests from this IP, please try again later.',
       standardHeaders: true,
-      legacyHeaders: false
+      legacyHeaders: false,
+      skip: (req) => {
+        // Skip rate limiting for admin routes
+        return req.path.startsWith('/api/admin/');
+      }
     });
     this.app.use('/api/', limiter);
 
@@ -161,6 +166,7 @@ class Server {
     this.app.use('/api/vps-monitor', vpsMonitorRoutes);
     this.app.use('/api/admin/screenshots', screenshotsRoutes);
     this.app.use('/api/admin/terminal', adminTerminalRoutes);
+    this.app.use('/api/tiktok-profiles', tiktokProfilesRoutes);
     
     // Also register API routes under /8bp-rewards prefix for frontend
     this.app.use('/8bp-rewards/api/auth', authRoutes);
@@ -172,6 +178,7 @@ class Server {
     this.app.use('/8bp-rewards/api/vps-monitor', vpsMonitorRoutes);
     this.app.use('/8bp-rewards/api/admin/screenshots', screenshotsRoutes);
     this.app.use('/8bp-rewards/api/admin/terminal', adminTerminalRoutes);
+    this.app.use('/8bp-rewards/api/tiktok-profiles', tiktokProfilesRoutes);
 
     // Serve static files from React build
     if (process.env.NODE_ENV === 'production') {

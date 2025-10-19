@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Menu, X, Settings, Home, UserPlus, Shield, Mail, Activity, Trophy, LogIn, LogOut, User, Users } from 'lucide-react';
+import { Menu, X, Settings, Home, UserPlus, Shield, Mail, Activity, Trophy, LogIn, LogOut, User, Users, Server } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import AnimatedBackground from './AnimatedBackground';
 import Footer from './Footer';
@@ -52,7 +52,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Desktop Navigation - Centered */}
               <div className="hidden lg:flex items-center space-x-1">
                 {navigation.map((item) => {
-                  if (item.name === 'Admin Dashboard' && !isAdmin) return null;
+                  if ((item.name === 'Admin Dashboard' || item.name === 'Active Services') && !isAdmin) return null;
                   const Icon = item.icon;
                   return (
                     <Link
@@ -112,7 +112,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Desktop Navigation - Centered */}
               <div className="hidden lg:flex items-center space-x-1">
                 {navigation.map((item) => {
-                  if (item.name === 'Admin Dashboard' && !isAdmin) return null;
+                  if ((item.name === 'Admin Dashboard' || item.name === 'Active Services') && !isAdmin) return null;
                   const Icon = item.icon;
                   return (
                     <Link

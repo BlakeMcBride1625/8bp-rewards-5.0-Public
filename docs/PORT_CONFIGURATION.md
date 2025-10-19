@@ -5,7 +5,7 @@
 ### **Core 8BP Services:**
 - **Backend API**: `2600` ✅ (Currently working)
 - **Frontend React**: `2500` ✅ (Currently configured)
-- **Discord Bot**: `No port` (Background service)
+- **Discord Bot API**: `2700` ✅ (Updated from 3001)
 
 ### **Database Services:**
 - **MongoDB**: `27017` ✅ (Standard MongoDB port)
@@ -56,8 +56,8 @@ services:
 
 ### **8BP System Ports (Reserved):**
 - `2500-2599` - Frontend and related services
-- `2600-2699` - Backend API and related services
-- `2700-2799` - Database and cache services
+- `2600-2699` - Backend API and related services  
+- `2700-2799` - Discord Bot API and related services
 
 ### **Avoid These Ports:**
 - `3000` - Zipline service

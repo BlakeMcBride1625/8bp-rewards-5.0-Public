@@ -8,6 +8,9 @@
 export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:2600/api';
 
 export const API_ENDPOINTS = {
+  // Base URL for direct access
+  BASE_URL: API_BASE_URL.replace('/api', ''),
+  
   // Auth
   AUTH_STATUS: `${API_BASE_URL}/auth/status`,
   AUTH_DISCORD: `${API_BASE_URL}/auth/discord`,
@@ -28,6 +31,7 @@ export const API_ENDPOINTS = {
   ADMIN_RESET_LEADERBOARD_REQUEST_ACCESS: `${API_BASE_URL}/admin/reset-leaderboard/request-access`,
   ADMIN_RESET_LEADERBOARD_VERIFY_ACCESS: `${API_BASE_URL}/admin/reset-leaderboard/verify-access`,
   ADMIN_RESET_LEADERBOARD_ACCESS_STATUS: `${API_BASE_URL}/admin/reset-leaderboard/access-status`,
+  ADMIN_ACTIVE_SERVICES: `${API_BASE_URL}/admin/active-services`,
   
   // VPS Monitor Authentication
   ADMIN_VPS_REQUEST_ACCESS: `${API_BASE_URL}/admin/vps/request-access`,

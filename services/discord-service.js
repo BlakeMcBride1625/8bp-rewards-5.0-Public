@@ -1,7 +1,7 @@
-const { Client, GatewayIntentBits, AttachmentBuilder, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, Collection, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, Collection, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const DatabaseService = require('./services/database-service');
+const DatabaseService = require('./database-service');
 const axios = require('axios');
 
 class DiscordService {
@@ -32,20 +32,21 @@ class DiscordService {
   }
 
   setupEventHandlers() {
-    this.client.once('ready', async () => {
+    this.client.once('clientReady', async () => {
       console.log('🤖 Discord bot is ready!');
       console.log(`📋 Logged in as: ${this.client.user.tag}`);
       this.isReady = true;
       
-      // Set bot status to DND and activity
+      // Set bot status and activity (configurable via environment variable)
+      const botStatus = process.env.DISCORD_BOT_STATUS || 'dnd'; // Default to 'dnd' if not set
       this.client.user.setPresence({
-        status: 'dnd',
+        status: botStatus,
         activities: [{
           name: 'https://8bp.epildevconnect.uk/8bp-rewards/home',
           type: ActivityType.Watching
         }]
       });
-      console.log('👁️ Bot status set to DND - Watching https://8bp.epildevconnect.uk/8bp-rewards/home');
+      console.log(`👁️ Bot status set to ${botStatus.toUpperCase()} - Watching https://8bp.epildevconnect.uk/8bp-rewards/home`);
       
       // Register slash commands
       await this.registerSlashCommands();
@@ -580,6 +581,7 @@ class DiscordService {
       }
     };
 
+
     // Clear messages command
     const clearCommand = {
       data: new SlashCommandBuilder()
@@ -773,6 +775,247 @@ class DiscordService {
       console.log(`✅ Registered ${commands.length} slash commands globally`);
     } catch (error) {
       console.error('❌ Failed to register slash commands:', error);
+    }
+  }
+
+  // Change bot status (called from website API)
+  async changeBotStatus(status) {
+    if (!this.isReady) {
+      console.log('⚠️ Discord bot not ready, cannot change status');
+      return { success: false, error: 'Bot not ready' };
+    }
+
+    try {
+      // Validate status
+      const validStatuses = ['online', 'idle', 'dnd', 'invisible'];
+      if (!validStatuses.includes(status)) {
+        return { success: false, error: 'Invalid status. Must be: online, idle, dnd, or invisible' };
+      }
+
+      // Convert invisible to dnd since Discord doesn't allow invisible for bots
+      const actualStatus = status === 'invisible' ? 'dnd' : status;
+      
+      console.log(`🔄 Changing bot status to: ${actualStatus} (requested: ${status})`);
+      
+      // Update environment variable
+      process.env.DISCORD_BOT_STATUS = actualStatus;
+      
+      // Set the bot's presence
+      await this.client.user.setPresence({
+        status: actualStatus,
+        activities: [{
+          name: 'https://8bp.epildevconnect.uk/8bp-rewards/home',
+          type: ActivityType.Watching
+        }]
+      });
+      
+      console.log(`✅ Bot status changed to: ${actualStatus}`);
+      
+      return { 
+        success: true, 
+        status: actualStatus,
+        requestedStatus: status,
+        message: `Bot status changed to ${actualStatus.toUpperCase()}`
+      };
+      
+    } catch (error) {
+      console.error('❌ Error changing bot status:', error);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
+  // Toggle bot on/off (called from website API)
+  async toggleBot(enabled) {
+    try {
+      if (enabled) {
+        // Enable bot - try to login if not already connected
+        if (!this.isReady) {
+          console.log('🔄 Bot is disabled, attempting to enable...');
+          const loginResult = await this.login();
+          if (loginResult) {
+            console.log('✅ Bot enabled successfully');
+            return { 
+              success: true, 
+              enabled: true,
+              message: 'Bot enabled successfully'
+            };
+          } else {
+            console.log('⚠️ Discord login failed - likely rate limited');
+            return { 
+              success: false, 
+              error: 'Discord API rate limit reached. Bot will auto-retry when limit resets.',
+              retryAfter: '2025-10-19T00:00:00.000Z'
+            };
+          }
+        } else {
+          console.log('✅ Bot is already enabled');
+          return { 
+            success: true, 
+            enabled: true,
+            message: 'Bot is already enabled'
+          };
+        }
+      } else {
+        // Disable bot - logout from Discord
+        if (this.isReady) {
+          console.log('🔄 Disabling bot...');
+          await this.logout();
+          console.log('✅ Bot disabled successfully');
+          return { 
+            success: true, 
+            enabled: false,
+            message: 'Bot disabled successfully'
+          };
+        } else {
+          console.log('✅ Bot is already disabled');
+          return { 
+            success: true, 
+            enabled: false,
+            message: 'Bot is already disabled'
+          };
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error toggling bot:', error);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
+  // Get current bot status
+  async getBotStatus() {
+    try {
+      const environmentStatus = process.env.DISCORD_BOT_STATUS || 'dnd';
+      
+      if (!this.isReady) {
+        return { 
+          success: true, 
+          currentStatus: 'offline',
+          environmentStatus: environmentStatus,
+          botReady: false,
+          botTag: null,
+          message: 'Bot is offline - Discord connection failed'
+        };
+      }
+
+      const currentStatus = this.client.user.presence?.status || 'unknown';
+      
+      return {
+        success: true,
+        currentStatus: currentStatus,
+        environmentStatus: environmentStatus,
+        botReady: this.isReady,
+        botTag: this.client.user.tag,
+        message: 'Bot is online and ready'
+      };
+    } catch (error) {
+      console.error('❌ Error getting bot status:', error);
+      return { 
+        success: true, 
+        currentStatus: 'offline',
+        environmentStatus: process.env.DISCORD_BOT_STATUS || 'dnd',
+        botReady: false,
+        botTag: null,
+        message: 'Bot status unknown - error occurred'
+      };
+    }
+  }
+
+  // Send confirmation message with screenshot to Discord
+  async sendConfirmation(bpAccountId, imagePath, claimedItems = []) {
+    if (!this.isReady) {
+      console.log('⚠️ Discord bot not ready, skipping confirmation');
+      return false;
+    }
+
+    try {
+      // Find user in database by 8BP account ID
+      const users = await this.dbService.getAllUsers();
+      const user = users.find(u => u.eightBallPoolId === bpAccountId);
+      
+      if (!user) {
+        console.log(`⚠️ No user found for 8BP account: ${bpAccountId}`);
+        return false;
+      }
+
+      const username = user.username || 'Unknown User';
+      
+      // Create confirmation message
+      const embed = new EmbedBuilder()
+        .setTitle('🎁 Rewards Claimed Successfully!')
+        .setDescription(`**${username}** has successfully claimed their rewards!`)
+        .addFields(
+          { name: '🎱 8BP Account ID', value: bpAccountId, inline: true },
+          { name: '👤 Username', value: username, inline: true },
+          { name: '📦 Items Claimed', value: claimedItems.length > 0 ? claimedItems.join(', ') : 'Various rewards', inline: false },
+          { name: '⏰ Claimed At', value: new Date().toLocaleString(), inline: true }
+        )
+        .setColor(0x00FF00)
+        .setTimestamp();
+
+      // Create image attachment if path exists
+      let imageAttachment = null;
+      if (imagePath && require('fs').existsSync(imagePath)) {
+        imageAttachment = new AttachmentBuilder(imagePath, {
+          name: `8bp-claim-${bpAccountId}.png`,
+          description: `8 Ball Pool claim confirmation for account ${bpAccountId}`
+        });
+      }
+
+      // Send to rewards channel if configured
+      const channelId = process.env.REWARDS_CHANNEL_ID;
+      if (channelId) {
+        const channel = this.client.channels.cache.get(channelId);
+        if (channel && channel.isTextBased()) {
+          const messageOptions = { embeds: [embed] };
+          if (imageAttachment) {
+            messageOptions.files = [imageAttachment];
+          }
+          
+          await channel.send(messageOptions);
+          console.log(`✅ Confirmation sent to rewards channel for ${username} (${bpAccountId})`);
+        }
+      }
+
+      // Send DM to admins if user is in allowed admins
+      const userId = user.discordId || user.eightBallPoolId; // Fallback to 8BP ID if no Discord ID
+      if (this.allowedAdmins.includes(userId)) {
+        try {
+          const userObj = await this.client.users.fetch(userId);
+          if (userObj) {
+            const dmOptions = { embeds: [embed] };
+            if (imageAttachment) {
+              dmOptions.files = [imageAttachment];
+            }
+            
+            await userObj.send(dmOptions);
+            console.log(`📩 DM sent to admin: ${username}`);
+          }
+        } catch (dmError) {
+          console.log(`⚠️ Could not send DM to ${username}: ${dmError.message}`);
+        }
+      }
+
+      // Clean up local file after sending
+      if (imagePath && require('fs').existsSync(imagePath)) {
+        try {
+          require('fs').unlinkSync(imagePath);
+          console.log(`🗑️ Cleaned up screenshot: ${imagePath}`);
+        } catch (cleanupError) {
+          console.log(`⚠️ Could not clean up screenshot: ${cleanupError.message}`);
+        }
+      }
+
+      return true;
+
+    } catch (error) {
+      console.error('❌ Error sending Discord confirmation:', error.message);
+      return false;
     }
   }
 

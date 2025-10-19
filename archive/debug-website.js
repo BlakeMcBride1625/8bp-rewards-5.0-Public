@@ -4,6 +4,27 @@
  */
 
 const { chromium } = require('playwright');
+const fs = require('fs');
+
+// Helper function to safely take screenshots with error handling
+async function takeScreenshot(page, path, description) {
+  try {
+    // Ensure directory exists
+    const dir = path.substring(0, path.lastIndexOf('/'));
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+      console.log(`📁 Created directory: ${dir}`);
+    }
+    
+    await page.screenshot({ path });
+    console.log(`📸 ${description}: ${path}`);
+    return true;
+  } catch (error) {
+    console.warn(`⚠️ Screenshot failed for ${description}: ${error.message}`);
+    console.warn(`⚠️ This won't affect the debug process - continuing without screenshot`);
+    return false;
+  }
+}
 
 async function debugWebsite() {
   console.log('🔍 Starting website debug analysis...');
@@ -26,7 +47,7 @@ async function debugWebsite() {
     await page.waitForTimeout(3000);
     
     console.log('📸 Taking initial screenshot...');
-    await page.screenshot({ path: 'screenshots/debug-initial.png' });
+    await takeScreenshot(page, 'screenshots/debug-initial.png', 'Initial debug page');
     
     // Check what we can see on the page
     console.log('🔍 Analyzing page content...');
@@ -141,7 +162,7 @@ async function debugWebsite() {
     
     // Take final screenshot
     console.log('📸 Taking final screenshot...');
-    await page.screenshot({ path: 'screenshots/debug-final.png' });
+    await takeScreenshot(page, 'screenshots/debug-final.png', 'Final debug page');
     
     console.log('✅ Debug analysis complete!');
     console.log('📸 Check screenshots/debug-initial.png and screenshots/debug-final.png');

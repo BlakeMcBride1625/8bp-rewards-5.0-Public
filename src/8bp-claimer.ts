@@ -220,27 +220,56 @@ export class EightBallPoolClaimer {
   }
 
   private async ensureScreenshotDirectories(): Promise<void> {
-    try {
-      const fs = require('fs');
-      const path = require('path');
+    const fs = require('fs');
+    const directories = [
+      'screenshots',
+      'screenshots/shop-page',
+      'screenshots/login',
+      'screenshots/id-entry',
+      'screenshots/go-click',
+      'screenshots/final-page'
+    ];
 
-      const directories = [
-        'screenshots',
-        'screenshots/shop-page',
-        'screenshots/login',
-        'screenshots/id-entry',
-        'screenshots/go-click',
-        'screenshots/final-page'
-      ];
-
-      for (const dir of directories) {
+    directories.forEach(dir => {
+      try {
         if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-          this.logger.info(`📁 Created directory: ${dir}`);
+          fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+          this.logger.info(`📁 Created screenshot directory: ${dir}`);
+        } else {
+          // Check if we can write to the directory
+          try {
+            const testFile = `${dir}/test-write.tmp`;
+            fs.writeFileSync(testFile, 'test');
+            fs.unlinkSync(testFile);
+            this.logger.info(`✅ Screenshot directory ${dir} is writable`);
+          } catch (error) {
+            this.logger.warn(`⚠️ Screenshot directory ${dir} may have permission issues: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
+      } catch (error) {
+        this.logger.warn(`⚠️ Failed to initialize screenshot directory ${dir}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    });
+  }
+
+  // Helper method to safely take screenshots with error handling
+  private async takeScreenshot(page: any, path: string, description: string): Promise<boolean> {
+    try {
+      // Ensure directory exists
+      const fs = require('fs');
+      const dir = path.substring(0, path.lastIndexOf('/'));
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+        this.logger.info(`📁 Created directory: ${dir}`);
+      }
+      
+      await page.screenshot({ path });
+      this.logger.info(`📸 ${description}: ${path}`);
+      return true;
     } catch (error) {
-      this.logger.error(`❌ Error creating screenshot directories: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(`⚠️ Screenshot failed for ${description}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(`⚠️ This won't affect the claim process - continuing without screenshot`);
+      return false;
     }
   }
 
@@ -289,8 +318,7 @@ export class EightBallPoolClaimer {
       await page.waitForTimeout(5000);
 
       // Take initial screenshot
-      await page.screenshot({ path: `screenshots/shop-page/daily-reward-page-${userId}.png` });
-      this.logger.info('📸 Initial screenshot saved');
+      await this.takeScreenshot(page, `screenshots/shop-page/daily-reward-page-${userId}.png`, 'Initial daily reward page');
 
       // Step 1: Check if we need to login first
       this.logger.info('Checking if login is required...');
@@ -341,8 +369,7 @@ export class EightBallPoolClaimer {
         await page.waitForTimeout(2000);
 
         // Take screenshot after entering ID
-        await page.screenshot({ path: `screenshots/id-entry/after-id-entry-${userId}.png` });
-        this.logger.info('📸 Screenshot after ID entry saved');
+        await this.takeScreenshot(page, `screenshots/id-entry/after-id-entry-${userId}.png`, 'After ID entry');
 
         // Click login button (Go button)
         const loginButtonSelectors = [
@@ -392,8 +419,7 @@ export class EightBallPoolClaimer {
         await page.waitForTimeout(8000);
 
         // Take screenshot after login
-        await page.screenshot({ path: `screenshots/login/after-login-${userId}.png` });
-        this.logger.info('📸 Screenshot after login saved');
+        await this.takeScreenshot(page, `screenshots/login/after-login-${userId}.png`, 'After login');
       }
 
       // Step 2: Look for specific reward sections
@@ -732,15 +758,13 @@ export class EightBallPoolClaimer {
       
       if (success) {
         // Take final screenshot
-        await page.screenshot({ path: `screenshots/final-page/final-page-${userId}.png` });
-        this.logger.info('📸 Final screenshot saved');
+        await this.takeScreenshot(page, `screenshots/final-page/final-page-${userId}.png`, 'Final page (success)');
         
         this.logger.success('Free items claimed successfully!');
         return true;
       } else {
         // Take final screenshot even if success is unclear
-        await page.screenshot({ path: `screenshots/final-page/final-page-${userId}.png` });
-        this.logger.info('📸 Final screenshot saved');
+        await this.takeScreenshot(page, `screenshots/final-page/final-page-${userId}.png`, 'Final page (unclear)');
         
         this.logger.warn('Claim process completed but success unclear');
         return true; // Assume success if we got this far

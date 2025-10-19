@@ -36,7 +36,7 @@ services:
         condition: service_healthy
     environment:
       # MongoDB Configuration
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD}@mongodb:27017/${MONGO_DATABASE:-8bp_rewards}?authSource=admin
+      MONGO_URI: ${MONGO_URI}
       
       # Discord Bot Configuration
       DISCORD_TOKEN: ${DISCORD_TOKEN}
@@ -44,12 +44,16 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI}
       ALLOWED_ADMINS: ${ALLOWED_ADMINS}
+      VPS_OWNERS: ${VPS_OWNERS}
+      ALLOWED_VPS_ADMINS: ${ALLOWED_VPS_ADMINS}
       SCHEDULER_CHANNEL_ID: ${SCHEDULER_CHANNEL_ID}
       REWARDS_CHANNEL_ID: ${REWARDS_CHANNEL_ID}
+      REGISTRATION_CHANNEL_ID: ${REGISTRATION_CHANNEL_ID}
       
       # Server Configuration (Standardized Ports)
       BACKEND_PORT: ${BACKEND_PORT:-2600}
       FRONTEND_PORT: ${FRONTEND_PORT:-2500}
+      DISCORD_API_PORT: ${DISCORD_API_PORT:-2700}
       NODE_ENV: production
       SESSION_SECRET: ${SESSION_SECRET}
       
@@ -73,10 +77,24 @@ services:
       
       # Legacy Configuration (for backward compatibility)
       USER_IDS: ${USER_IDS}
+      USER_ID: ${USER_ID}
       SHOP_URL: ${SHOP_URL:-https://8ballpool.com/en/shop}
       HEADLESS: ${HEADLESS:-true}
       TIMEOUT: ${TIMEOUT:-60000}
       DELAY_BETWEEN_USERS: ${DELAY_BETWEEN_USERS:-10000}
+      
+      # Additional Configuration
+      ADMIN_EMAILS: ${ADMIN_EMAILS}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      ALLOWED_TELEGRAM_USERS: ${ALLOWED_TELEGRAM_USERS}
+      DISCORD_TO_TELEGRAM_MAPPING: ${DISCORD_TO_TELEGRAM_MAPPING}
+      DISCORD_SPECIAL_USERS: ${DISCORD_SPECIAL_USERS}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID}
+      DISCORD_BOT_STATUS: ${DISCORD_BOT_STATUS}
+      DISCORD_BOT_SERVICE_URL: ${DISCORD_BOT_SERVICE_URL}
+      MONGODB_URI: ${MONGODB_URI}
+      JWT_SECRET: ${JWT_SECRET}
       
       # Timezone
       TZ: ${TZ:-Europe/London}
@@ -84,7 +102,8 @@ services:
       - "${BACKEND_PORT:-2600}:${BACKEND_PORT:-2600}"
     volumes:
       - ./logs:/app/logs
-      - ./user-mapping.json:/app/user-mapping.json
+      - ./screenshots:/app/screenshots
+# - ./user-mapping.json:/app/user-mapping.json
     networks:
       - 8bp-network
     healthcheck:
@@ -108,7 +127,7 @@ services:
         condition: service_healthy
     environment:
       # MongoDB Configuration
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD}@mongodb:27017/${MONGO_DATABASE:-8bp_rewards}?authSource=admin
+      MONGO_URI: ${MONGO_URI}
       
       # Discord Bot Configuration
       DISCORD_TOKEN: ${DISCORD_TOKEN}
@@ -117,6 +136,11 @@ services:
       ALLOWED_ADMINS: ${ALLOWED_ADMINS}
       SCHEDULER_CHANNEL_ID: ${SCHEDULER_CHANNEL_ID}
       REWARDS_CHANNEL_ID: ${REWARDS_CHANNEL_ID}
+      REGISTRATION_CHANNEL_ID: ${REGISTRATION_CHANNEL_ID}
+      DISCORD_BOT_STATUS: ${DISCORD_BOT_STATUS}
+      
+      # Server Configuration
+      DISCORD_API_PORT: ${DISCORD_API_PORT:-2700}
       
       # Legacy Configuration
       USER_IDS: ${USER_IDS}
@@ -127,9 +151,12 @@ services:
       
       # Timezone
       TZ: ${TZ:-Europe/London}
+    ports:
+      - "${DISCORD_API_PORT:-2700}:${DISCORD_API_PORT:-2700}"
     volumes:
       - ./logs:/app/logs
-      - ./user-mapping.json:/app/user-mapping.json
+      - ./screenshots:/app/screenshots
+# - ./user-mapping.json:/app/user-mapping.json
     networks:
       - 8bp-network
     healthcheck:
