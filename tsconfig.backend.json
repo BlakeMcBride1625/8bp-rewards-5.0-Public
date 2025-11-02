@@ -4,7 +4,7 @@
     "module": "commonjs",
     "lib": ["ES2020"],
     "outDir": "./dist/backend",
-    "rootDir": "./backend/src",
+    "rootDir": "./",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -36,7 +36,8 @@
     "emitDecoratorMetadata": true
   },
   "include": [
-    "backend/src/**/*"
+    "backend/src/**/*",
+    "models/**/*"
   ],
   "exclude": [
     "node_modules",
@@ -44,7 +45,8 @@
     "frontend",
     "src",
     "**/*.test.ts",
-    "**/*.spec.ts"
+    "**/*.spec.ts",
+    "backend/src/scripts/**/*"
   ]
 }
 

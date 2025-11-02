@@ -1,6 +1,5 @@
 import winston from 'winston';
-import { LogEntry } from '../models/LogEntry';
-import mongoose from 'mongoose';
+import { Pool } from 'pg';
 
 interface LogMeta {
   userId?: string;
@@ -13,6 +12,7 @@ interface LogMeta {
 class LoggerService {
   private logger: winston.Logger;
   private isConnected: boolean = false;
+  private dbPool: Pool | null = null;
 
   constructor() {
     this.logger = winston.createLogger({
@@ -46,76 +46,81 @@ class LoggerService {
       ]
     });
 
-    // Add MongoDB transport if connected
-    this.setupMongoTransport();
+    // MongoDB transport disabled for PostgreSQL migration
+    this.initDatabaseConnection();
   }
 
-  private async setupMongoTransport(): Promise<void> {
+  private async initDatabaseConnection(): Promise<void> {
     try {
-      if (mongoose.connection.readyState === 1) {
-        this.addMongoTransport();
-        this.isConnected = true;
-      } else {
-        // Wait for MongoDB connection
-        mongoose.connection.once('open', () => {
-          this.addMongoTransport();
-          this.isConnected = true;
-        });
-      }
+      this.dbPool = new Pool({
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || '5432'),
+        database: process.env.POSTGRES_DB || '8bp_rewards',
+        user: process.env.POSTGRES_USER || 'admin',
+        password: process.env.POSTGRES_PASSWORD || '192837DB25',
+        ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        // Connection pool settings to prevent disconnections
+        max: 20,
+        min: 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000
+      });
+      this.isConnected = true;
+      console.log('✅ Logger database connection initialized with pooling');
     } catch (error) {
-      console.error('Failed to setup MongoDB transport:', error);
+      console.error('❌ Failed to initialize logger database connection:', error);
+      this.isConnected = false;
     }
   }
 
-  private addMongoTransport(): void {
-    // MongoDB transport is not available in current winston version
-    // Using console transport instead for now
-    console.log('MongoDB transport not available, using console logging');
-  }
+  private async logToDatabase(level: string, message: string, meta: LogMeta = {}): Promise<void> {
+    if (!this.isConnected || !this.dbPool) {
+      return;
+    }
 
-  private async logToMongo(level: string, message: string, meta: LogMeta = {}): Promise<void> {
     try {
-      if (this.isConnected) {
-        const logEntry = new LogEntry({
-          level: level as 'error' | 'warn' | 'info' | 'debug',
-          message,
-          meta,
-          timestamp: new Date(),
-          service: '8bp-rewards',
-          userId: meta.userId,
-          action: meta.action,
-          ip: meta.ip,
-          userAgent: meta.userAgent
-        });
-
-        await logEntry.save();
-      }
+      await this.dbPool.query(
+        'INSERT INTO log_entries (timestamp, level, message, service, metadata) VALUES ($1, $2, $3, $4, $5)',
+        [new Date(), level, message, '8bp-rewards', JSON.stringify(meta)]
+      );
     } catch (error) {
-      console.error('Failed to log to MongoDB:', error);
+      console.error('❌ Failed to log to database:', error);
     }
   }
 
   public info(message: string, meta: LogMeta = {}): void {
     this.logger.info(message, meta);
-    this.logToMongo('info', message, meta);
+    this.logToDatabase('info', message, meta);
   }
 
   public warn(message: string, meta: LogMeta = {}): void {
     this.logger.warn(message, meta);
-    this.logToMongo('warn', message, meta);
+    this.logToDatabase('warn', message, meta);
   }
 
   public error(message: string, meta: LogMeta = {}): void {
     this.logger.error(message, meta);
-    this.logToMongo('error', message, meta);
+    this.logToDatabase('error', message, meta);
   }
 
   public debug(message: string, meta: LogMeta = {}): void {
     this.logger.debug(message, meta);
-    this.logToMongo('debug', message, meta);
+    this.logToDatabase('debug', message, meta);
   }
 
   // Specific logging methods for different actions
+  public logClaim(eightBallPoolId: string, username: string, items: string[], success: boolean, ip?: string): void {
+    const status = success ? 'success' : 'failed';
+    this.info(`Claim ${status}: ${username} (${eightBallPoolId}) - Items: ${items.join(', ')}`, {
+      action: 'claim',
+      userId: eightBallPoolId,
+      username,
+      items,
+      success,
+      ip
+    });
+  }
+
   public logRegistration(eightBallPoolId: string, username: string, ip?: string): void {
     this.info(`User registered: ${username} (${eightBallPoolId})`, {
       action: 'registration',
@@ -183,45 +188,15 @@ class LoggerService {
     }
   }
 
-  // Method to get logs with pagination
+  // MongoDB query methods disabled for PostgreSQL migration
   public async getLogs(page: number = 1, limit: number = 50, filters: any = {}): Promise<any[]> {
-    try {
-      const skip = (page - 1) * limit;
-      return await LogEntry.find(filters)
-        .sort({ timestamp: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
-    } catch (error) {
-      this.error('Failed to retrieve logs', { action: 'get_logs', error: error instanceof Error ? error.message : 'Unknown error' });
-      return [];
-    }
+    // Return empty array since MongoDB logging is disabled
+    return [];
   }
 
-  // Method to get log statistics
   public async getLogStats(days: number = 7): Promise<any[]> {
-    try {
-      // Simple aggregation instead of custom method
-      const stats = await LogEntry.aggregate([
-        {
-          $match: {
-            timestamp: {
-              $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-            }
-          }
-        },
-        {
-          $group: {
-            _id: '$level',
-            count: { $sum: 1 }
-          }
-        }
-      ]);
-      return stats;
-    } catch (error) {
-      this.error('Failed to get log statistics', { action: 'get_log_stats', error: error instanceof Error ? error.message : 'Unknown error' });
-      return [];
-    }
+    // Return empty array since MongoDB logging is disabled
+    return [];
   }
 }
 

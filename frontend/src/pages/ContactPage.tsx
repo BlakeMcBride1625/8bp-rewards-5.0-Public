@@ -268,7 +268,7 @@ const ContactPage: React.FC = () => {
                     Is my account information safe?
                   </h4>
                   <p className="text-text-secondary text-sm">
-                    Yes, we use secure MongoDB Atlas database and only store your 8BP ID and username.
+                    Yes, we use secure PostgreSQL database and only store your 8BP ID and username.
                   </p>
                 </div>
                 <div>

@@ -2,7 +2,7 @@ import express from 'express';
 import { logger } from '../services/LoggerService';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { Registration } from '../models/Registration';
+import { DatabaseService } from '../services/DatabaseService';
 import TelegramNotificationService from '../services/TelegramNotificationService';
 import { EmailNotificationService } from '../services/EmailNotificationService';
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
@@ -24,6 +24,7 @@ declare module 'express-session' {
 
 const router = express.Router();
 const execAsync = promisify(exec);
+const dbService = DatabaseService.getInstance();
 
 // Initialize Discord client for sending DMs
 let discordClient: Client | null = null;
@@ -195,18 +196,12 @@ const verifyMFA = async (discordCode: string, telegramCode: string, emailCode: s
 // Clear failed claims command
 const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: string; error?: string }> => {
   try {
-    const mongoose = require('mongoose');
-    
-    // Connect to MongoDB if not already connected
-    if (mongoose.connection.readyState !== 1) {
-      await mongoose.connect(process.env.MONGO_URI);
-    }
-    
-    const db = mongoose.connection.db;
-    const claimRecordsCollection = db.collection('claim_records');
+    // Get all claim records
+    const allClaims = await dbService.findClaimRecords();
     
     // Count failed claims
-    const failedClaimsCount = await claimRecordsCollection.countDocuments({ status: 'failed' });
+    const failedClaims = allClaims.filter(claim => claim.status === 'failed');
+    const failedClaimsCount = failedClaims.length;
     
     if (failedClaimsCount === 0) {
       return {
@@ -215,18 +210,19 @@ const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: s
       };
     }
     
-    // Delete all failed claims
-    const deleteResult = await claimRecordsCollection.deleteMany({ status: 'failed' });
+    // Delete all failed claims using DatabaseService
+    const deleteResult = await dbService.deleteClaimRecords({ status: 'failed' });
     
     // Get updated statistics
-    const totalClaims = await claimRecordsCollection.countDocuments({});
-    const successfulClaims = await claimRecordsCollection.countDocuments({ status: 'success' });
-    const remainingFailed = await claimRecordsCollection.countDocuments({ status: 'failed' });
+    const updatedClaims = await dbService.findClaimRecords();
+    const totalClaims = updatedClaims.length;
+    const successfulClaims = updatedClaims.filter(claim => claim.status === 'success').length;
+    const remainingFailed = updatedClaims.filter(claim => claim.status === 'failed').length;
     
     const output = [
       '🗑️  Failed Claims Cleanup Complete',
       '================================',
-      `✅ Removed ${deleteResult.deletedCount} failed claim records`,
+      `✅ Removed ${deleteResult} failed claim records`,
       '',
       '📊 Updated Database Statistics:',
       `   Total claims: ${totalClaims}`,
@@ -238,7 +234,7 @@ const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: s
     
     logger.info('Failed claims cleared via terminal', {
       action: 'failed_claims_cleared_terminal',
-      deletedCount: deleteResult.deletedCount,
+      deletedCount: deleteResult,
       totalClaims,
       successfulClaims,
       remainingFailed

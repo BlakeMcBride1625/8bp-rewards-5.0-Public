@@ -1,12 +1,12 @@
 import express from 'express';
-import { ClaimRecord } from '../models/ClaimRecord';
-import { Registration } from '../models/Registration';
+import { DatabaseService } from '../services/DatabaseService';
 import { logger } from '../services/LoggerService';
 
 const router = express.Router();
+const dbService = DatabaseService.getInstance();
 
 // Get leaderboard
-router.get('/', async (req, res) => {
+router.get('/', async (req, res): Promise<void> => {
   try {
     const timeframe = req.query.timeframe as string || '7d';
     const limit = parseInt(req.query.limit as string) || 50;
@@ -16,73 +16,107 @@ router.get('/', async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // LAYER 4: Get claim statistics grouped by user with deduplication
-    // Group by user AND date to prevent same-day duplicates from inflating counts
-    const leaderboardData = await ClaimRecord.aggregate([
-      {
-        $match: {
+    // Get all claim records within the timeframe with timeout
+    let claimRecords: any[] = [];
+    try {
+      claimRecords = await Promise.race([
+        dbService.findClaimRecords({
           claimedAt: { $gte: startDate }
-        }
-      },
-      {
-        // First group by user AND date to deduplicate same-day claims
-        $group: {
-          _id: {
-            userId: '$eightBallPoolId',
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
-          },
-          totalClaims: { $sum: 1 },
-          successfulClaims: {
-            $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
-          },
-          itemsClaimed: { $first: '$itemsClaimed' }, // Take first claim of the day
-          lastClaimed: { $max: '$claimedAt' }
-        }
-      },
-      {
-        // Now group by user to get totals (counting unique days)
-        $group: {
-          _id: '$_id.userId',
-          totalClaims: { $sum: 1 }, // Count unique days
-          successfulClaims: { $sum: '$successfulClaims' },
-          totalClaimsActual: { $sum: '$totalClaims' }, // Sum actual claim counts
-          failedClaims: { $sum: { $subtract: ['$totalClaims', '$successfulClaims'] } },
-          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
-          lastClaimed: { $max: '$lastClaimed' }
-        }
-      },
-      {
-        $sort: { totalItemsClaimed: -1, successfulClaims: -1 }
-      },
-      {
-        $limit: limit
-      }
-    ]);
+        }),
+        new Promise<any[]>((_, reject) => 
+          setTimeout(() => reject(new Error('Query timeout')), 15000)
+        )
+      ]);
+    } catch (error) {
+      logger.error('Leaderboard query timeout or error', {
+        action: 'leaderboard_query_error',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      // Return empty leaderboard instead of failing
+      res.json({
+        timeframe,
+        period: `${days} days`,
+        totalUsers: 0,
+        leaderboard: []
+      });
+      return;
+    }
 
-    // Get user details for each entry
-    const leaderboard = await Promise.all(
-      leaderboardData.map(async (entry) => {
-        const registration = await Registration.findByEightBallPoolId(entry._id);
-        return {
-          rank: 0, // Will be set below
-          eightBallPoolId: entry._id,
-          username: registration?.username || 'Unknown',
-          totalClaims: entry.totalClaims,
-          successfulClaims: entry.successfulClaims,
-          failedClaims: entry.failedClaims || 0,
-          totalItemsClaimed: entry.totalItemsClaimed,
-          successRate: entry.totalClaimsActual > 0 
-            ? Math.round((entry.successfulClaims / entry.totalClaimsActual) * 100) 
-            : 0,
-          lastClaimed: entry.lastClaimed
+    // Group by user and calculate stats
+    const userStats: { [key: string]: any } = {};
+    
+    claimRecords.forEach((claim: any) => {
+      const userId = claim.eightBallPoolId;
+      if (!userStats[userId]) {
+        userStats[userId] = {
+          eightBallPoolId: userId,
+          totalClaims: 0,
+          successfulClaims: 0,
+          failedClaims: 0,
+          totalItemsClaimed: 0,
+          lastClaimed: null
         };
+      }
+      
+      userStats[userId].totalClaims++;
+      if (claim.status === 'success') {
+        userStats[userId].successfulClaims++;
+        userStats[userId].totalItemsClaimed += claim.itemsClaimed?.length || 0;
+      } else {
+        userStats[userId].failedClaims++;
+      }
+      
+      if (!userStats[userId].lastClaimed || new Date(claim.claimedAt) > new Date(userStats[userId].lastClaimed)) {
+        userStats[userId].lastClaimed = claim.claimedAt;
+      }
+    });
+
+    // Convert to array and sort by total items claimed
+    const leaderboardData = Object.values(userStats)
+      .sort((a: any, b: any) => b.totalItemsClaimed - a.totalItemsClaimed)
+      .slice(0, limit);
+
+    // Get user details for each entry with timeout protection
+    const leaderboard = await Promise.all(
+      leaderboardData.map(async (entry: any, index: number) => {
+        try {
+          const registration = await Promise.race([
+            dbService.findRegistration({ eightBallPoolId: entry.eightBallPoolId }),
+            new Promise<any>((_, reject) => 
+              setTimeout(() => reject(new Error('Query timeout')), 2000)
+            )
+          ]);
+          return {
+            rank: index + 1,
+            eightBallPoolId: entry.eightBallPoolId,
+            username: registration?.username || 'Unknown',
+            totalClaims: entry.totalClaims,
+            successfulClaims: entry.successfulClaims,
+            failedClaims: entry.failedClaims,
+            totalItemsClaimed: entry.totalItemsClaimed,
+            successRate: entry.totalClaims > 0 
+              ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
+              : 0,
+            lastClaimed: entry.lastClaimed
+          };
+        } catch (error) {
+          // Return entry without username if query fails
+          return {
+            rank: index + 1,
+            eightBallPoolId: entry.eightBallPoolId,
+            username: 'Unknown',
+            totalClaims: entry.totalClaims,
+            successfulClaims: entry.successfulClaims,
+            failedClaims: entry.failedClaims,
+            totalItemsClaimed: entry.totalItemsClaimed,
+            successRate: entry.totalClaims > 0 
+              ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
+              : 0,
+            lastClaimed: entry.lastClaimed
+          };
+        }
       })
     );
-
-    // Set ranks
-    leaderboard.forEach((entry, index) => {
-      entry.rank = index + 1;
-    });
 
     res.json({
       timeframe,
@@ -114,103 +148,77 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get user's stats with deduplication
-    const userStats = await ClaimRecord.aggregate([
-      {
-        $match: {
-          eightBallPoolId,
-          claimedAt: { $gte: startDate }
-        }
-      },
-      {
-        // Group by date to deduplicate same-day claims
-        $group: {
-          _id: {
-            userId: '$eightBallPoolId',
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
-          },
-          totalClaims: { $sum: 1 },
-          successfulClaims: {
-            $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
-          },
-          itemsClaimed: { $first: '$itemsClaimed' },
-          lastClaimed: { $max: '$claimedAt' }
-        }
-      },
-      {
-        // Aggregate to user level
-        $group: {
-          _id: '$_id.userId',
-          totalClaims: { $sum: 1 }, // Count unique days
-          successfulClaims: { $sum: '$successfulClaims' },
-          totalClaimsActual: { $sum: '$totalClaims' }, // Sum actual claim counts
-          failedClaims: { $sum: { $subtract: ['$totalClaims', '$successfulClaims'] } },
-          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
-          lastClaimed: { $max: '$lastClaimed' }
-        }
-      }
-    ]);
+    // Get user's claim records within timeframe
+    const userClaims = await dbService.findClaimRecords({
+      eightBallPoolId,
+      claimedAt: { $gte: startDate }
+    });
 
-    if (userStats.length === 0) {
+    if (userClaims.length === 0) {
       res.status(404).json({
         error: 'No claims found for this user in the specified timeframe'
       });
       return;
     }
 
-    const userStat = userStats[0];
-    
-    // Get user's rank with deduplication
-    const usersWithMoreItems = await ClaimRecord.aggregate([
-      {
-        $match: {
-          claimedAt: { $gte: startDate }
-        }
-      },
-      {
-        // Group by user AND date to deduplicate
-        $group: {
-          _id: {
-            userId: '$eightBallPoolId',
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
-          },
-          itemsClaimed: { $first: '$itemsClaimed' }
-        }
-      },
-      {
-        // Group by user
-        $group: {
-          _id: '$_id.userId',
-          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } }
-        }
-      },
-      {
-        $match: {
-          totalItemsClaimed: { $gt: userStat.totalItemsClaimed }
-        }
-      },
-      {
-        $count: 'count'
-      }
-    ]);
+    // Calculate user stats
+    let totalClaims = 0;
+    let successfulClaims = 0;
+    let failedClaims = 0;
+    let totalItemsClaimed = 0;
+    let lastClaimed: string | null = null;
 
-    const rank = (usersWithMoreItems[0]?.count || 0) + 1;
+    userClaims.forEach((claim: any) => {
+      totalClaims++;
+      if (claim.status === 'success') {
+        successfulClaims++;
+        totalItemsClaimed += claim.itemsClaimed?.length || 0;
+      } else {
+        failedClaims++;
+      }
+      
+      if (!lastClaimed || new Date(claim.claimedAt) > new Date(lastClaimed)) {
+        lastClaimed = claim.claimedAt;
+      }
+    });
+
+    // Get user's rank by getting all users and finding position
+    const allClaims = await dbService.findClaimRecords({
+      claimedAt: { $gte: startDate }
+    });
+
+    const allUserStats: { [key: string]: number } = {};
+    allClaims.forEach((claim: any) => {
+      const userId = claim.eightBallPoolId;
+      if (!allUserStats[userId]) {
+        allUserStats[userId] = 0;
+      }
+      if (claim.status === 'success') {
+        allUserStats[userId] += claim.itemsClaimed?.length || 0;
+      }
+    });
+
+    const sortedUsers = Object.entries(allUserStats)
+      .sort(([,a], [,b]) => b - a)
+      .map(([userId]) => userId);
+
+    const rank = sortedUsers.indexOf(eightBallPoolId) + 1;
 
     // Get user registration details
-    const registration = await Registration.findByEightBallPoolId(eightBallPoolId);
+    const registration = await dbService.findRegistration({ eightBallPoolId });
 
     res.json({
       rank,
       eightBallPoolId,
       username: registration?.username || 'Unknown',
-      totalClaims: userStat.totalClaims,
-      successfulClaims: userStat.successfulClaims,
-      failedClaims: userStat.failedClaims || 0,
-      totalItemsClaimed: userStat.totalItemsClaimed,
-      successRate: userStat.totalClaimsActual > 0 
-        ? Math.round((userStat.successfulClaims / userStat.totalClaimsActual) * 100) 
+      totalClaims,
+      successfulClaims,
+      failedClaims,
+      totalItemsClaimed,
+      successRate: totalClaims > 0 
+        ? Math.round((successfulClaims / totalClaims) * 100) 
         : 0,
-      lastClaimed: userStat.lastClaimed,
+      lastClaimed,
       timeframe,
       period: `${days} days`
     });
@@ -236,73 +244,43 @@ router.get('/stats', async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get overall statistics with deduplication
-    const stats = await ClaimRecord.aggregate([
-      {
-        $match: {
-          claimedAt: { $gte: startDate }
-        }
-      },
-      {
-        // Group by user AND date to deduplicate
-        $group: {
-          _id: {
-            userId: '$eightBallPoolId',
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$claimedAt' } }
-          },
-          totalClaims: { $sum: 1 },
-          successfulClaims: {
-            $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
-          },
-          itemsClaimed: { $first: '$itemsClaimed' },
-          userId: { $first: '$eightBallPoolId' }
-        }
-      },
-      {
-        // Group to overall stats
-        $group: {
-          _id: null,
-          totalClaims: { $sum: 1 }, // Count unique user-days
-          totalClaimsActual: { $sum: '$totalClaims' }, // Sum actual claim counts
-          successfulClaims: { $sum: '$successfulClaims' },
-          failedClaims: { $sum: { $subtract: ['$totalClaims', '$successfulClaims'] } },
-          totalItemsClaimed: { $sum: { $size: '$itemsClaimed' } },
-          uniqueUsers: { $addToSet: '$userId' }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          totalClaims: 1,
-          successfulClaims: 1,
-          failedClaims: 1,
-          totalItemsClaimed: 1,
-          uniqueUsers: { $size: '$uniqueUsers' },
-          successRate: {
-            $cond: [
-              { $gt: ['$totalClaimsActual', 0] },
-              { $multiply: [{ $divide: ['$successfulClaims', '$totalClaimsActual'] }, 100] },
-              0
-            ]
-          }
-        }
-      }
-    ]);
+    // Get all claim records within timeframe
+    const claimRecords = await dbService.findClaimRecords({
+      claimedAt: { $gte: startDate }
+    });
 
-    const result = stats[0] || {
-      totalClaims: 0,
-      successfulClaims: 0,
-      failedClaims: 0,
-      totalItemsClaimed: 0,
-      uniqueUsers: 0,
-      successRate: 0
-    };
+    // Calculate overall statistics
+    let totalClaims = 0;
+    let successfulClaims = 0;
+    let failedClaims = 0;
+    let totalItemsClaimed = 0;
+    const uniqueUsers = new Set<string>();
+
+    claimRecords.forEach((claim: any) => {
+      totalClaims++;
+      uniqueUsers.add(claim.eightBallPoolId);
+      
+      if (claim.status === 'success') {
+        successfulClaims++;
+        totalItemsClaimed += claim.itemsClaimed?.length || 0;
+      } else {
+        failedClaims++;
+      }
+    });
+
+    const successRate = totalClaims > 0 
+      ? Math.round((successfulClaims / totalClaims) * 100) 
+      : 0;
 
     res.json({
       timeframe,
       period: `${days} days`,
-      ...result,
-      successRate: Math.round(result.successRate)
+      totalClaims,
+      successfulClaims,
+      failedClaims,
+      totalItemsClaimed,
+      uniqueUsers: uniqueUsers.size,
+      successRate
     });
 
   } catch (error) {

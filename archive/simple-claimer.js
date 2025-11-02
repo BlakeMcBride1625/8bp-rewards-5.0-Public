@@ -1,14 +1,30 @@
 const https = require('https');
 const http = require('http');
+const ValidationService = require('../services/validation-service');
 
 async function claimRewards() {
   console.log('🚀 Starting simple 8ball pool reward claimer...');
   
   const userIds = ['1826254746', '3057211056'];
+  const validationService = new ValidationService();
   
   for (let i = 0; i < userIds.length; i++) {
     const userId = userIds[i];
     console.log(`\n📋 Processing user ${i + 1}/${userIds.length}: ${userId}`);
+    
+    // VALIDATION CHECK: Validate user before any operations
+    console.log(`🔍 Validating user ${userId} before processing...`);
+    const validationResult = await validationService.validateUser(userId, 'simple-claimer', {
+      operation: 'test_access',
+      timestamp: new Date().toISOString()
+    });
+    
+    if (!validationResult.isValid) {
+      console.log(`❌ User ${userId} failed validation: ${validationResult.reason} - Skipping`);
+      continue;
+    }
+    
+    console.log(`✅ User ${userId} validation passed - Proceeding with test`);
     
     try {
       // Try to make a request to the shop page

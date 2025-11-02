@@ -10,16 +10,17 @@ router.get('/', async (req, res) => {
   try {
     const startTime = Date.now();
     
-    // Database connectivity check
-    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    // Database connectivity check using DatabaseService
+    const dbService = DatabaseService.getInstance();
+    const dbHealthCheck = await dbService.healthCheck();
     
     // Get database stats
     const dbStats = {
-      connected: dbStatus === 'connected',
-      readyState: mongoose.connection.readyState,
-      host: mongoose.connection.host,
-      port: mongoose.connection.port,
-      name: mongoose.connection.name
+      connected: dbHealthCheck.connected,
+      readyState: dbHealthCheck.connected ? 1 : 0,
+      host: 'Classified',
+      port: 'Classified',
+      name: 'Classified'
     };
 
     // Get system uptime
@@ -74,17 +75,41 @@ router.get('/', async (req, res) => {
 });
 
 // Get scheduler status
-router.get('/scheduler', async (req, res) => {
+router.get('/scheduler', async (req, res): Promise<void> => {
   try {
-    // This would be implemented when we create the scheduler service
-    // For now, return basic info
-    res.json({
-      status: 'active',
-      lastRun: 'Not implemented yet',
-      nextRun: 'Not implemented yet',
-      schedule: '00:00, 06:00, 12:00, 18:00 UTC',
-      timezone: 'UTC'
-    });
+    // Import SchedulerService to get actual status with timeout
+    try {
+      const SchedulerService = require('../services/SchedulerService').default;
+      const schedulerService = SchedulerService.getInstance();
+      
+      if (!schedulerService) {
+        res.json({
+          status: 'not_initialized',
+          message: 'Scheduler service not initialized'
+        });
+        return;
+      }
+
+      const status = {
+        status: schedulerService.isRunning ? 'running' : 'idle',
+        lastRun: schedulerService.lastRun ? schedulerService.lastRun.toISOString() : null,
+        nextRun: schedulerService.nextRun ? schedulerService.nextRun.toISOString() : null,
+        schedule: '00:00, 06:00, 12:00, 18:00 UTC',
+        timezone: 'UTC'
+      };
+
+      res.json(status);
+      return;
+    } catch (importError) {
+      // If import fails, return basic status
+      res.json({
+        status: 'unknown',
+        message: 'Scheduler service unavailable',
+        schedule: '00:00, 06:00, 12:00, 18:00 UTC',
+        timezone: 'UTC'
+      });
+      return;
+    }
 
   } catch (error) {
     logger.error('Scheduler status check failed', {
@@ -101,7 +126,7 @@ router.get('/scheduler', async (req, res) => {
 // Get database status
 router.get('/database', async (req, res) => {
   try {
-    const dbService = new DatabaseService();
+    const dbService = DatabaseService.getInstance();
     const healthCheck = await dbService.healthCheck();
 
     res.json({
@@ -150,6 +175,159 @@ router.get('/metrics', async (req, res) => {
   }
 });
 
+// Get Discord bot status (if running)
+router.get('/discord-bot', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    // Check if discord-bot process is running
+    try {
+      const { stdout } = await execAsync('pgrep -f "discord.*bot" || echo ""');
+      const isRunning = stdout.trim().length > 0;
+      
+      res.json({
+        status: isRunning ? 'running' : 'not_running',
+        pid: isRunning ? stdout.trim() : null,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.json({
+        status: 'unknown',
+        error: 'Could not check Discord bot status',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+  } catch (error) {
+    logger.error('Discord bot status check failed', {
+      action: 'discord_bot_status_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+
+    res.status(500).json({
+      error: 'Failed to retrieve Discord bot status'
+    });
+  }
+});
+
+// Get claimers status
+router.get('/claimers', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const claimers = [
+      { name: 'playwright-claimer', file: 'playwright-claimer.js' },
+      { name: 'playwright-claimer-discord', file: 'playwright-claimer-discord.js' },
+      { name: 'first-time-claim', file: 'first-time-claim.js' }
+    ];
+    
+    const status = [];
+    
+    for (const claimer of claimers) {
+      const filePath = path.join(process.cwd(), claimer.file);
+      const exists = fs.existsSync(filePath);
+      
+      // Check if process is running
+      let isRunning = false;
+      let pid = null;
+      try {
+        const { stdout } = await execAsync(`pgrep -f "${claimer.file}" || echo ""`);
+        if (stdout.trim().length > 0) {
+          isRunning = true;
+          pid = stdout.trim().split('\n')[0];
+        }
+      } catch (e) {
+        // Process not running
+      }
+      
+      status.push({
+        name: claimer.name,
+        file: claimer.file,
+        exists,
+        running: isRunning,
+        pid: pid ? parseInt(pid) : null
+      });
+    }
+    
+    res.json({
+      claimers: status,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Claimers status check failed', {
+      action: 'claimers_status_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+
+    res.status(500).json({
+      error: 'Failed to retrieve claimers status'
+    });
+  }
+});
+
+// Comprehensive health check endpoint
+router.get('/health', async (req, res) => {
+  try {
+    const dbService = DatabaseService.getInstance();
+    const dbHealth = await dbService.healthCheck();
+    
+    // Check Discord bot
+    let discordBotStatus = 'unknown';
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      const { stdout } = await execAsync('pgrep -f "discord.*bot" || echo ""');
+      discordBotStatus = stdout.trim().length > 0 ? 'running' : 'not_running';
+    } catch (e) {
+      discordBotStatus = 'unknown';
+    }
+    
+    // Overall health
+    const overallHealth = dbHealth.connected && discordBotStatus !== 'error' ? 'healthy' : 'degraded';
+    
+    res.json({
+      status: overallHealth,
+      timestamp: new Date().toISOString(),
+      services: {
+        database: {
+          status: dbHealth.connected ? 'healthy' : 'unhealthy',
+          connected: dbHealth.connected
+        },
+        backend: {
+          status: 'healthy',
+          uptime: process.uptime(),
+          pid: process.pid
+        },
+        discordBot: {
+          status: discordBotStatus
+        },
+        scheduler: {
+          status: 'unknown' // Will be checked if scheduler is available
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('Health check failed', {
+      action: 'health_check_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+
+    res.status(500).json({
+      status: 'unhealthy',
+      error: 'Health check failed'
+    });
+  }
+});
+
 // Helper function to format uptime
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -157,7 +335,7 @@ function formatUptime(seconds: number): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
 
-  const parts = [];
+  const parts: string[] = [];
   if (days > 0) parts.push(`${days}d`);
   if (hours > 0) parts.push(`${hours}h`);
   if (minutes > 0) parts.push(`${minutes}m`);

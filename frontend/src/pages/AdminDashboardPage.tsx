@@ -5,6 +5,7 @@ import { Navigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS, getAdminUserBlockEndpoint, getAdminRegistrationDeleteEndpoint } from '../config/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import PostgreSQLDBManager from '../components/PostgreSQLDBManager';
 import { 
   Shield, 
   Users, 
@@ -39,7 +40,8 @@ import {
   Circle,
   CircleDot,
   Pause,
-  ChevronDown
+  ChevronDown,
+  Network
 } from 'lucide-react';
 import ClaimProgressTracker from '../components/ClaimProgressTracker';
 import VPSAuthModal from '../components/VPSAuthModal';
@@ -55,7 +57,7 @@ interface AdminOverview {
   claims: Array<{
     _id: string;
     count: number;
-    totalItems: number;
+    totalitems: number;
   }>;
   logs: Array<{
     _id: string;
@@ -68,6 +70,17 @@ interface AdminOverview {
     itemsClaimed: string[];
     claimedAt: string;
   }>;
+}
+
+interface HeartbeatSummary {
+  totalActiveFiles: number;
+  byProcess: { [pid: string]: Array<{
+    moduleId: string;
+    filePath: string;
+    processId: number;
+    service?: string;
+    lastSeen: number;
+  }> };
 }
 
 interface Registration {
@@ -212,6 +225,7 @@ const AdminDashboardPage: React.FC = () => {
   
   // Active Services state
   const [activeServicesData, setActiveServicesData] = useState<any>(null);
+  const [heartbeatData, setHeartbeatData] = useState<HeartbeatSummary | null>(null);
   const [isLoadingActiveServices, setIsLoadingActiveServices] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<{ [key: string]: boolean }>({
     'Claimers': true,
@@ -235,6 +249,25 @@ const AdminDashboardPage: React.FC = () => {
   // Bot on/off toggle state
   const [isBotEnabled, setIsBotEnabled] = useState(true);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
+  
+  // Manual claim per user state
+  const [singleUserId, setSingleUserId] = useState('');
+  const [testUsers, setTestUsers] = useState<Array<{id: string; username: string; description: string}>>([]);
+  const [isLoadingTestUsers, setIsLoadingTestUsers] = useState(false);
+
+  // Deregistered Users state
+  const [deregisteredUsers, setDeregisteredUsers] = useState<any[]>([]);
+  const [isLoadingDeregisteredUsers, setIsLoadingDeregisteredUsers] = useState(false);
+  const [deregisteredUsersFilter, setDeregisteredUsersFilter] = useState({
+    sourceModule: '',
+    reason: '',
+    search: ''
+  });
+
+  // System Integration Map state
+  const [systemIntegrationData, setSystemIntegrationData] = useState<any>(null);
+  const [isLoadingSystemIntegration, setIsLoadingSystemIntegration] = useState(false);
+  const [moduleHealthData, setModuleHealthData] = useState<any>(null);
 
   const fetchVpsStats = useCallback(async () => {
     setIsLoadingVpsStats(true);
@@ -314,6 +347,7 @@ const AdminDashboardPage: React.FC = () => {
     if (isAuthenticated && isAdmin) {
       fetchAdminData();
       fetchUserIp();
+      fetchTestUsers(); // Fetch test users on component mount
       
       // Only fetch bot status when on tools tab
       if (activeTab === 'tools') {
@@ -333,8 +367,15 @@ const AdminDashboardPage: React.FC = () => {
       if (activeTab === 'terminal') {
         checkTerminalAccess();
       }
-      if (activeTab === 'active-services') {
+      if (activeTab === 'deregistered-users') {
+        fetchDeregisteredUsers();
+      }
+      if (activeTab === 'system-integration') {
+        fetchSystemIntegrationData();
+      }
+      if (activeTab === 'active-services' || activeTab === 'overview') {
         fetchActiveServices();
+        fetchHeartbeatData();
       }
     }
   }, [isAuthenticated, isAdmin, activeTab]);
@@ -430,6 +471,60 @@ const AdminDashboardPage: React.FC = () => {
       toast.success('Manual claim triggered successfully - Opening progress tracker');
     } catch (error: any) {
       toast.error('Failed to trigger manual claim');
+    }
+  };
+
+  const handleSingleUserClaim = async () => {
+    if (!singleUserId.trim()) {
+      toast.error('Please enter a User ID');
+      return;
+    }
+
+    try {
+      const response = await axios.post(API_ENDPOINTS.ADMIN_CLAIM_USERS, {
+        userIds: [singleUserId.trim()]
+      }, { withCredentials: true });
+      
+      const { processId } = response.data;
+      setCurrentProcessId(processId);
+      setShowProgressTracker(true);
+      toast.success(`Manual claim started for user ${singleUserId}`);
+      setSingleUserId(''); // Clear the input
+    } catch (error: any) {
+      toast.error('Failed to trigger single user claim');
+    }
+  };
+
+  const handleTestUserClaim = async (userId: string) => {
+    try {
+      const response = await axios.post(API_ENDPOINTS.ADMIN_CLAIM_USERS, {
+        userIds: [userId]
+      }, { withCredentials: true });
+      
+      const { processId } = response.data;
+      setCurrentProcessId(processId);
+      setShowProgressTracker(true);
+      toast.success(`Manual claim started for test user ${userId}`);
+    } catch (error: any) {
+      toast.error('Failed to trigger test user claim');
+    }
+  };
+
+  const fetchTestUsers = async () => {
+    setIsLoadingTestUsers(true);
+    try {
+      const response = await axios.get(API_ENDPOINTS.ADMIN_TEST_USERS, { withCredentials: true });
+      setTestUsers(response.data.testUsers);
+    } catch (error: any) {
+      console.error('Failed to fetch test users:', error);
+      // Set default test users if API fails
+      setTestUsers([
+        { id: '1826254746', username: 'TestUser1', description: 'Primary test user' },
+        { id: '3057211056', username: 'TestUser2', description: 'Secondary test user' },
+        { id: '110141', username: 'TestUser3', description: 'Tertiary test user' }
+      ]);
+    } finally {
+      setIsLoadingTestUsers(false);
     }
   };
 
@@ -533,6 +628,15 @@ const AdminDashboardPage: React.FC = () => {
       setIsLoadingProcesses(false);
     }
   };
+
+  const fetchHeartbeatData = useCallback(async () => {
+    try {
+      const response = await axios.get(API_ENDPOINTS.ADMIN_HEARTBEAT_SUMMARY);
+      setHeartbeatData(response.data.data);
+    } catch (error) {
+      console.error('Error fetching heartbeat data:', error);
+    }
+  }, []);
 
   const fetchActiveServices = async () => {
     setIsLoadingActiveServices(true);
@@ -708,6 +812,39 @@ const AdminDashboardPage: React.FC = () => {
   const handleScreenshotSearch = (query: string) => {
     setScreenshotSearchQuery(query);
     filterScreenshotsByUser(allScreenshotFolders, query);
+  };
+
+  // Fetch deregistered users
+  const fetchDeregisteredUsers = async () => {
+    setIsLoadingDeregisteredUsers(true);
+    try {
+      const response = await axios.get('/api/validation/deregistered-users', { withCredentials: true });
+      setDeregisteredUsers(response.data.users || []);
+    } catch (error: any) {
+      console.error('Error fetching deregistered users:', error);
+      toast.error('Failed to fetch deregistered users');
+    } finally {
+      setIsLoadingDeregisteredUsers(false);
+    }
+  };
+
+  // Fetch system integration data
+  const fetchSystemIntegrationData = async () => {
+    setIsLoadingSystemIntegration(true);
+    try {
+      const [integrationResponse, healthResponse] = await Promise.all([
+        axios.get('/api/validation/system-integration', { withCredentials: true }),
+        axios.get('/api/validation/system-health', { withCredentials: true })
+      ]);
+      
+      setSystemIntegrationData(integrationResponse.data);
+      setModuleHealthData(healthResponse.data);
+    } catch (error: any) {
+      console.error('Error fetching system integration data:', error);
+      toast.error('Failed to fetch system integration data');
+    } finally {
+      setIsLoadingSystemIntegration(false);
+    }
   };
 
   // Terminal functions
@@ -935,7 +1072,9 @@ const AdminDashboardPage: React.FC = () => {
   const filteredUsers = registrations.filter((reg: any) =>
     reg.eightBallPoolId.includes(userSearchQuery) ||
     reg.username.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-    (reg.registrationIp && reg.registrationIp.includes(userSearchQuery))
+    (reg.registrationIp && reg.registrationIp.includes(userSearchQuery)) ||
+    (reg.deviceId && reg.deviceId.toLowerCase().includes(userSearchQuery.toLowerCase())) ||
+    (reg.deviceType && reg.deviceType.toLowerCase().includes(userSearchQuery.toLowerCase()))
   );
 
   return (
@@ -984,6 +1123,8 @@ const AdminDashboardPage: React.FC = () => {
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'registrations', label: 'Registrations', icon: Users },
               { id: 'users', label: 'User Management', icon: Shield },
+              { id: 'deregistered-users', label: 'Deregistered Users', icon: XCircle },
+              { id: 'system-integration', label: 'System Integration Map', icon: Network },
               { id: 'logs', label: 'Logs', icon: FileText },
               { id: 'tools', label: 'Tools', icon: Settings },
               { id: 'progress', label: 'Progress', icon: Monitor },
@@ -991,6 +1132,7 @@ const AdminDashboardPage: React.FC = () => {
               { id: 'terminal', label: 'Terminal', icon: Terminal },
               { id: 'vps', label: 'VPS Monitor', icon: Server },
               { id: 'active-services', label: 'Active Services', icon: Server },
+              { id: 'postgresql-db', label: 'PostgreSQL DB', icon: Database },
             ].map((tab) => {
               const Icon = tab.icon;
               const handleTabClick = () => {
@@ -1038,7 +1180,7 @@ const AdminDashboardPage: React.FC = () => {
             ) : overview ? (
               <>
                 {/* Stats Cards */}
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-6">
                   <div className="card text-center">
                     <Users className="w-8 h-8 text-primary-600 mx-auto mb-2" />
                     <h3 className="text-lg font-semibold text-text-primary mb-1">
@@ -1061,20 +1203,7 @@ const AdminDashboardPage: React.FC = () => {
                       {overview.claims.find(c => c._id === 'success')?.count || 0}
                     </p>
                     <p className="text-sm text-text-secondary">
-                      {overview.claims.find(c => c._id === 'success')?.totalItems || 0} items
-                    </p>
-                  </div>
-                  
-                  <div className="card text-center">
-                    <Activity className="w-8 h-8 text-primary-600 mx-auto mb-2" />
-                    <h3 className="text-lg font-semibold text-text-primary mb-1">
-                      Failed Claims
-                    </h3>
-                    <p className="text-2xl font-bold text-red-600">
-                      {overview.claims.find(c => c._id === 'failed')?.count || 0}
-                    </p>
-                    <p className="text-sm text-text-secondary">
-                      This week
+                      {overview.claims.find(c => c._id === 'success')?.totalitems || 0} items
                     </p>
                   </div>
                   
@@ -1085,6 +1214,45 @@ const AdminDashboardPage: React.FC = () => {
                     </h3>
                     <p className="text-2xl font-bold text-primary-600">
                       {overview.logs.reduce((sum, log) => sum + log.count, 0)}
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                      This week
+                    </p>
+                  </div>
+                  
+                  <div className="card text-center">
+                    <Server className="w-8 h-8 text-primary-600 mx-auto mb-2" />
+                    <h3 className="text-lg font-semibold text-text-primary mb-1">
+                      Active Services
+                    </h3>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {activeServicesData?.activeCount || 0}
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                      {activeServicesData?.totalCount || 0} total
+                    </p>
+                  </div>
+                  
+                  <div className="card text-center">
+                    <FileText className="w-8 h-8 text-primary-600 mx-auto mb-2" />
+                    <h3 className="text-lg font-semibold text-text-primary mb-1">
+                      Active Files
+                    </h3>
+                    <p className="text-2xl font-bold text-green-600">
+                      {heartbeatData?.totalActiveFiles || 0}
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                      Heartbeat tracking
+                    </p>
+                  </div>
+                  
+                  <div className="card text-center">
+                    <XCircle className="w-8 h-8 text-primary-600 mx-auto mb-2" />
+                    <h3 className="text-lg font-semibold text-text-primary mb-1">
+                      Failed Claims
+                    </h3>
+                    <p className="text-2xl font-bold text-red-600">
+                      {overview.claims.find(c => c._id === 'failed')?.count || 0}
                     </p>
                     <p className="text-sm text-text-secondary">
                       This week
@@ -1296,7 +1464,7 @@ const AdminDashboardPage: React.FC = () => {
                   <Search className="w-5 h-5 text-text-secondary dark:text-text-dark-secondary" />
                   <input
                     type="text"
-                    placeholder="Search by username, 8BP ID, or IP address..."
+                    placeholder="Search by username, 8BP ID, IP address, or device type..."
                     value={userSearchQuery}
                     onChange={(e) => setUserSearchQuery(e.target.value)}
                     className="input flex-1"
@@ -1326,9 +1494,15 @@ const AdminDashboardPage: React.FC = () => {
                           <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
                             8BP ID: {reg.eightBallPoolId}
                           </p>
-                          <p className="text-xs text-text-muted dark:text-text-dark-muted font-mono">
-                            IP: {reg.registrationIp || 'Unknown'}
-                          </p>
+                          <div className="text-xs text-text-muted dark:text-text-dark-muted font-mono space-y-1">
+                            <p>IP: {reg.registrationIp || 'Unknown'}</p>
+                            {reg.deviceId && (
+                              <p>Device ID: {reg.deviceId}</p>
+                            )}
+                            {reg.deviceType && (
+                              <p>Device: {reg.deviceType}</p>
+                            )}
+                          </div>
                           {reg.isBlocked && (
                             <p className="text-xs text-red-600 dark:text-red-400 mt-1">
                               🚫 Blocked: {reg.blockedReason || 'No reason provided'}
@@ -1361,6 +1535,277 @@ const AdminDashboardPage: React.FC = () => {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Deregistered Users Tab */}
+        {activeTab === 'deregistered-users' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary flex items-center">
+                  <XCircle className="w-8 h-8 text-red-500 mr-3" />
+                  Deregistered Users
+                </h2>
+                <button
+                  onClick={fetchDeregisteredUsers}
+                  disabled={isLoadingDeregisteredUsers}
+                  className="btn-primary flex items-center"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingDeregisteredUsers ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+
+              {/* Filters */}
+              <div className="grid md:grid-cols-3 gap-4 mb-6">
+                <div>
+                  <label className="label">Source Module</label>
+                  <select
+                    value={deregisteredUsersFilter.sourceModule}
+                    onChange={(e) => setDeregisteredUsersFilter({...deregisteredUsersFilter, sourceModule: e.target.value})}
+                    className="input"
+                  >
+                    <option value="">All Modules</option>
+                    <option value="playwright-claimer-discord">Playwright Claimer Discord</option>
+                    <option value="playwright-claimer">Playwright Claimer</option>
+                    <option value="first-time-claimer">First Time Claimer</option>
+                    <option value="8bp-claimer-ts">8BP Claimer TS</option>
+                    <option value="simple-claimer">Simple Claimer</option>
+                    <option value="scheduler-service">Scheduler Service</option>
+                    <option value="registration-api">Registration API</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Reason</label>
+                  <select
+                    value={deregisteredUsersFilter.reason}
+                    onChange={(e) => setDeregisteredUsersFilter({...deregisteredUsersFilter, reason: e.target.value})}
+                    className="input"
+                  >
+                    <option value="">All Reasons</option>
+                    <option value="invalid_format">Invalid Format</option>
+                    <option value="database_invalid">Database Invalid</option>
+                    <option value="api_failed">API Failed</option>
+                    <option value="validation_error">Validation Error</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Search</label>
+                  <input
+                    type="text"
+                    placeholder="Search by user ID..."
+                    value={deregisteredUsersFilter.search}
+                    onChange={(e) => setDeregisteredUsersFilter({...deregisteredUsersFilter, search: e.target.value})}
+                    className="input"
+                  />
+                </div>
+              </div>
+
+              {/* Users Table */}
+              {isLoadingDeregisteredUsers ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                  <p className="text-text-secondary dark:text-text-dark-secondary mt-2">Loading deregistered users...</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-700">
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">User ID</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Source Module</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Reason</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Error Message</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Deregistered At</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deregisteredUsers
+                        .filter(user => {
+                          if (deregisteredUsersFilter.sourceModule && user.source_module !== deregisteredUsersFilter.sourceModule) return false;
+                          if (deregisteredUsersFilter.reason && user.deregistration_reason !== deregisteredUsersFilter.reason) return false;
+                          if (deregisteredUsersFilter.search && !user.eight_ball_pool_id.includes(deregisteredUsersFilter.search)) return false;
+                          return true;
+                        })
+                        .map((user, index) => (
+                        <tr key={index} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                          <td className="py-3 px-4 text-text-primary dark:text-text-dark-primary font-mono">{user.eight_ball_pool_id}</td>
+                          <td className="py-3 px-4 text-text-primary dark:text-text-dark-primary">
+                            <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm">
+                              {user.source_module}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-text-primary dark:text-text-dark-primary">
+                            <span className={`px-2 py-1 rounded text-sm ${
+                              user.deregistration_reason === 'invalid_format' ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200' :
+                              user.deregistration_reason === 'database_invalid' ? 'bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200' :
+                              user.deregistration_reason === 'api_failed' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' :
+                              'bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200'
+                            }`}>
+                              {user.deregistration_reason}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-text-secondary dark:text-text-dark-secondary text-sm max-w-xs truncate" title={user.error_message}>
+                            {user.error_message}
+                          </td>
+                          <td className="py-3 px-4 text-text-secondary dark:text-text-dark-secondary text-sm">
+                            {new Date(user.deregistered_at).toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              onClick={() => {
+                                // TODO: Implement revalidation
+                                toast('Revalidation feature coming soon', { icon: 'ℹ️' });
+                              }}
+                              className="btn-secondary text-sm"
+                            >
+                              Revalidate
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  
+                  {deregisteredUsers.length === 0 && (
+                    <div className="text-center py-8 text-text-secondary dark:text-text-dark-secondary">
+                      <XCircle className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                      <p>No deregistered users found</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* System Integration Map Tab */}
+        {activeTab === 'system-integration' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary flex items-center">
+                  <Network className="w-8 h-8 text-blue-500 mr-3" />
+                  System Integration Map
+                </h2>
+                <button
+                  onClick={fetchSystemIntegrationData}
+                  disabled={isLoadingSystemIntegration}
+                  className="btn-primary flex items-center"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingSystemIntegration ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+
+              {isLoadingSystemIntegration ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                  <p className="text-text-secondary dark:text-text-dark-secondary mt-2">Loading system integration data...</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Module Status Overview */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">Module Integration Status</h3>
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {moduleHealthData?.moduleStats && Object.entries(moduleHealthData.moduleStats).map(([module, stats]: [string, any]) => (
+                        <div key={module} className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-semibold text-text-primary dark:text-text-dark-primary">{module}</h4>
+                            <div className={`w-3 h-3 rounded-full ${
+                              stats.validation_error > 0 ? 'bg-red-500' :
+                              stats.validation_failure > 0 ? 'bg-yellow-500' :
+                              'bg-green-500'
+                            }`}></div>
+                          </div>
+                          <div className="space-y-1 text-sm text-text-secondary dark:text-text-dark-secondary">
+                            <div>Attempts: {stats.validation_attempt || 0}</div>
+                            <div>Success: {stats.validation_success || 0}</div>
+                            <div>Failures: {stats.validation_failure || 0}</div>
+                            <div>Errors: {stats.validation_error || 0}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* System Health Metrics */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">System Health Metrics</h3>
+                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
+                          {moduleHealthData?.cacheSize || 0}
+                        </div>
+                        <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Cache Entries</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
+                          {moduleHealthData?.errorCounts || 0}
+                        </div>
+                        <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Error Counts</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
+                          {Object.keys(moduleHealthData?.moduleStats || {}).length}
+                        </div>
+                        <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Active Modules</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-green-500">
+                          {moduleHealthData?.timestamp ? 'Online' : 'Offline'}
+                        </div>
+                        <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Status</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Integration Map */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">Integration Map</h3>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg">
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <div>
+                          <h4 className="font-semibold text-text-primary dark:text-text-dark-primary mb-3">Claimers</h4>
+                          <div className="space-y-2">
+                            {['playwright-claimer-discord', 'playwright-claimer', 'first-time-claimer', '8bp-claimer-ts', 'simple-claimer'].map(claimer => (
+                              <div key={claimer} className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded">
+                                <span className="text-sm text-text-primary dark:text-text-dark-primary">{claimer}</span>
+                                <CheckCircle className="w-4 h-4 text-green-500" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-text-primary dark:text-text-dark-primary mb-3">Services</h4>
+                          <div className="space-y-2">
+                            {['scheduler-service', 'registration-api', 'validation-service', 'monitoring-service'].map(service => (
+                              <div key={service} className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded">
+                                <span className="text-sm text-text-primary dark:text-text-dark-primary">{service}</span>
+                                <CheckCircle className="w-4 h-4 text-green-500" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1483,14 +1928,63 @@ const AdminDashboardPage: React.FC = () => {
                   Manual Actions
                 </h3>
                 <div className="space-y-4">
+                  {/* Claim All Users */}
                   <button
                     onClick={handleManualClaim}
                     className="btn-primary w-full inline-flex items-center justify-center space-x-2"
                   >
                     <Play className="w-4 h-4" />
-                    <span>Trigger Manual Claim</span>
+                    <span>Claim All Users</span>
                   </button>
                   
+                  {/* Single User Claim */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-text-primary">
+                      Claim Single User
+                    </label>
+                    <div className="flex space-x-2">
+                      <input
+                        type="text"
+                        placeholder="Enter User ID"
+                        value={singleUserId}
+                        onChange={(e) => {
+                          // Only allow numbers
+                          const value = e.target.value.replace(/[^0-9]/g, '');
+                          setSingleUserId(value);
+                        }}
+                        className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text-primary dark:text-text-dark-primary focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={handleSingleUserClaim}
+                        disabled={!singleUserId.trim()}
+                        className="btn-secondary inline-flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span>Claim</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Test Users Quick Claim */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-text-primary">
+                      Quick Test Claims
+                    </label>
+                    <div className="grid grid-cols-1 gap-2">
+                      {testUsers.map((user) => (
+                        <button
+                          key={user.id}
+                          onClick={() => handleTestUserClaim(user.id)}
+                          className="btn-secondary text-left inline-flex items-center justify-between space-x-2 text-sm"
+                        >
+                          <span>{user.username} ({user.id})</span>
+                          <Play className="w-3 h-3" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  {/* Reset Leaderboard */}
                   <button
                     onClick={() => {
                       if (resetAccessGranted) {
@@ -3398,6 +3892,18 @@ const AdminDashboardPage: React.FC = () => {
           </motion.div>
         </div>
       )}
+
+        {/* PostgreSQL DB Tab */}
+        {activeTab === 'postgresql-db' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="space-y-6"
+          >
+            <PostgreSQLDBManager />
+          </motion.div>
+        )}
     </div>
   );
 };

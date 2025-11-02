@@ -19,6 +19,16 @@ class DiscordService {
     this.allowedAdmins = this.getAllowedAdmins();
     this.commands = new Collection();
     
+    // Rate limiting and duplicate prevention
+    this.sentMessages = new Map(); // Track sent messages to prevent duplicates
+    this.lastMessageTime = 0; // Rate limiting
+    this.minMessageInterval = 2000; // Minimum 2 seconds between messages
+    
+    // Clean up old message records every hour to prevent memory leaks
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOldMessages();
+    }, 60 * 60 * 1000); // 1 hour
+    
     this.setupEventHandlers();
     this.setupSlashCommands();
   }
@@ -934,6 +944,50 @@ class DiscordService {
     }
 
     try {
+      // Rate limiting check
+      const now = Date.now();
+      if (now - this.lastMessageTime < this.minMessageInterval) {
+        console.log(`⏳ Rate limiting: waiting ${this.minMessageInterval - (now - this.lastMessageTime)}ms before sending next message`);
+        await new Promise(resolve => setTimeout(resolve, this.minMessageInterval - (now - this.lastMessageTime)));
+      }
+
+      // LAYER 1: Database duplicate check - check if user already claimed today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Start of today
+      
+      console.log(`🔍 Checking for existing claims - user: ${bpAccountId}, today: ${today.toISOString()}`);
+      
+      try {
+        // Check if database service has findClaimRecords method
+        if (this.dbService && typeof this.dbService.findClaimRecords === 'function') {
+          const existingClaims = await this.dbService.findClaimRecords({
+            eightBallPoolId: bpAccountId,
+            status: 'success',
+            claimedAt: { $gte: today }
+          });
+
+          console.log(`🔍 Found ${existingClaims.length} existing claims for user ${bpAccountId} today`);
+
+          // If already claimed successfully today, skip sending Discord message
+          if (existingClaims.length > 0) {
+            console.log(`⏭️ Duplicate Discord message prevented (DB check) - user ${bpAccountId} already claimed today at ${existingClaims[0].claimedAt.toLocaleTimeString()}`);
+            return false;
+          }
+        } else {
+          console.log(`⚠️ Database service doesn't have findClaimRecords method, skipping DB duplicate check`);
+        }
+      } catch (dbError) {
+        console.log(`⚠️ Database duplicate check failed: ${dbError.message}, continuing with in-memory check only`);
+      }
+
+      // LAYER 2: In-memory duplicate prevention (backup)
+      const messageKey = `${bpAccountId}-${today.toISOString().split('T')[0]}`;
+      
+      if (this.sentMessages.has(messageKey)) {
+        console.log(`⏭️ Duplicate message prevented (memory check) for user ${bpAccountId} on ${today.toISOString().split('T')[0]}`);
+        return false;
+      }
+
       // Find user in database by 8BP account ID
       const users = await this.dbService.getAllUsers();
       const user = users.find(u => u.eightBallPoolId === bpAccountId);
@@ -945,19 +999,6 @@ class DiscordService {
 
       const username = user.username || 'Unknown User';
       
-      // Create confirmation message
-      const embed = new EmbedBuilder()
-        .setTitle('🎁 Rewards Claimed Successfully!')
-        .setDescription(`**${username}** has successfully claimed their rewards!`)
-        .addFields(
-          { name: '🎱 8BP Account ID', value: bpAccountId, inline: true },
-          { name: '👤 Username', value: username, inline: true },
-          { name: '📦 Items Claimed', value: claimedItems.length > 0 ? claimedItems.join(', ') : 'Various rewards', inline: false },
-          { name: '⏰ Claimed At', value: new Date().toLocaleString(), inline: true }
-        )
-        .setColor(0x00FF00)
-        .setTimestamp();
-
       // Create image attachment if path exists
       let imageAttachment = null;
       if (imagePath && require('fs').existsSync(imagePath)) {
@@ -965,6 +1006,25 @@ class DiscordService {
           name: `8bp-claim-${bpAccountId}.png`,
           description: `8 Ball Pool claim confirmation for account ${bpAccountId}`
         });
+      }
+      
+      // Create confirmation message with embedded image
+      const embed = new EmbedBuilder()
+        .setTitle('🎱 8 BALL POOL REWARD CLAIMED')
+        .setDescription(`**${username}** has successfully claimed their rewards!`)
+        .addFields(
+          { name: '🎱 Account ID', value: bpAccountId, inline: true },
+          { name: '👤 User', value: username, inline: true },
+          { name: '📦 Items Claimed', value: claimedItems.length > 0 ? claimedItems.join(', ') : 'Various rewards', inline: false },
+          { name: '⏰ Claimed At', value: new Date().toLocaleString(), inline: true },
+          { name: '📊 Status', value: 'Successfully claimed', inline: true }
+        )
+        .setColor(0xFFD700) // Gold color to match the banner
+        .setTimestamp();
+
+      // Set image at the bottom of the embed if screenshot exists
+      if (imageAttachment) {
+        embed.setImage(`attachment://8bp-claim-${bpAccountId}.png`);
       }
 
       // Send to rewards channel if configured
@@ -979,6 +1039,11 @@ class DiscordService {
           
           await channel.send(messageOptions);
           console.log(`✅ Confirmation sent to rewards channel for ${username} (${bpAccountId})`);
+          
+          // Mark message as sent and update timestamp
+          this.sentMessages.set(messageKey, now);
+          this.lastMessageTime = now;
+          console.log(`✅ Discord message sent and marked as sent for user ${bpAccountId}`);
         }
       }
 
@@ -1001,14 +1066,9 @@ class DiscordService {
         }
       }
 
-      // Clean up local file after sending
+      // Keep screenshots for website display - don't clean up automatically
       if (imagePath && require('fs').existsSync(imagePath)) {
-        try {
-          require('fs').unlinkSync(imagePath);
-          console.log(`🗑️ Cleaned up screenshot: ${imagePath}`);
-        } catch (cleanupError) {
-          console.log(`⚠️ Could not clean up screenshot: ${cleanupError.message}`);
-        }
+        console.log(`📸 Screenshot saved for website: ${imagePath}`);
       }
 
       return true;
@@ -1019,6 +1079,41 @@ class DiscordService {
     }
   }
 
+  // Clean up old message records to prevent memory leaks
+  cleanupOldMessages() {
+    const now = Date.now();
+    const oneDayAgo = now - (24 * 60 * 60 * 1000); // 24 hours ago
+    
+    let cleanedCount = 0;
+    for (const [key, timestamp] of this.sentMessages.entries()) {
+      if (timestamp < oneDayAgo) {
+        this.sentMessages.delete(key);
+        cleanedCount++;
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`🧹 Cleaned up ${cleanedCount} old Discord message records`);
+    }
+  }
+
+  // Clear all sent message records (useful for testing or manual reset)
+  clearSentMessages() {
+    const count = this.sentMessages.size;
+    this.sentMessages.clear();
+    console.log(`🧹 Cleared ${count} Discord message records`);
+  }
+
+  // Get duplicate protection status for debugging
+  getDuplicateProtectionStatus() {
+    return {
+      totalTrackedMessages: this.sentMessages.size,
+      lastMessageTime: this.lastMessageTime,
+      minMessageInterval: this.minMessageInterval,
+      cleanupInterval: this.cleanupInterval ? 'active' : 'inactive'
+    };
+  }
+
   async logout() {
     if (this.client) {
       await this.client.destroy();
@@ -1027,6 +1122,12 @@ class DiscordService {
     
     if (this.dbService) {
       await this.dbService.disconnect();
+    }
+    
+    // Clear cleanup interval
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
     }
   }
 

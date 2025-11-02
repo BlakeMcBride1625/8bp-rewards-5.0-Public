@@ -3,127 +3,115 @@
 /**
  * Remove Failed Claims Script
  * 
- * This script removes all failed claim records from the MongoDB database.
- * Failed claims are identified by status: 'failed' in the claim_records collection.
+ * This script removes all failed claim records from the PostgreSQL database.
+ * Failed claims are identified by status: 'failed' in the claim_records table.
  */
 
-const mongoose = require('mongoose');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-// Connect to MongoDB
+// Connect to PostgreSQL
 async function connectToDatabase() {
   try {
-    const mongoUri = process.env.MONGO_URI;
-    if (!mongoUri) {
-      throw new Error('MONGO_URI environment variable is not set');
-    }
+    const pool = new Pool({
+      host: process.env.POSTGRES_HOST || 'localhost',
+      port: process.env.POSTGRES_PORT || 5432,
+      database: process.env.POSTGRES_DB || '8bp_rewards',
+      user: process.env.POSTGRES_USER || 'admin',
+      password: process.env.POSTGRES_PASSWORD || '192837DB25',
+      ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false
+    });
 
-    console.log('🔌 Connecting to MongoDB...');
-    await mongoose.connect(mongoUri);
-    console.log('✅ Connected to MongoDB successfully');
-    return true;
+    // Test connection
+    const client = await pool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
+    
+    console.log('✅ Connected to PostgreSQL');
+    return pool;
   } catch (error) {
-    console.error('❌ Failed to connect to MongoDB:', error.message);
-    return false;
+    console.error('❌ Failed to connect to PostgreSQL:', error.message);
+    throw error;
   }
 }
 
 // Remove failed claims
-async function removeFailedClaims() {
+async function removeFailedClaims(pool) {
   try {
-    const db = mongoose.connection.db;
-    const claimRecordsCollection = db.collection('claim_records');
-
-    // First, count how many failed claims exist
-    console.log('📊 Checking for failed claims...');
-    const failedClaimsCount = await claimRecordsCollection.countDocuments({ status: 'failed' });
+    console.log('🔍 Checking for failed claims...');
     
-    if (failedClaimsCount === 0) {
+    // First, count failed claims
+    const countResult = await pool.query(
+      'SELECT COUNT(*) as count FROM claim_records WHERE status = $1',
+      ['failed']
+    );
+    
+    const failedCount = parseInt(countResult.rows[0].count);
+    
+    if (failedCount === 0) {
       console.log('✅ No failed claims found in the database');
       return;
     }
-
-    console.log(`📊 Found ${failedClaimsCount} failed claims to remove`);
-
-    // Get some sample failed claims for review
-    const sampleFailedClaims = await claimRecordsCollection
-      .find({ status: 'failed' })
-      .limit(5)
-      .toArray();
-
-    console.log('\n📋 Sample failed claims to be removed:');
-    sampleFailedClaims.forEach((claim, index) => {
-      console.log(`${index + 1}. User: ${claim.eightBallPoolId}, Error: ${claim.error || 'No error message'}, Date: ${claim.claimedAt}`);
-    });
-
-    // Confirm deletion
-    console.log(`\n⚠️  About to delete ${failedClaimsCount} failed claim records`);
-    console.log('This action cannot be undone!');
     
-    // In a real script, you might want to add a confirmation prompt
-    // For now, we'll proceed with the deletion
+    console.log(`📊 Found ${failedCount} failed claims to remove`);
     
-    // Delete all failed claims
-    console.log('\n🗑️  Removing failed claims...');
-    const deleteResult = await claimRecordsCollection.deleteMany({ status: 'failed' });
+    // Remove failed claims
+    const deleteResult = await pool.query(
+      'DELETE FROM claim_records WHERE status = $1',
+      ['failed']
+    );
     
-    console.log(`✅ Successfully removed ${deleteResult.deletedCount} failed claim records`);
-
-    // Verify deletion
-    const remainingFailedCount = await claimRecordsCollection.countDocuments({ status: 'failed' });
-    console.log(`📊 Remaining failed claims: ${remainingFailedCount}`);
-
-    // Show updated statistics
-    const totalClaims = await claimRecordsCollection.countDocuments({});
-    const successfulClaims = await claimRecordsCollection.countDocuments({ status: 'success' });
+    console.log(`🗑️ Removed ${deleteResult.rowCount} failed claims from the database`);
     
-    console.log('\n📈 Updated database statistics:');
-    console.log(`   Total claims: ${totalClaims}`);
-    console.log(`   Successful claims: ${successfulClaims}`);
-    console.log(`   Failed claims: ${remainingFailedCount}`);
-
+    // Verify removal
+    const verifyResult = await pool.query(
+      'SELECT COUNT(*) as count FROM claim_records WHERE status = $1',
+      ['failed']
+    );
+    
+    const remainingFailed = parseInt(verifyResult.rows[0].count);
+    
+    if (remainingFailed === 0) {
+      console.log('✅ All failed claims have been successfully removed');
+    } else {
+      console.log(`⚠️ ${remainingFailed} failed claims still remain`);
+    }
+    
   } catch (error) {
     console.error('❌ Error removing failed claims:', error.message);
     throw error;
   }
 }
 
-// Main execution
+// Main function
 async function main() {
+  let pool = null;
+  
   try {
-    console.log('🚀 Starting Failed Claims Removal Script');
-    console.log('=====================================\n');
-
+    console.log('🚀 Starting failed claims removal process...');
+    
     // Connect to database
-    const connected = await connectToDatabase();
-    if (!connected) {
-      process.exit(1);
-    }
-
+    pool = await connectToDatabase();
+    
     // Remove failed claims
-    await removeFailedClaims();
-
-    console.log('\n✅ Script completed successfully!');
+    await removeFailedClaims(pool);
+    
+    console.log('🎉 Failed claims removal process completed successfully!');
     
   } catch (error) {
-    console.error('\n❌ Script failed:', error.message);
+    console.error('💥 Failed claims removal process failed:', error.message);
     process.exit(1);
   } finally {
-    // Close database connection
-    if (mongoose.connection.readyState === 1) {
-      await mongoose.connection.close();
-      console.log('🔌 Database connection closed');
+    if (pool) {
+      await pool.end();
+      console.log('🔌 Disconnected from PostgreSQL');
     }
   }
 }
 
 // Run the script
 if (require.main === module) {
-  main();
+  main().catch(console.error);
 }
 
-module.exports = { removeFailedClaims, connectToDatabase };
-
-
-
-
+module.exports = { connectToDatabase, removeFailedClaims };

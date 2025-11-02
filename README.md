@@ -86,6 +86,19 @@ graph TB
 
 ---
 
+## 📚 **Documentation**
+
+Comprehensive documentation is available in the [`docs/`](./docs/) directory:
+
+- **[File Structure](./docs/FILE_STRUCTURE.md)** - Complete file structure with descriptions and path explanations
+- **[Technical Deep Dive](./docs/README.md)** - Complete system architecture and implementation details
+- **[Host Setup](./docs/HOST_SETUP.md)** - Host-based deployment guide
+- **[Cloudflare Tunnel](./docs/CLOUDFLARE.md)** - Secure public access setup
+- **[Environment Setup](./docs/ENV_SETUP_GUIDE.md)** - Configuration guide
+- **[Deployment Checklist](./docs/DEPLOYMENT_CHECKLIST.md)** - Production deployment steps
+- **[Discord Setup](./docs/DISCORD_SETUP.md)** - Bot configuration
+- And more in the [`docs/`](./docs/) folder
+
 ## 📊 **Dashboard Features**
 
 ### **Public Leaderboard**
@@ -293,10 +306,25 @@ sudo journalctl -u 8bp-rewards-backend -f
 
 | Command | Description | Access Level |
 |---------|-------------|--------------|
-| **Manual Claim** | Trigger claims manually | Admin |
+| **Manual Claim All** | Trigger claims for all users | Admin |
+| **Manual Claim Single User** | Trigger claim for specific user ID | Admin |
+| **Manual Claim Test Users** | Quick claims for pre-configured test users | Admin |
 | **User Management** | View/manage users | Admin |
 | **System Status** | Check service status | Admin |
 | **VPS Terminal** | Server access | VPS Owner |
+
+### **Manual Claim Options**
+
+The Admin Dashboard now supports multiple manual claim options:
+
+1. **Claim All Users** - Processes all registered users (original functionality)
+2. **Single User Claim** - Enter any user ID to claim for just that user
+3. **Test User Quick Claims** - Pre-configured buttons for common test users
+
+**Test Users Configuration:**
+- Configure test users via `TEST_USERS` environment variable
+- Default test users: `1826254746`, `3057211056`, `110141`
+- Format: JSON array with `id`, `username`, and `description` fields
 
 ---
 

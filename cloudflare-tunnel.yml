@@ -1,23 +1,19 @@
 # Cloudflare Tunnel Configuration for 8BP Rewards System
 # This file configures Cloudflare Tunnels to route traffic to your local services
+# Updated for consolidated setup (frontend served from backend)
 
 tunnel: 8bp-rewards-tunnel
-credentials-file: /home/blake/.cloudflared/59ce795a-9617-4dcc-975b-37ca377ffdb9.json
+# credentials-file will be set automatically when creating new tunnel
+# Format: credentials-file: /home/blake/.cloudflared/TUNNEL_UUID.json
 
 ingress:
-  # Frontend (React app)
+  # All traffic (frontend + backend API) now goes to backend port 2600
+  # Backend serves frontend static files under /8bp-rewards route
   - hostname: 8bp.epildevconnect.uk
-    path: /8bp-rewards/*
-    service: http://localhost:2500
-    originRequest:
-      httpHostHeader: 8bp.epildevconnect.uk
-
-  # Backend API
-  - hostname: 8bp.epildevconnect.uk
-    path: /8bp-rewards/api/*
     service: http://localhost:2600
     originRequest:
       httpHostHeader: 8bp.epildevconnect.uk
+      noHappyEyeballs: true
 
   # Catch-all rule (must be last)
   - service: http_status:404

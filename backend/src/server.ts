@@ -9,6 +9,8 @@ import passport from 'passport';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import path from 'path';
+import heartbeatRoutes from './routes/heartbeat';
+import { initModuleHeartbeat } from './utils/heartbeat-client';
 
 // Load environment variables
 dotenv.config();
@@ -29,6 +31,8 @@ import vpsMonitorRoutes from './routes/vps-monitor';
 import screenshotsRoutes from './routes/screenshots';
 import adminTerminalRoutes from './routes/admin-terminal';
 import tiktokProfilesRoutes from './routes/tiktok-profiles';
+import postgresqlDbRoutes from './routes/postgresql-db';
+import validationRoutes from './routes/validation';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -43,8 +47,11 @@ class Server {
   constructor() {
     this.app = express();
     this.port = parseInt(process.env.BACKEND_PORT || '2600', 10);
-    this.databaseService = new DatabaseService();
+    this.databaseService = DatabaseService.getInstance();
     
+    // Report this module's heartbeat
+    initModuleHeartbeat(module, { service: 'backend' });
+
     this.setupMiddleware();
     this.setupRoutes();
     this.setupErrorHandling();
@@ -105,13 +112,13 @@ class Server {
     // Rate limiting
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 1000, // limit each IP to 1000 requests per windowMs (increased for admin operations)
+      max: 10000, // limit each IP to 10000 requests per windowMs (increased for dashboard and admin operations)
       message: 'Too many requests from this IP, please try again later.',
       standardHeaders: true,
       legacyHeaders: false,
       skip: (req) => {
-        // Skip rate limiting for admin routes
-        return req.path.startsWith('/api/admin/');
+        // Skip rate limiting for admin routes and dashboard
+        return req.path.startsWith('/api/admin/') || req.path.startsWith('/8bp-rewards/admin-dashboard');
       }
     });
     this.app.use('/api/', limiter);
@@ -129,12 +136,14 @@ class Server {
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: process.env.NODE_ENV === 'production', // true for HTTPS in production
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        path: '/'
-      }
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' required for cross-site redirects
+        path: '/',
+        domain: undefined // Allow cookies to work across subdomains if needed
+      },
+      name: 'connect.sid' // Explicit session cookie name
     }));
 
     // Passport initialization
@@ -167,6 +176,9 @@ class Server {
     this.app.use('/api/admin/screenshots', screenshotsRoutes);
     this.app.use('/api/admin/terminal', adminTerminalRoutes);
     this.app.use('/api/tiktok-profiles', tiktokProfilesRoutes);
+    this.app.use('/api/postgresql-db', postgresqlDbRoutes);
+    this.app.use('/api/validation', validationRoutes);
+    this.app.use('/api/heartbeat', heartbeatRoutes);
     
     // Also register API routes under /8bp-rewards prefix for frontend
     this.app.use('/8bp-rewards/api/auth', authRoutes);
@@ -179,30 +191,70 @@ class Server {
     this.app.use('/8bp-rewards/api/admin/screenshots', screenshotsRoutes);
     this.app.use('/8bp-rewards/api/admin/terminal', adminTerminalRoutes);
     this.app.use('/8bp-rewards/api/tiktok-profiles', tiktokProfilesRoutes);
+    this.app.use('/8bp-rewards/api/postgresql-db', postgresqlDbRoutes);
+    this.app.use('/8bp-rewards/api/validation', validationRoutes);
+    this.app.use('/8bp-rewards/api/heartbeat', heartbeatRoutes);
 
-    // Serve static files from React build
+    // Serve static files from React build (consolidated Docker setup)
     if (process.env.NODE_ENV === 'production') {
-      this.app.use('/8bp-rewards', express.static(path.join(__dirname, '../../frontend/build')));
+      // Try multiple possible frontend build locations (dev vs Docker)
+      const possibleFrontendPaths = [
+        path.join(process.cwd(), 'frontend/build'),
+        path.join(process.cwd(), '../frontend/build'),
+        path.join(__dirname, '../../../../frontend/build'),
+        path.join(__dirname, '../../../frontend/build'),
+        '/app/frontend-build' // Docker path
+      ];
       
-      // Handle React routing, return all requests to React app
-      this.app.get('/8bp-rewards/*', (req, res) => {
-        res.sendFile(path.join(__dirname, '../../frontend/build/index.html'));
-      });
-      
-      // Redirect root to /8bp-rewards
-      this.app.get('/', (req, res) => {
-        res.redirect('/8bp-rewards/home');
-      });
-      
-      // Redirect any other GET requests (not API) to /8bp-rewards
-      this.app.get('*', (req, res, next) => {
-        // Don't redirect API calls
-        if (req.path.startsWith('/api/')) {
-          return next();
+      let frontendBuildPath: string | null = null;
+      const fs = require('fs');
+      for (const buildPath of possibleFrontendPaths) {
+        try {
+          if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, 'index.html'))) {
+            frontendBuildPath = buildPath;
+            logger.info(`Frontend build found at: ${buildPath}`);
+            break;
+          }
+        } catch (e) {
+          // Continue to next path
         }
-        // Redirect to the same path under /8bp-rewards
-        res.redirect('/8bp-rewards' + req.path);
-      });
+      }
+      
+      if (frontendBuildPath) {
+        // Serve static assets from frontend build (including assets folder)
+        this.app.use('/8bp-rewards', express.static(frontendBuildPath, {
+          maxAge: '1y', // Cache static assets
+          etag: true,
+          lastModified: true
+        }));
+        
+        // Also serve assets directly for paths like /assets/logos/8logo.png
+        const assetsPath = path.join(frontendBuildPath, 'assets');
+        if (require('fs').existsSync(assetsPath)) {
+          this.app.use('/assets', express.static(assetsPath, {
+            maxAge: '1y',
+            etag: true,
+            lastModified: true
+          }));
+        }
+        
+        // Redirect root to /8bp-rewards
+        this.app.get('/', (req, res) => {
+          res.redirect('/8bp-rewards');
+        });
+        
+        // Handle React routing - serve index.html for all non-API routes under /8bp-rewards
+        this.app.get('/8bp-rewards/*', (req, res, next) => {
+          // Don't handle API routes - let them pass through
+          if (req.path.startsWith('/8bp-rewards/api/') || req.path.startsWith('/api/')) {
+            return next();
+          }
+          // Serve index.html for React Router
+          res.sendFile(path.join(frontendBuildPath!, 'index.html'));
+        });
+      } else {
+        logger.warn('Frontend build not found - serving API only. Tried paths:', possibleFrontendPaths);
+      }
     }
   }
 
@@ -232,15 +284,15 @@ class Server {
   public async start(): Promise<void> {
     try {
       // Connect to database
-      logger.info('Connecting to MongoDB...');
+      logger.info('Connecting to PostgreSQL...');
       const dbConnected = await this.databaseService.connect();
       
       if (!dbConnected) {
         throw new Error('Failed to connect to database');
       }
 
-      // Start server
-      this.app.listen(this.port, () => {
+      // Start server - bind to all interfaces (0.0.0.0) to accept connections from Docker
+      this.app.listen(this.port, '0.0.0.0', () => {
         logger.info(`🚀 Backend server running on port ${this.port}`);
         logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
         logger.info(`🔗 Public URL: ${process.env.PUBLIC_URL || 'http://localhost:2500'}`);

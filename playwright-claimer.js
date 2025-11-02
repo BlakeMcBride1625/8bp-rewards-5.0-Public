@@ -3,23 +3,10 @@ const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = 
 const fs = require('fs');
 const cron = require('node-cron');
 const DatabaseService = require('./services/database-service');
-const Registration = require('./models/Registration');
-const mongoose = require('mongoose');
 const BrowserPool = require('./browser-pool');
 require('dotenv').config();
 
-// ClaimRecord schema for saving claim results (matching backend TypeScript model)
-const ClaimRecordSchema = new mongoose.Schema({
-  eightBallPoolId: { type: String, required: true, index: true },
-  websiteUserId: { type: String, required: true }, // Added to match backend model
-  status: { type: String, enum: ['success', 'failed'], required: true },
-  itemsClaimed: [String],
-  error: String,
-  claimedAt: { type: Date, default: Date.now },
-  schedulerRun: Date
-}, { timestamps: true, collection: 'claim_records' });
-
-const ClaimRecord = mongoose.models.ClaimRecord || mongoose.model('ClaimRecord', ClaimRecordSchema);
+const dbService = DatabaseService.getInstance();
 
 // LAYER 1: Database-level duplicate prevention
 async function saveClaimRecord(userId, username, claimedItems, success, error = null, schedulerRunTime = null) {
@@ -28,19 +15,20 @@ async function saveClaimRecord(userId, username, claimedItems, success, error = 
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Start of today
     
-    const existingClaim = await ClaimRecord.findOne({
+    const existingClaims = await dbService.findClaimRecords({
       eightBallPoolId: userId,
       status: 'success',
       claimedAt: { $gte: today }
     });
 
     // If already claimed successfully today, skip saving
-    if (existingClaim && success) {
-      console.log(`⏭️ Duplicate prevented (DB check) - user ${username} already claimed today at ${existingClaim.claimedAt.toLocaleTimeString()}`);
-      return { saved: false, reason: 'duplicate', existingClaim };
+    if (existingClaims.length > 0 && success) {
+      console.log(`⏭️ Duplicate prevented (DB check) - user ${username} already claimed today at ${existingClaims[0].claimedAt.toLocaleTimeString()}`);
+      return { saved: false, reason: 'duplicate', existingClaim: existingClaims[0] };
     }
 
-    const claimRecord = new ClaimRecord({
+    // Create claim record using DatabaseService
+    const claimData = {
       eightBallPoolId: userId,
       websiteUserId: username,
       status: success ? 'success' : 'failed',
@@ -48,11 +36,18 @@ async function saveClaimRecord(userId, username, claimedItems, success, error = 
       error: error,
       schedulerRun: schedulerRunTime,
       claimedAt: new Date()
+    };
+    
+    console.log(`💾 Saving claim record for user ${userId}:`, {
+      status: claimData.status,
+      itemsCount: claimData.itemsClaimed.length,
+      success: success
     });
+    
+    await dbService.createClaimRecord(claimData);
 
-    await claimRecord.save();
-    console.log(`💾 Saved claim record for ${username} to database`);
-    return { saved: true, record: claimRecord };
+    console.log(`💾 Saved claim record for ${username} to database with status: ${claimData.status}`);
+    return { saved: true };
   } catch (error) {
     console.error(`❌ Failed to save claim record for ${username}:`, error.message);
     return { saved: false, reason: 'error', error: error.message };
@@ -62,10 +57,21 @@ async function saveClaimRecord(userId, username, claimedItems, success, error = 
 // Get user IDs from database instead of environment
 async function getUserIdsFromDatabase() {
   try {
-    const dbService = new DatabaseService();
-    await dbService.connect();
-    
-    const registrations = await Registration.getAllRegistrations();
+    // Check if specific users are targeted via environment variable
+    const targetUserIds = process.env.TARGET_USER_IDS;
+    if (targetUserIds) {
+      const userIds = targetUserIds.split(',').map(id => id.trim()).filter(id => id);
+      console.log(`🎯 Running targeted claim for ${userIds.length} specific users`);
+      console.log(`👥 Target Users: ${userIds.join(', ')}`);
+      
+      // Return in the expected format with username placeholders
+      return userIds.map(id => ({
+        eightBallPoolId: id,
+        username: `User_${id}` // Placeholder username for targeted users
+      }));
+    }
+
+    const registrations = await dbService.findRegistrations();
     console.log(`📋 Found ${registrations.length} registered users in database`);
     
     // Filter out blocked users
@@ -224,7 +230,7 @@ async function claimRewardsForUser(userId) {
           if (isVisible) {
             console.log(`🖱️ Clicking login button ${i + 1}...`);
             await button.click();
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(1000);
             
             // Check if login modal appeared
             const modalInputs = await page.locator('input[placeholder*="Unique ID"], input[placeholder*="123-456-789-0"]').all();
@@ -386,7 +392,7 @@ async function claimRewardsForUser(userId) {
         }
         
         // Wait for login to complete and check for redirects
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(1000);
         
         // Check if we got redirected to Google or another site
         const currentUrl = page.url();
@@ -396,7 +402,7 @@ async function claimRewardsForUser(userId) {
           console.log('❌ Got redirected to Google - login failed');
           console.log('🔄 Trying to go back to shop page...');
           await page.goto(shopUrl, { waitUntil: 'networkidle' });
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(1000);
         } else if (currentUrl.includes('8ballpool.com')) {
           console.log('✅ Still on 8ball pool site - login may have succeeded');
         } else {
@@ -414,7 +420,7 @@ async function claimRewardsForUser(userId) {
     console.log('🎁 Looking for all FREE and CLAIM buttons...');
     
     // Wait a bit for any dynamic content to load
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1000);
     
     // Specific target keywords to identify rewards we care about
     // ORDER MATTERS! Check more specific items first
@@ -597,52 +603,55 @@ async function claimRewardsForUser(userId) {
             if (privacyModal) {
               console.log('🍪 Privacy Settings modal detected - attempting aggressive dismissal');
               
-              // Try multiple dismissal strategies
-              const dismissalSuccess = await page.evaluate(() => {
-                try {
-                  // Strategy 1: Click outside the modal (on backdrop)
-                  const modal = document.querySelector('[class*="modal"], [role="dialog"]');
-                  if (modal) {
-                    const backdrop = modal.parentElement;
-                    if (backdrop && backdrop !== modal) {
-                      backdrop.click();
-                      return true;
+              // Try multiple dismissal strategies with timeout
+              const dismissalSuccess = await Promise.race([
+                page.evaluate(() => {
+                  try {
+                    // Strategy 1: Click outside the modal (on backdrop)
+                    const modal = document.querySelector('[class*="modal"], [role="dialog"]');
+                    if (modal) {
+                      const backdrop = modal.parentElement;
+                      if (backdrop && backdrop !== modal) {
+                        backdrop.click();
+                        return true;
+                      }
                     }
-                  }
-                  
-                  // Strategy 2: Press Escape key
-                  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
-                  return true;
-                  
-                  // Strategy 3: Try to find and click any close button
-                  const closeButtons = document.querySelectorAll('button, [role="button"]');
-                  for (const btn of closeButtons) {
-                    const text = btn.textContent || '';
-                    if (text.toLowerCase().includes('save') || 
-                        text.toLowerCase().includes('exit') || 
-                        text.toLowerCase().includes('close') ||
-                        text.toLowerCase().includes('dismiss')) {
-                      btn.click();
-                      return true;
+                    
+                    // Strategy 2: Press Escape key
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
+                    return true;
+                    
+                    // Strategy 3: Try to find and click any close button
+                    const closeButtons = document.querySelectorAll('button, [role="button"]');
+                    for (const btn of closeButtons) {
+                      const text = btn.textContent || '';
+                      if (text.toLowerCase().includes('save') || 
+                          text.toLowerCase().includes('exit') || 
+                          text.toLowerCase().includes('close') ||
+                          text.toLowerCase().includes('dismiss')) {
+                        btn.click();
+                        return true;
+                      }
                     }
+                    
+                    return false;
+                  } catch (error) {
+                    return false;
                   }
-                  
-                  return false;
-                } catch (error) {
-                  return false;
-                }
-              });
+                }),
+                new Promise(resolve => setTimeout(() => resolve(false), 5000)) // 5 second timeout
+              ]);
               
               if (dismissalSuccess) {
                 console.log('✅ Modal dismissal successful');
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(1000);
                 // Now try normal click
-                await buttonInfo.element.click();
+                await buttonInfo.element.click({ timeout: 10000 });
               } else {
                 console.log('⚠️ Modal dismissal failed, trying force click');
                 // Fallback to force click
                 try {
-                  await buttonInfo.element.click({ force: true });
+                  await buttonInfo.element.click({ force: true, timeout: 10000 });
                   console.log('✅ Force click successful');
                 } catch (forceError) {
                   console.log(`⚠️ Force click failed: ${forceError.message}`);
@@ -672,7 +681,7 @@ async function claimRewardsForUser(userId) {
           }
           
           // Wait between clicks
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(1000);
           
         } catch (error) {
           console.log(`⚠️ Error clicking FREE button ${i + 1}: ${error.message}`);
@@ -709,7 +718,7 @@ async function claimRewardsForUser(userId) {
     console.log('✅ Successfully loaded Free Daily Cue Piece page');
     
     // Wait for page to load
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1000);
     
     // Look for FREE buttons in Free Daily Cue Piece section
     console.log('🎁 Checking Free Daily Cue Piece section for FREE items...');
@@ -764,7 +773,7 @@ async function claimRewardsForUser(userId) {
             
             // Wait between clicks
             if (i < cueFreeButtons.length - 1) {
-              await page.waitForTimeout(3000);
+              await page.waitForTimeout(1000);
             }
           }
         } catch (error) {
@@ -773,6 +782,12 @@ async function claimRewardsForUser(userId) {
       }
       
       console.log(`🎉 Successfully clicked ${cueFreeButtons.length} cue FREE buttons!`);
+      
+      // Add cue items to claimed items (avoiding duplicates)
+      const cueItems = ['Free Daily Cue Piece']; // This would be dynamically determined
+      const uniqueCueItems = cueItems.filter(item => !claimedItems.includes(item));
+      claimedItems = claimedItems.concat(uniqueCueItems);
+      console.log(`✅ Added ${uniqueCueItems.length} unique cue items to claimed items`);
     } else {
       console.log('❌ No FREE buttons found in cue section');
     }
@@ -781,7 +796,7 @@ async function claimRewardsForUser(userId) {
     await takeScreenshot(page, `screenshots/final-page/final-page-${userId}.png`, 'Final page');
     
     // Wait a bit to see results
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1000);
     
     // Logout to prepare for next user
     console.log('🚪 Logging out...');
@@ -792,8 +807,19 @@ async function claimRewardsForUser(userId) {
     console.error('Stack:', error.stack);
   } finally {
     if (browser) {
-      await browser.close();
-      console.log('🔒 Browser closed');
+      try {
+        await browser.close();
+        console.log('🔒 Browser closed');
+      } catch (closeError) {
+        console.error('⚠️ Error closing browser:', closeError.message);
+        // Force kill browser process if normal close fails
+        try {
+          await browser.close({ force: true });
+          console.log('🔒 Browser force-closed');
+        } catch (forceCloseError) {
+          console.error('❌ Failed to force-close browser:', forceCloseError.message);
+        }
+      }
     }
   }
   
@@ -819,7 +845,7 @@ async function logout(page) {
             console.log(`🚪 Found logout button: "${buttonText}"`);
             await logoutButton.click();
             console.log('✅ Clicked logout button');
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(1000);
             return true;
           }
         } catch (error) {
@@ -848,7 +874,7 @@ async function logout(page) {
           if (dropdownVisible) {
             await dropdownLogout.click();
             console.log('✅ Clicked logout from dropdown');
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(1000);
             return true;
           }
         }
@@ -868,6 +894,13 @@ async function logout(page) {
 
 // Main function to claim rewards for all users
 async function claimRewards() {
+  // Ensure database connection
+  const connected = await dbService.connect();
+  if (!connected) {
+    console.error('❌ Failed to connect to database');
+    return;
+  }
+  
   // Get users from database
   const users = await getUserIdsFromDatabase();
   

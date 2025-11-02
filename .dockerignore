@@ -1,22 +1,87 @@
+# Dependencies
 node_modules
+*/node_modules
+**/node_modules
 npm-debug.log
+
+# Git
 .git
 .gitignore
+
+# Environment files (read by docker-compose, not copied into image)
 .env
-.DS_Store
+.env.*
+env.docker
+
+# Logs
 *.log
 logs
-dist/frontend
-coverage
+*/logs
+**/logs
+backend/logs
+
+# Screenshots (huge!)
+screenshots
+*/screenshots
+**/screenshots
+backend/screenshots
+
+# Backups (huge!)
+backups
+*/backups
+**/backups
+database-backups
+
+# Built files (we build inside Docker)
+dist
+*/dist
+**/dist
+build
+*/build
+**/build
+
+# Frontend node_modules
+frontend/node_modules
+frontend/build
+
+# Discord bot
+discord-status-bot/node_modules
+discord-status-bot/dist
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
 .vscode
 .idea
-*.png
-*.jpg
-*.jpeg
-.env.local
-.env.development
-.env.test
-.env.production
-README.md
-docker-compose.yml
+*.swp
+*.swo
+
+# Test files
+coverage
+.nyc_output
+**/*.test.ts
+**/*.spec.ts
+
+# Archive folder
+archive
+
+# Docker files (don't need inside image)
+docker-compose*.yml
 Dockerfile*
+.dockerignore
+*.sh
+
+# Docs
+README.md
+docs
+*.md
+
+# Reports
+reports
+
+# Temp files
+tmp
+temp
+*.tmp

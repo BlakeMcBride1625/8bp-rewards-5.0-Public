@@ -23,6 +23,8 @@ export const API_ENDPOINTS = {
   ADMIN_OVERVIEW: `${API_BASE_URL}/admin/overview`,
   ADMIN_REGISTRATIONS: `${API_BASE_URL}/admin/registrations`,
   ADMIN_CLAIM_ALL: `${API_BASE_URL}/admin/claim-all`,
+  ADMIN_CLAIM_USERS: `${API_BASE_URL}/admin/claim-users`,
+  ADMIN_TEST_USERS: `${API_BASE_URL}/admin/test-users`,
   ADMIN_USERS: `${API_BASE_URL}/admin/users`,
   ADMIN_CLAIM_PROGRESS: `${API_BASE_URL}/admin/claim-progress`,
   ADMIN_CLAIM_PROGRESS_BY_ID: (processId: string) => `${API_BASE_URL}/admin/claim-progress/${processId}`,
@@ -32,6 +34,7 @@ export const API_ENDPOINTS = {
   ADMIN_RESET_LEADERBOARD_VERIFY_ACCESS: `${API_BASE_URL}/admin/reset-leaderboard/verify-access`,
   ADMIN_RESET_LEADERBOARD_ACCESS_STATUS: `${API_BASE_URL}/admin/reset-leaderboard/access-status`,
   ADMIN_ACTIVE_SERVICES: `${API_BASE_URL}/admin/active-services`,
+  ADMIN_HEARTBEAT_SUMMARY: `${API_BASE_URL}/admin/heartbeat/summary`,
   
   // VPS Monitor Authentication
   ADMIN_VPS_REQUEST_ACCESS: `${API_BASE_URL}/admin/vps/request-access`,

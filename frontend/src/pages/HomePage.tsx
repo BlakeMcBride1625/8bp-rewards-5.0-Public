@@ -77,7 +77,7 @@ const HomePage: React.FC = () => {
               {
                 icon: Shield,
                 title: 'Secure & Reliable',
-                description: 'Your data is safe with our secure MongoDB database',
+                description: 'Your data is safe with our secure PostgreSQL database',
               },
               {
                 icon: Trophy,

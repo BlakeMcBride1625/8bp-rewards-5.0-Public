@@ -68,7 +68,7 @@ const ActiveServicesPage: React.FC = () => {
 
   const fetchActiveServices = async () => {
     try {
-      const response = await axios.get(`${API_ENDPOINTS.BASE_URL}/api/admin/active-services`);
+      const response = await axios.get(API_ENDPOINTS.ADMIN_ACTIVE_SERVICES);
       if (response.data.success) {
         setServices(response.data.data.services);
         setSystemInfo(response.data.data.systemInfo);

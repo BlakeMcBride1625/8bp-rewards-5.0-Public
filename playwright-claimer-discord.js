@@ -3,7 +3,7 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
 const DiscordService = require('./services/discord-service');
-const mongoose = require('mongoose');
+const DatabaseService = require('./services/database-service');
 const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
 const BrowserPool = require('./browser-pool');
 
@@ -19,8 +19,7 @@ try {
 // Load environment variables
 dotenv.config();
 
-// Import ClaimRecord model (compiled JS version)
-const { ClaimRecord } = require('./dist/backend/models/ClaimRecord');
+const dbService = DatabaseService.getInstance();
 
 class EightBallPoolClaimer {
   constructor() {
@@ -31,7 +30,7 @@ class EightBallPoolClaimer {
     this.freeDailyCueUrl = 'https://8ballpool.com/en/shop#free_daily_cue_piece';
     this.userIds = []; // Will be populated in initialize()
     this.delayBetweenUsers = parseInt(process.env.DELAY_BETWEEN_USERS || '5000', 10);
-    this.timeout = parseInt(process.env.TIMEOUT || '60000', 10);
+    this.timeout = parseInt(process.env.TIMEOUT || '20000', 10);
     this.headless = process.env.HEADLESS !== 'false';
     this.dbConnected = false;
     this.browserPool = new BrowserPool(6); // Max 6 concurrent browsers
@@ -78,18 +77,12 @@ class EightBallPoolClaimer {
     if (this.dbConnected) return true;
     
     try {
-      const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
-      if (!mongoUri) {
-        console.warn('⚠️ MongoDB URI not found - claims will not be saved to database');
-        return false;
-      }
-      
-      await mongoose.connect(mongoUri);
+      await dbService.connect();
       this.dbConnected = true;
-      console.log('✅ Connected to MongoDB for claim records');
+      console.log('✅ Connected to database for claim records');
       return true;
     } catch (error) {
-      console.error('❌ Failed to connect to MongoDB:', error.message);
+      console.error('❌ Failed to connect to database:', error.message);
       return false;
     }
   }
@@ -125,19 +118,24 @@ class EightBallPoolClaimer {
       const today = new Date();
       today.setHours(0, 0, 0, 0); // Start of today
       
-      const existingClaim = await ClaimRecord.findOne({
+      console.log(`🔍 Checking for duplicates - user: ${userId}, today: ${today.toISOString()}`);
+      
+      const existingClaims = await dbService.findClaimRecords({
         eightBallPoolId: userId,
         status: 'success',
         claimedAt: { $gte: today }
       });
 
+      console.log(`🔍 Found ${existingClaims.length} existing claims for user ${userId} today`);
+
       // If already claimed successfully today, skip saving
-      if (existingClaim && success) {
-        console.log(`⏭️ Duplicate prevented (DB check) - user ${userId} already claimed today at ${existingClaim.claimedAt.toLocaleTimeString()}`);
-        return { saved: false, reason: 'duplicate', existingClaim };
+      if (existingClaims.length > 0 && success) {
+        console.log(`⏭️ Duplicate prevented (DB check) - user ${userId} already claimed today at ${existingClaims[0].claimedAt.toLocaleTimeString()}`);
+        return { saved: false, reason: 'duplicate', existingClaim: existingClaims[0] };
       }
 
-      const claimRecord = new ClaimRecord({
+      // Create claim record using DatabaseService
+      const claimData = {
         eightBallPoolId: userId,
         websiteUserId: userId, // Use the same ID for both fields
         status: success ? 'success' : 'failed',
@@ -145,11 +143,18 @@ class EightBallPoolClaimer {
         error: error,
         claimedAt: new Date(),
         schedulerRun: new Date()
+      };
+      
+      console.log(`💾 Saving claim record for user ${userId}:`, {
+        status: claimData.status,
+        itemsCount: claimData.itemsClaimed.length,
+        success: success
       });
+      
+      await dbService.createClaimRecord(claimData);
 
-      await claimRecord.save();
-      console.log(`💾 Saved claim record to database for user ${userId}`);
-      return { saved: true, record: claimRecord };
+      console.log(`💾 Saved claim record to database for user ${userId} with status: ${claimData.status}`);
+      return { saved: true };
     } catch (error) {
       console.error(`❌ Failed to save claim record for ${userId}:`, error.message);
       return { saved: false, reason: 'error', error: error.message };
@@ -219,9 +224,17 @@ class EightBallPoolClaimer {
 
   async getUserIdList() {
     try {
-      // First try to get users from MongoDB database
-      const db = mongoose.connection.db;
-      const registrations = await db.collection('registrations').find({}).project({ eightBallPoolId: 1 }).toArray();
+      // Check if specific users are targeted via environment variable
+      const targetUserIds = process.env.TARGET_USER_IDS;
+      if (targetUserIds) {
+        const userIds = targetUserIds.split(',').map(id => id.trim()).filter(id => id);
+        console.log(`🎯 Running targeted claim for ${userIds.length} specific users`);
+        console.log(`👥 Target Users: ${userIds.join(', ')}`);
+        return userIds;
+      }
+
+      // First try to get users from database
+      const registrations = await dbService.findRegistrations();
       if (registrations && registrations.length > 0) {
         const userIds = registrations.map(reg => reg.eightBallPoolId).filter(id => id);
         console.log(`📊 Found ${userIds.length} users in database`);
@@ -334,7 +347,7 @@ class EightBallPoolClaimer {
       await this.handleLogin(page, userId);
 
       // Wait for login to complete
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(1000);
 
       // Take screenshot after login
       await this.takeScreenshot(page, `screenshots/login/after-login-${userId}.png`, 'After login');
@@ -346,7 +359,7 @@ class EightBallPoolClaimer {
       console.log(`✅ Claimed ${dailyItems.length} items from Daily Reward section`);
 
       // Wait between sections
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(1000);
 
       // Navigate to Free Daily Cue Piece section
       console.log(`🌐 Navigating to Free Daily Cue Piece section: ${this.freeDailyCueUrl}`);
@@ -357,13 +370,16 @@ class EightBallPoolClaimer {
       console.log('✅ Successfully loaded Free Daily Cue Piece page');
 
       // Wait for page to settle
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(1000);
 
       // Check for FREE buttons in Free Daily Cue Piece section
       console.log('🎁 Checking Free Daily Cue Piece section for FREE items...');
       let cueItems = await this.claimFreeItems(page, userId);
-      claimedItems = claimedItems.concat(cueItems);
-      console.log(`✅ Claimed ${cueItems.length} items from Free Daily Cue Piece section`);
+      
+      // Filter out duplicate items that were already claimed
+      const uniqueCueItems = cueItems.filter(item => !claimedItems.includes(item));
+      claimedItems = claimedItems.concat(uniqueCueItems);
+      console.log(`✅ Claimed ${uniqueCueItems.length} unique items from Free Daily Cue Piece section`);
 
       // Take final screenshot
       screenshotPath = `screenshots/final-page/final-page-${userId}.png`;
@@ -379,6 +395,7 @@ class EightBallPoolClaimer {
       if (claimedItems.length === 0) {
         console.log(`⚠️ No items detected in claimedItems array for user ${userId} - this may indicate a counting issue`);
         console.log(`🔍 However, we'll still save the claim record as 'success' since the process completed without errors`);
+        console.log(`🔍 This could mean: 1) Items already claimed today, 2) No free items available, 3) Website structure changed`);
         
         // Cleanup old screenshots
         await this.cleanupOldScreenshots();
@@ -387,6 +404,8 @@ class EightBallPoolClaimer {
         const saveResult = await this.saveClaimRecord(userId, [], true);
         return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: false };
       }
+      
+      console.log(`🎉 SUCCESS: User ${userId} claimed ${claimedItems.length} items: ${claimedItems.join(', ')}`);
 
       // Save claim record to database (with Layer 1 duplicate check)
       const saveResult = await this.saveClaimRecord(userId, claimedItems, true);
@@ -395,11 +414,8 @@ class EightBallPoolClaimer {
       if (saveResult && !saveResult.saved && saveResult.reason === 'duplicate') {
         console.log(`⏭️ Duplicate detected by database layer - claim already recorded today`);
         
-        // Still send Discord confirmation if needed (showing existing claim)
-        if (this.discordService && this.discordService.isReady) {
-          console.log('📤 Sending Discord notification (duplicate claim attempt)...');
-          await this.sendDiscordConfirmation(userId, screenshotPath, []);
-        }
+        // Don't send Discord confirmation for duplicates - they already got their message
+        console.log('⏭️ Skipping Discord notification for duplicate claim');
         
         return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
       }
@@ -430,8 +446,19 @@ class EightBallPoolClaimer {
       return { success: false, error: error.message };
     } finally {
       if (browser) {
-        await browser.close();
-        console.log('🔒 Browser closed');
+        try {
+          await browser.close();
+          console.log('🔒 Browser closed');
+        } catch (closeError) {
+          console.error('⚠️ Error closing browser:', closeError.message);
+          // Force kill browser process if normal close fails
+          try {
+            await browser.close({ force: true });
+            console.log('🔒 Browser force-closed');
+          } catch (forceCloseError) {
+            console.error('❌ Failed to force-close browser:', forceCloseError.message);
+          }
+        }
       }
       
       // Release browser pool slot
@@ -443,7 +470,7 @@ class EightBallPoolClaimer {
   async handleLogin(page, userId) {
     try {
       // Wait for page to fully load
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(1000);
       
       // Look for login triggers
       const loginTriggers = await page.locator('button, a, div').filter({ hasText: /login|sign.?in|enter|join/i }).all();
@@ -481,7 +508,7 @@ class EightBallPoolClaimer {
           const button = loginButtons[i];
           console.log(`🖱️ Clicking login button ${i + 1}...`);
           await button.click();
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(1000);
           
           // Check if login modal appeared
           const modal = await page.locator('input[type="text"], input[placeholder*="ID"], input[placeholder*="id"]').first();
@@ -596,7 +623,7 @@ class EightBallPoolClaimer {
       await this.clickGoButton(page, input);
       
       // Wait for login to complete and take another screenshot
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(1000);
       await this.takeScreenshot(page, `screenshots/go-click/after-go-click-${userId}.png`, 'After Go click');
 
     } catch (error) {
@@ -685,7 +712,7 @@ class EightBallPoolClaimer {
       }
 
       // Wait for login to complete and check for redirects
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(1000);
       
       // Check if we got redirected to Google or another site
       const currentUrl = page.url();
@@ -695,7 +722,7 @@ class EightBallPoolClaimer {
         console.log('❌ Got redirected to Google - login failed');
         console.log('🔄 Trying to go back to shop page...');
         await page.goto(this.shopUrl, { waitUntil: 'networkidle' });
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(1000);
       } else if (currentUrl.includes('8ballpool.com')) {
         console.log('✅ Still on 8ball pool site - login may have succeeded');
       } else {
@@ -865,52 +892,55 @@ class EightBallPoolClaimer {
             if (privacyModal) {
               console.log('🍪 Privacy Settings modal detected - attempting aggressive dismissal');
               
-              // Try multiple dismissal strategies
-              const dismissalSuccess = await page.evaluate(() => {
-                try {
-                  // Strategy 1: Click outside the modal (on backdrop)
-                  const modal = document.querySelector('[class*="modal"], [role="dialog"]');
-                  if (modal) {
-                    const backdrop = modal.parentElement;
-                    if (backdrop && backdrop !== modal) {
-                      backdrop.click();
-                      return true;
+              // Try multiple dismissal strategies with timeout
+              const dismissalSuccess = await Promise.race([
+                page.evaluate(() => {
+                  try {
+                    // Strategy 1: Click outside the modal (on backdrop)
+                    const modal = document.querySelector('[class*="modal"], [role="dialog"]');
+                    if (modal) {
+                      const backdrop = modal.parentElement;
+                      if (backdrop && backdrop !== modal) {
+                        backdrop.click();
+                        return true;
+                      }
                     }
-                  }
+                    
+                    // Strategy 2: Press Escape key
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
+                    return true;
                   
-                  // Strategy 2: Press Escape key
-                  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27 }));
-                  return true;
-                  
-                  // Strategy 3: Try to find and click any close button
-                  const closeButtons = document.querySelectorAll('button, [role="button"]');
-                  for (const btn of closeButtons) {
-                    const text = btn.textContent || '';
-                    if (text.toLowerCase().includes('save') || 
-                        text.toLowerCase().includes('exit') || 
-                        text.toLowerCase().includes('close') ||
-                        text.toLowerCase().includes('dismiss')) {
-                      btn.click();
-                      return true;
+                    // Strategy 3: Try to find and click any close button
+                    const closeButtons = document.querySelectorAll('button, [role="button"]');
+                    for (const btn of closeButtons) {
+                      const text = btn.textContent || '';
+                      if (text.toLowerCase().includes('save') || 
+                          text.toLowerCase().includes('exit') || 
+                          text.toLowerCase().includes('close') ||
+                          text.toLowerCase().includes('dismiss')) {
+                        btn.click();
+                        return true;
+                      }
                     }
+                    
+                    return false;
+                  } catch (error) {
+                    return false;
                   }
-                  
-                  return false;
-                } catch (error) {
-                  return false;
-                }
-              });
+                }),
+                new Promise(resolve => setTimeout(() => resolve(false), 5000)) // 5 second timeout
+              ]);
               
               if (dismissalSuccess) {
                 console.log('✅ Modal dismissal successful');
                 await page.waitForTimeout(2000);
                 // Now try normal click
-                await buttonInfo.element.click();
+                await buttonInfo.element.click({ timeout: 10000 });
               } else {
                 console.log('⚠️ Modal dismissal failed, trying force click');
                 // Fallback to force click
                 try {
-                  await buttonInfo.element.click({ force: true });
+                  await buttonInfo.element.click({ force: true, timeout: 10000 });
                   console.log('✅ Force click successful');
                 } catch (forceError) {
                   console.log(`⚠️ Force click failed: ${forceError.message}`);
@@ -918,13 +948,13 @@ class EightBallPoolClaimer {
               }
             } else {
               // No modal detected, proceed with normal click
-              await buttonInfo.element.click();
+              await buttonInfo.element.click({ timeout: 10000 });
             }
           } catch (error) {
             console.log(`⚠️ Error with modal bypass: ${error.message}`);
             // Fallback to normal click
             try {
-              await buttonInfo.element.click();
+              await buttonInfo.element.click({ timeout: 10000 });
             } catch (clickError) {
               console.log(`⚠️ Normal click failed: ${clickError.message}`);
             }
@@ -940,7 +970,7 @@ class EightBallPoolClaimer {
           }
           
           // Wait between clicks
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(1000);
           
         } catch (error) {
           console.log(`⚠️ Error clicking FREE button ${i + 1}: ${error.message}`);
@@ -974,7 +1004,7 @@ class EightBallPoolClaimer {
               console.log(`🚪 Found logout button: "${buttonText}"`);
               await logoutButton.click();
               console.log('✅ Clicked logout button');
-              await page.waitForTimeout(2000);
+              await page.waitForTimeout(1000);
               return true;
             }
           } catch (error) {
@@ -994,7 +1024,7 @@ class EightBallPoolClaimer {
           if (isVisible) {
             console.log(`👤 Clicking profile button ${i + 1} to find logout...`);
             await profileButton.click();
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(500);
             
             // Look for logout in dropdown
             const dropdownLogout = await page.locator('button:has-text("Logout"), button:has-text("Sign Out"), a:has-text("Logout")').first();
@@ -1003,7 +1033,7 @@ class EightBallPoolClaimer {
             if (dropdownVisible) {
               await dropdownLogout.click();
               console.log('✅ Clicked logout from dropdown');
-              await page.waitForTimeout(2000);
+              await page.waitForTimeout(1000);
               return true;
             }
           }
@@ -1069,14 +1099,14 @@ class EightBallPoolClaimer {
   }
 
   async claimRewards() {
+    // Connect to database first
+    await this.connectToDatabase();
+    
     // Initialize user list from database
     this.userIds = await this.getUserIdList();
     
     console.log(`🚀 Starting 8ball pool reward claimer for ${this.userIds.length} users...`);
     console.log(`👥 Users: ${this.userIds.join(', ')}`);
-    
-    // Connect to database
-    await this.connectToDatabase();
     
     console.log(`\n🚀 Running ${this.userIds.length} claims with BROWSER POOL (max 6 concurrent browsers)!`);
     console.log(`📊 Browser Pool Status: ${this.browserPool.getStatus().activeBrowsers}/${this.browserPool.getStatus().maxConcurrent} active, ${this.browserPool.getStatus().queued} queued`);

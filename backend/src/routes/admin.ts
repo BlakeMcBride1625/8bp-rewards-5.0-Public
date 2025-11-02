@@ -1,14 +1,16 @@
 import express from 'express';
-import { Registration } from '../models/Registration';
-import { ClaimRecord } from '../models/ClaimRecord';
-import { LogEntry } from '../models/LogEntry';
+import { DatabaseService } from '../services/DatabaseService';
 import { logger } from '../services/LoggerService';
+import { HeartbeatRegistry } from '../services/HeartbeatRegistry';
 import { authenticateAdmin } from '../middleware/auth';
 import DiscordNotificationService from '../services/DiscordNotificationService';
 import TelegramNotificationService from '../services/TelegramNotificationService';
 import { EmailNotificationService } from '../services/EmailNotificationService';
 import { exec } from 'child_process';
 import path from 'path';
+import { DeviceDetectionService } from '../services/DeviceDetectionService';
+import { BlockingService } from '../services/BlockingService';
+import { checkDeviceBlocking, logDeviceInfo } from '../middleware/deviceBlocking';
 import crypto from 'crypto';
 import axios from 'axios';
 
@@ -21,12 +23,15 @@ declare global {
 }
 
 const router = express.Router();
+const dbService = DatabaseService.getInstance();
+const deviceDetectionService = DeviceDetectionService.getInstance();
+const blockingService = BlockingService.getInstance();
 
 // Public bot status endpoint (no auth required)
 router.get('/bot-status-public', async (req, res) => {
   try {
     // Make a request to the Discord bot service to get current status
-    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    const botServiceUrl = 'http://localhost:2700'; // Use localhost for hybrid mode
     
     try {
       const response = await axios.get(`${botServiceUrl}/api/bot-status`, {
@@ -71,33 +76,76 @@ router.get('/overview', async (req, res) => {
     const user = req.user as any;
     
     // Get registration count
-    const totalRegistrations = await Registration.getRegistrationCount();
+    const totalRegistrations = await dbService.findRegistrations();
     
     // Get recent registrations (last 7 days)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const recentRegistrations = await Registration.countDocuments({
+    const recentRegistrations = await dbService.findRegistrations({
       createdAt: { $gte: sevenDaysAgo }
     });
 
-    // Get claim statistics (last 7 days)
-    const claimStats = await ClaimRecord.getClaimStats(7);
+    // Get claim statistics (all-time)
+    const claimStats = await dbService.getClaimStats(); // Get all-time stats
     
-    // Get log statistics (last 7 days)
-    const logStats = await LogEntry.getLogStats(7);
+    // Get log statistics (last 7 days) from database
+    let logStats: any[] = [];
+    try {
+      const { Pool } = require('pg');
+      const pool = new Pool({
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || '5432'),
+        database: process.env.POSTGRES_DB || '8bp_rewards',
+        user: process.env.POSTGRES_USER || 'admin',
+        password: process.env.POSTGRES_PASSWORD || '192837DB25',
+        ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false
+      });
+      
+      // Get log counts by level for last 7 days
+      const result = await pool.query(`
+        SELECT level, COUNT(*) as count 
+        FROM log_entries 
+        WHERE timestamp > NOW() - INTERVAL '7 days'
+        GROUP BY level
+      `);
+      
+      // Convert to array format
+      logStats = result.rows.map((row: any) => ({
+        _id: row.level,
+        count: parseInt(row.count),
+        latest: new Date().toISOString()
+      }));
+      
+      await pool.end();
+    } catch (error) {
+      logger.warn('Failed to read log statistics from database', { error: error instanceof Error ? error.message : 'Unknown error' });
+    }
 
     // Get recent claims
-    const recentClaims = await ClaimRecord.getRecentClaims(10);
+    const recentClaims = await dbService.findClaimRecords();
+    
+    // Debug logging for claim status
+    logger.info('Admin overview - recent claims debug', {
+      action: 'admin_overview_debug',
+      totalClaims: recentClaims.length,
+      claimStatuses: recentClaims.slice(0, 5).map((claim: any) => ({
+        id: claim.id,
+        eightBallPoolId: claim.eightBallPoolId,
+        status: claim.status,
+        itemsClaimed: claim.itemsClaimed,
+        claimedAt: claim.claimedAt
+      }))
+    });
 
     res.json({
       registrations: {
-        total: totalRegistrations,
-        recent: recentRegistrations,
+        total: totalRegistrations.length,
+        recent: recentRegistrations.length,
         period: '7 days'
       },
       claims: claimStats,
       logs: logStats,
-      recentClaims: recentClaims.map(claim => ({
+      recentClaims: recentClaims.slice(0, 10).map((claim: any) => ({
         eightBallPoolId: claim.eightBallPoolId,
         status: claim.status,
         itemsClaimed: claim.itemsClaimed,
@@ -114,6 +162,63 @@ router.get('/overview', async (req, res) => {
 
     res.status(500).json({
       error: 'Failed to retrieve dashboard overview'
+    });
+  }
+});
+
+// Heartbeat admin proxy endpoints (surface summary into admin routes)
+router.get('/heartbeat/summary', async (req, res) => {
+  const registry = HeartbeatRegistry.getInstance();
+  return res.json({ success: true, data: registry.getSummary() });
+});
+router.get('/heartbeat/active', async (req, res) => {
+  const registry = HeartbeatRegistry.getInstance();
+  return res.json({ success: true, data: registry.getActiveRecords() });
+});
+
+// Get test users configuration
+router.get('/test-users', async (req, res) => {
+  try {
+    // Default test users - can be configured via environment variables
+    const defaultTestUsers = [
+      { id: '1826254746', username: 'TestUser1', description: 'Primary test user' },
+      { id: '3057211056', username: 'TestUser2', description: 'Secondary test user' },
+      { id: '110141', username: 'TestUser3', description: 'Tertiary test user' }
+    ];
+
+    // Check if custom test users are configured via environment
+    const customTestUsers = process.env.TEST_USERS;
+    let testUsers = defaultTestUsers;
+
+    if (customTestUsers) {
+      try {
+        const parsed = JSON.parse(customTestUsers);
+        if (Array.isArray(parsed)) {
+          testUsers = parsed;
+        }
+      } catch (error) {
+        logger.warn('Failed to parse TEST_USERS environment variable', {
+          action: 'test_users_parse_error',
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+
+    res.json({
+      testUsers,
+      configured: !!customTestUsers,
+      count: testUsers.length
+    });
+
+  } catch (error) {
+    logger.error('Failed to retrieve test users', {
+      action: 'admin_test_users_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      adminId: (req.user as any)?.id
+    });
+
+    res.status(500).json({
+      error: 'Failed to retrieve test users'
     });
   }
 });
@@ -135,12 +240,8 @@ router.get('/registrations', async (req, res) => {
       };
     }
 
-    const registrations = await Registration.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit);
-
-    const total = await Registration.countDocuments(filter);
+    const registrations = await dbService.findRegistrations(filter);
+    const total = registrations.length;
 
     res.json({
       registrations,
@@ -166,7 +267,7 @@ router.get('/registrations', async (req, res) => {
 });
 
 // Add new registration (admin)
-router.post('/registrations', async (req, res): Promise<void> => {
+router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, res): Promise<void> => {
   try {
     const { eightBallPoolId, username } = req.body;
 
@@ -178,7 +279,7 @@ router.post('/registrations', async (req, res): Promise<void> => {
     }
 
     // Check if user already exists
-    const existingUser = await Registration.findByEightBallPoolId(eightBallPoolId);
+    const existingUser = await dbService.findRegistration({ eightBallPoolId });
     if (existingUser) {
       res.status(409).json({
         error: 'User with this 8 Ball Pool ID already exists'
@@ -186,13 +287,39 @@ router.post('/registrations', async (req, res): Promise<void> => {
       return;
     }
 
-    const registration = new Registration({
+    // Extract client IP with better proxy handling
+    console.log('🔍 Admin IP Detection Debug - Starting IP detection for user:', username);
+    const clientIP = req.ip || 
+                     req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
+                     req.headers['x-real-ip']?.toString() ||
+                     req.headers['cf-connecting-ip']?.toString() ||
+                     req.connection?.remoteAddress ||
+                     req.socket?.remoteAddress ||
+                     'Admin Dashboard';
+    console.log('🔍 Admin IP Detection Debug - Final clientIP:', clientIP);
+
+    // Extract device information
+    const deviceInfo = deviceDetectionService.extractDeviceInfo(req);
+    
+    logger.info('Admin device detection completed', {
+      action: 'admin_device_detection',
       eightBallPoolId,
       username,
-      registrationIp: req.ip || req.headers['x-forwarded-for']?.toString() || 'Admin Dashboard'
+      deviceId: deviceInfo.deviceId.substring(0, 8) + '...', // Log partial ID for privacy
+      deviceType: deviceInfo.deviceType,
+      platform: deviceInfo.platform,
+      browser: deviceInfo.browser
     });
 
-    await registration.save();
+    const registration = await dbService.createRegistration({
+      eightBallPoolId,
+      username,
+      registrationIp: clientIP,
+      deviceId: deviceInfo.deviceId,
+      deviceType: deviceInfo.deviceType,
+      userAgent: deviceInfo.userAgent,
+      lastLoginAt: new Date()
+    });
 
     logger.logAdminAction((req.user as any)?.id, 'add_registration', {
       eightBallPoolId,
@@ -204,7 +331,7 @@ router.post('/registrations', async (req, res): Promise<void> => {
     discordNotification.sendRegistrationNotification(
       eightBallPoolId, 
       username, 
-      req.ip || req.headers['x-forwarded-for']?.toString() || 'Admin Dashboard'
+      clientIP
     ).catch(error => {
       logger.error('Discord notification failed (non-blocking)', {
         action: 'discord_notification_error',
@@ -284,7 +411,7 @@ router.delete('/registrations/:eightBallPoolId', async (req, res): Promise<void>
   try {
     const { eightBallPoolId } = req.params;
 
-    const registration = await Registration.findOneAndDelete({ eightBallPoolId });
+    const registration = await dbService.findRegistration({ eightBallPoolId });
     
     if (!registration) {
       res.status(404).json({
@@ -292,6 +419,8 @@ router.delete('/registrations/:eightBallPoolId', async (req, res): Promise<void>
       });
       return;
     }
+
+    await dbService.deleteRegistration(eightBallPoolId);
 
     logger.logAdminAction((req.user as any)?.id, 'remove_registration', {
       eightBallPoolId,
@@ -317,6 +446,33 @@ router.delete('/registrations/:eightBallPoolId', async (req, res): Promise<void>
   }
 });
 
+// Remove failed claims (admin)
+router.delete('/claim-records/failed', async (req, res): Promise<void> => {
+  try {
+    const deletedCount = await dbService.deleteClaimRecords({ status: 'failed' });
+
+    logger.logAdminAction((req.user as any)?.id, 'clear_failed_claims', {
+      deletedCount
+    });
+
+    res.json({
+      message: 'Failed claims removed successfully',
+      deletedCount
+    });
+
+  } catch (error) {
+    logger.error('Failed to remove failed claims', {
+      action: 'admin_clear_failed_claims_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      adminId: (req.user as any)?.id
+    });
+
+    res.status(500).json({
+      error: 'Failed to remove failed claims'
+    });
+  }
+});
+
 // Get logs with pagination and filters
 router.get('/logs', async (req, res) => {
   try {
@@ -331,16 +487,156 @@ router.get('/logs', async (req, res) => {
     if (service) filters.service = service;
     if (action) filters.action = action;
 
-    const logs = await LogEntry.getLogsWithPagination(page, limit, filters);
-    const total = await LogEntry.countDocuments(filters);
+    // Read from PostgreSQL database
+    const { Pool } = require('pg');
+    const pool = new Pool({
+      host: process.env.POSTGRES_HOST || 'localhost',
+      port: parseInt(process.env.POSTGRES_PORT || '5432'),
+      database: process.env.POSTGRES_DB || '8bp_rewards',
+      user: process.env.POSTGRES_USER || 'admin',
+      password: process.env.POSTGRES_PASSWORD || '192837DB25',
+      ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      // Connection pool settings to prevent disconnections
+      max: 20,
+      min: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000
+    });
+    
+    let logs: any[] = [];
+    
+    try {
+      // Build query with filters
+      let query = 'SELECT * FROM log_entries WHERE 1=1';
+      const queryParams: any[] = [];
+      let paramCount = 0;
+      
+      if (level) {
+        query += ` AND level = $${++paramCount}`;
+        queryParams.push(level);
+      }
+      if (service) {
+        query += ` AND service = $${++paramCount}`;
+        queryParams.push(service);
+      }
+      if (action) {
+        query += ` AND metadata->>'action' = $${++paramCount}`;
+        queryParams.push(action);
+      }
+      
+      query += ` ORDER BY timestamp DESC LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+      queryParams.push(limit, (page - 1) * limit);
+      
+      const result = await pool.query(query, queryParams);
+      logs = result.rows.map((row: any) => ({
+        id: row.id,
+        timestamp: row.timestamp,
+        level: row.level,
+        message: row.message,
+        service: row.service,
+        metadata: row.metadata
+      }));
+      
+      // Get total count for pagination
+      let countQuery = 'SELECT COUNT(*) as total FROM log_entries WHERE 1=1';
+      const countParams: any[] = [];
+      let countParamCount = 0;
+      
+      if (level) {
+        countQuery += ` AND level = $${++countParamCount}`;
+        countParams.push(level);
+      }
+      if (service) {
+        countQuery += ` AND service = $${++countParamCount}`;
+        countParams.push(service);
+      }
+      if (action) {
+        countQuery += ` AND metadata->>'action' = $${++countParamCount}`;
+        countParams.push(action);
+      }
+      
+      const countResult = await pool.query(countQuery, countParams);
+      const total = parseInt(countResult.rows[0].total);
+      
+      await pool.end();
+      
+      res.json({
+        logs,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+      
+      return;
+    } catch (dbError) {
+      console.error('Database query error:', dbError);
+      await pool.end();
+      
+      // Fallback to reading from log files
+      const fs = require('fs');
+      const path = require('path');
+      
+      try {
+        // Read from combined log file
+        const logPath = path.join(__dirname, '../../../../../logs/combined.log');
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, 'utf8');
+        const logLines = logContent.split('\n').filter((line: string) => line.trim());
+        
+        logs = logLines.slice(-100).map((line: string, index: number) => {
+          try {
+            const parsed = JSON.parse(line);
+            return {
+              id: index,
+              level: parsed.level || 'info',
+              message: parsed.message || line,
+              timestamp: parsed.timestamp || new Date().toISOString(),
+              service: parsed.service || '8bp-rewards',
+              action: parsed.action || 'unknown'
+            };
+          } catch {
+            return {
+              id: index,
+              level: 'info',
+              message: line,
+              timestamp: new Date().toISOString(),
+              service: '8bp-rewards',
+              action: 'unknown'
+            };
+          }
+        }).reverse(); // Most recent first
+        }
+      } catch (error) {
+        logger.error('Failed to read log files', { error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    }
+
+    // Apply filters
+    if (level) {
+      logs = logs.filter(log => log.level === level);
+    }
+    if (service) {
+      logs = logs.filter(log => log.service === service);
+    }
+    if (action) {
+      logs = logs.filter(log => log.action === action);
+    }
+
+    // Pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedLogs = logs.slice(startIndex, endIndex);
 
     res.json({
-      logs,
+      logs: paginatedLogs,
       pagination: {
         page,
         limit,
-        total,
-        pages: Math.ceil(total / limit)
+        total: logs.length,
+        pages: Math.ceil(logs.length / limit)
       }
     });
 
@@ -360,7 +656,191 @@ router.get('/logs', async (req, res) => {
 // In-memory storage for progress tracking
 const claimProgress = new Map<string, any>();
 
-// Manual claim trigger (admin)
+// Manual claim for specific users (admin)
+router.post('/claim-users', async (req, res): Promise<any> => {
+  try {
+    const { userIds } = req.body;
+    
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        error: 'userIds array is required and must not be empty'
+      });
+    }
+
+    logger.logAdminAction((req.user as any)?.id, 'manual_claim_users_trigger', {
+      userIds,
+      count: userIds.length,
+      timestamp: new Date().toISOString()
+    });
+
+    // Trigger the claim script asynchronously with specific users
+    const { spawn } = require('child_process');
+    const claimProcess = spawn('node', ['playwright-claimer-discord.js'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        MONGO_URI: process.env.MONGO_URI,
+        ENABLE_PROGRESS_TRACKING: 'true',
+        TARGET_USER_IDS: userIds.join(',') // Pass specific user IDs
+      },
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    const processId = claimProcess.pid?.toString() || Date.now().toString();
+    
+    // Initialize progress tracking
+    claimProgress.set(processId, {
+      status: 'starting',
+      startTime: new Date(),
+      currentUser: null,
+      totalUsers: userIds.length,
+      completedUsers: 0,
+      failedUsers: 0,
+      userProgress: [],
+      logs: [],
+      targetUsers: userIds
+    });
+
+    // Log process output for debugging and progress tracking
+    claimProcess.stdout.on('data', (data: Buffer) => {
+      const output = data.toString().trim();
+      logger.info('Targeted claim process output', {
+        action: 'targeted_claim_process_output',
+        output,
+        pid: claimProcess.pid,
+        targetUsers: userIds
+      });
+
+      // Parse progress updates from the claimer script
+      const progress = claimProgress.get(processId);
+      if (progress) {
+        progress.logs.push({
+          timestamp: new Date(),
+          message: output,
+          type: 'info'
+        });
+
+        // Parse specific progress indicators (same as claim-all)
+        if (output.includes('🚀 Starting claim process for User ID:')) {
+          const userIdMatch = output.match(/User ID: (\d+)/);
+          if (userIdMatch) {
+            progress.currentUser = userIdMatch[1];
+            progress.userProgress.push({
+              userId: userIdMatch[1],
+              status: 'starting',
+              startTime: new Date(),
+              steps: []
+            });
+          }
+        } else if (output.includes('✅ Claim process completed for user:')) {
+          const userIdMatch = output.match(/Claim process completed for user: (\d+)/);
+          if (userIdMatch) {
+            const completedUserId = userIdMatch[1];
+            
+            const userProgressEntry = progress.userProgress.find((up: any) => up.userId === completedUserId);
+            if (userProgressEntry && userProgressEntry.status !== 'completed') {
+              userProgressEntry.status = 'completed';
+              userProgressEntry.steps.push({ step: 'completed', timestamp: new Date() });
+              progress.completedUsers++;
+              
+              const activeUsers = progress.userProgress.filter((up: any) => up.status === 'starting' || up.status === 'in_progress');
+              if (activeUsers.length > 0) {
+                progress.currentUser = activeUsers[0].userId;
+              } else {
+                progress.currentUser = 'All target users processed';
+              }
+            }
+          }
+        } else if (output.includes('⚠️ Failed to send Discord confirmation') || output.includes('Error claiming')) {
+          const currentUserProgress = progress.userProgress[progress.userProgress.length - 1];
+          if (currentUserProgress && currentUserProgress.status !== 'failed') {
+            currentUserProgress.status = 'failed';
+            currentUserProgress.steps.push({ step: 'failed', timestamp: new Date() });
+            progress.failedUsers++;
+            
+            const activeUsers = progress.userProgress.filter((up: any) => up.status === 'starting' || up.status === 'in_progress');
+            if (activeUsers.length > 0) {
+              progress.currentUser = activeUsers[0].userId;
+            } else {
+              progress.currentUser = 'All target users processed';
+            }
+          }
+        }
+
+        claimProgress.set(processId, progress);
+      }
+    });
+
+    claimProcess.stderr.on('data', (data: Buffer) => {
+      const error = data.toString().trim();
+      logger.error('Targeted claim process error', {
+        action: 'targeted_claim_process_error',
+        error,
+        pid: claimProcess.pid,
+        targetUsers: userIds
+      });
+
+      const progress = claimProgress.get(processId);
+      if (progress) {
+        progress.logs.push({
+          timestamp: new Date(),
+          message: error,
+          type: 'error'
+        });
+        claimProgress.set(processId, progress);
+      }
+    });
+
+    claimProcess.on('close', (code: number | null) => {
+      logger.info('Targeted claim process completed', {
+        action: 'targeted_claim_process_completed',
+        exitCode: code,
+        pid: claimProcess.pid,
+        targetUsers: userIds
+      });
+
+      const progress = claimProgress.get(processId);
+      if (progress) {
+        progress.status = 'completed';
+        progress.endTime = new Date();
+        progress.exitCode = code;
+        claimProgress.set(processId, progress);
+      }
+    });
+
+    // Detach the process so it runs independently
+    claimProcess.unref();
+
+    logger.info('Manual claim process started for specific users', {
+      action: 'manual_claim_users_started',
+      pid: claimProcess.pid,
+      adminId: (req.user as any)?.id,
+      targetUsers: userIds
+    });
+
+    res.json({
+      message: `Manual claim process started for ${userIds.length} users`,
+      pid: claimProcess.pid,
+      processId,
+      targetUsers: userIds,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Failed to trigger manual claim for specific users', {
+      action: 'admin_manual_claim_users_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      adminId: (req.user as any)?.id
+    });
+
+    res.status(500).json({
+      error: 'Failed to trigger manual claim for specific users'
+    });
+  }
+});
+
+// Manual claim trigger (admin) - keep existing functionality
 router.post('/claim-all', async (req, res) => {
   try {
     logger.logAdminAction((req.user as any)?.id, 'manual_claim_trigger', {
@@ -674,7 +1154,7 @@ router.get('/claim-totals', async (req, res) => {
 
     for (const timeframe of timeframes) {
       const days = timeframe === '7d' ? 7 : timeframe === '14d' ? 14 : 28;
-      const stats = await ClaimRecord.getClaimStats(days);
+      const stats = await dbService.getClaimStats(days);
       totals[timeframe] = stats;
     }
 
@@ -696,7 +1176,7 @@ router.get('/claim-totals', async (req, res) => {
 // Search functionality
 router.get('/search', async (req, res): Promise<void> => {
   try {
-    const query = req.query.q as string;
+    const query = req.query.q as string || req.query.query as string;
     const type = req.query.type as string || 'all';
 
     if (!query) {
@@ -709,37 +1189,32 @@ router.get('/search', async (req, res): Promise<void> => {
     const results: any = {};
 
     if (type === 'all' || type === 'registrations') {
-      const registrations = await Registration.find({
-        $or: [
-          { eightBallPoolId: { $regex: query, $options: 'i' } },
-          { username: { $regex: query, $options: 'i' } }
-        ]
-      }).limit(10);
+      // Get all registrations and filter in memory for PostgreSQL compatibility
+      const allRegistrations = await dbService.findRegistrations();
+      const registrations = allRegistrations.filter(reg => 
+        reg.eightBallPoolId.includes(query) || 
+        reg.username.toLowerCase().includes(query.toLowerCase())
+      );
 
       results.registrations = registrations;
     }
 
     if (type === 'all' || type === 'claims') {
-      const claims = await ClaimRecord.find({
-        $or: [
-          { eightBallPoolId: { $regex: query, $options: 'i' } },
-          { itemsClaimed: { $in: [new RegExp(query, 'i')] } }
-        ]
-      }).sort({ claimedAt: -1 }).limit(10);
+      // Get all claims and filter in memory for PostgreSQL compatibility
+      const allClaims = await dbService.findClaimRecords();
+      const claims = allClaims.filter(claim => 
+        claim.eightBallPoolId.includes(query) ||
+        (claim.itemsClaimed && claim.itemsClaimed.some((item: string) => 
+          item.toLowerCase().includes(query.toLowerCase())
+        ))
+      );
 
       results.claims = claims;
     }
 
     if (type === 'all' || type === 'logs') {
-      const logs = await LogEntry.find({
-        $or: [
-          { message: { $regex: query, $options: 'i' } },
-          { userId: { $regex: query, $options: 'i' } },
-          { action: { $regex: query, $options: 'i' } }
-        ]
-      }).sort({ timestamp: -1 }).limit(10);
-
-      results.logs = logs;
+      // Logs functionality disabled for PostgreSQL migration
+      results.logs = [];
     }
 
     res.json({
@@ -797,16 +1272,63 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
     const { eightBallPoolId } = req.params;
     const { isBlocked, reason } = req.body;
 
-    const registration = await Registration.findByEightBallPoolId(eightBallPoolId);
+    const registration = await dbService.findRegistration({ eightBallPoolId });
     
     if (!registration) {
       res.status(404).json({ error: 'Registration not found' });
       return;
     }
 
-    registration.isBlocked = isBlocked;
-    registration.blockedReason = isBlocked ? reason : undefined;
-    await registration.save();
+    await dbService.updateRegistration(eightBallPoolId, {
+      isBlocked,
+      blockedReason: isBlocked ? reason : undefined
+    });
+
+    if (isBlocked) {
+      // Enhanced blocking with device tracking
+      const deviceInfo = deviceDetectionService.extractDeviceInfo(req);
+      const clientIP = req.ip || 
+                       req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
+                       req.headers['x-real-ip']?.toString() ||
+                       req.headers['cf-connecting-ip']?.toString() ||
+                       req.connection?.remoteAddress ||
+                       req.socket?.remoteAddress ||
+                       'Admin Dashboard';
+
+      // Block all devices associated with this user
+      const blockedDevices = await blockingService.blockUserByEightBallPoolId(
+        eightBallPoolId,
+        (req.user as any)?.id || 'admin',
+        reason || 'Blocked by admin'
+      );
+
+      logger.info('User blocked with device tracking', {
+        action: 'enhanced_user_blocked',
+        eightBallPoolId,
+        username: registration.username,
+        blockedDevicesCount: blockedDevices.length,
+        adminId: (req.user as any)?.id,
+        reason
+      });
+    } else {
+      // Unblock user (remove from blocked_devices table)
+      const blockedDevices = await blockingService.getBlockedDevices(1000, 0);
+      const userBlockedDevices = blockedDevices.filter(
+        device => device.eightBallPoolId === eightBallPoolId && device.isActive
+      );
+
+      for (const blockedDevice of userBlockedDevices) {
+        await blockingService.unblockDevice(blockedDevice.id, (req.user as any)?.id || 'admin');
+      }
+
+      logger.info('User unblocked with device tracking', {
+        action: 'enhanced_user_unblocked',
+        eightBallPoolId,
+        username: registration.username,
+        unblockedDevicesCount: userBlockedDevices.length,
+        adminId: (req.user as any)?.id
+      });
+    }
 
     logger.logAdminAction((req.user as any)?.id, isBlocked ? 'block_user' : 'unblock_user', {
       eightBallPoolId,
@@ -815,11 +1337,14 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
     });
 
     res.json({
-      message: isBlocked ? 'User blocked successfully' : 'User unblocked successfully',
+      message: isBlocked ? 'User blocked successfully with device tracking' : 'User unblocked successfully',
       user: {
         eightBallPoolId: registration.eightBallPoolId,
         username: registration.username,
         isBlocked: registration.isBlocked,
+        deviceId: registration.deviceId,
+        deviceType: registration.deviceType,
+        registrationIp: registration.registrationIp,
         blockedReason: registration.blockedReason
       }
     });
@@ -833,6 +1358,72 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
 
     res.status(500).json({
       error: 'Failed to block/unblock user'
+    });
+  }
+});
+
+// Get blocked devices
+router.get('/blocked-devices', authenticateAdmin, async (req, res): Promise<void> => {
+  try {
+    const { limit = 50, offset = 0 } = req.query;
+    
+    const blockedDevices = await blockingService.getBlockedDevices(
+      parseInt(limit as string),
+      parseInt(offset as string)
+    );
+    
+    const totalCount = await blockingService.getBlockedDevicesCount();
+    
+    res.json({
+      blockedDevices,
+      pagination: {
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+        total: totalCount,
+        pages: Math.ceil(totalCount / parseInt(limit as string))
+      }
+    });
+    
+  } catch (error) {
+    logger.error('Failed to get blocked devices', {
+      action: 'get_blocked_devices_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      adminId: (req.user as any)?.id
+    });
+    
+    res.status(500).json({
+      error: 'Failed to get blocked devices'
+    });
+  }
+});
+
+// Unblock a specific device
+router.post('/blocked-devices/:deviceId/unblock', authenticateAdmin, async (req, res): Promise<void> => {
+  try {
+    const { deviceId } = req.params;
+    
+    const success = await blockingService.unblockDevice(deviceId, (req.user as any)?.id || 'admin');
+    
+    if (success) {
+      res.json({
+        message: 'Device unblocked successfully'
+      });
+    } else {
+      res.status(404).json({
+        error: 'Blocked device not found'
+      });
+    }
+    
+  } catch (error) {
+    logger.error('Failed to unblock device', {
+      action: 'unblock_device_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      deviceId: req.params.deviceId,
+      adminId: (req.user as any)?.id
+    });
+    
+    res.status(500).json({
+      error: 'Failed to unblock device'
     });
   }
 });
@@ -901,9 +1492,26 @@ function isAllowedForEmail(userEmail: string): boolean {
 router.post('/vps/request-access', async (req, res) => {
   try {
     const user = req.user as any;
-    const userId = user.id;
-    const username = user.username;
-    const { channel } = req.body; // 'discord', 'telegram', or undefined for both
+    const userId = user?.id;
+    const username = user?.username;
+    const { channel, email } = req.body; // 'discord', 'telegram', or undefined for both, plus optional email
+
+    // Debug logging (can be removed in production)
+    console.log('VPS request access debug:', {
+      hasUser: !!user,
+      userId,
+      username,
+      channel,
+      userEmail: user?.email,
+      providedEmail: email
+    });
+
+    // Check if user is authenticated
+    if (!user || !userId) {
+      return res.status(401).json({
+        error: 'Authentication required. Please log in through Discord.'
+      });
+    }
 
     // Check if user is allowed VPS access
     if (!isAllowedForVPS(userId)) {
@@ -926,7 +1534,7 @@ router.post('/vps/request-access', async (req, res) => {
         discordCode,
         telegramCode,
         emailCode,
-        userEmail: user.email || '', // Store user's email from Discord OAuth
+        userEmail: email || user.email || '', // Use provided email or Discord email
         userId,
         username,
         expiresAt,
@@ -1429,6 +2037,61 @@ router.post('/vps/test-telegram', async (req, res) => {
   }
 });
 
+// Test email service functionality (development only)
+router.post('/vps/test-email', async (req, res) => {
+  try {
+    const user = req.user as any;
+    const userId = user.id;
+
+    if (!isAllowedForVPS(userId)) {
+      return res.status(403).json({
+        error: 'Access denied. You are not authorized to access VPS Monitor.'
+      });
+    }
+
+    // Test email service
+    const emailService = new EmailNotificationService();
+    
+    return res.json({
+      success: true,
+      configured: emailService.isConfigured(),
+      smtpHost: process.env.SMTP_HOST,
+      smtpPort: process.env.SMTP_PORT,
+      smtpUser: process.env.SMTP_USER,
+      mailFrom: process.env.MAIL_FROM,
+      hasPassword: !!process.env.SMTP_PASS
+    });
+    
+  } catch (error: any) {
+    logger.error('Email test error:', error);
+    return res.status(500).json({
+      error: 'Failed to test email service',
+      details: error.message
+    });
+  }
+});
+
+// Debug environment variables (development only)
+router.get('/debug/env', async (req, res) => {
+  try {
+    return res.json({
+      success: true,
+      smtpHost: process.env.SMTP_HOST,
+      smtpPort: process.env.SMTP_PORT,
+      smtpUser: process.env.SMTP_USER,
+      mailFrom: process.env.MAIL_FROM,
+      hasPassword: !!process.env.SMTP_PASS,
+      nodeEnv: process.env.NODE_ENV,
+      allEnvKeys: Object.keys(process.env).filter(key => key.includes('SMTP') || key.includes('MAIL'))
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      error: 'Failed to get environment variables',
+      details: error.message
+    });
+  }
+});
+
 // Request access to reset leaderboard (Discord or Telegram)
 router.post('/reset-leaderboard/request-access', async (req, res) => {
   try {
@@ -1913,8 +2576,8 @@ router.post('/reset-leaderboard', async (req, res) => {
     logger.info(`Admin ${user.username} (${user.id}) initiated leaderboard reset`);
     
     // Get current statistics before reset
-    const totalClaimRecords = await ClaimRecord.countDocuments();
-    const totalUsers = await Registration.getRegistrationCount();
+    const totalClaimRecords = await dbService.findClaimRecords();
+    const totalUsers = await dbService.findRegistrations();
     
     // Create backup directory if it doesn't exist
     const backupDir = path.join(process.cwd(), 'database-backups');
@@ -1927,7 +2590,7 @@ router.post('/reset-leaderboard', async (req, res) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     
     // Backup claim records before deletion
-    const claimRecords = await ClaimRecord.find({}).lean();
+    const claimRecords = await dbService.findClaimRecords();
     const backupFile = path.join(backupDir, `claim-records-backup-${timestamp}.json`);
     fs.writeFileSync(backupFile, JSON.stringify({
       timestamp: new Date().toISOString(),
@@ -1937,7 +2600,7 @@ router.post('/reset-leaderboard', async (req, res) => {
     }, null, 2));
     
     // Delete all claim records
-    const deleteResult = await ClaimRecord.deleteMany({});
+    const deleteResult = await dbService.deleteAllClaimRecords();
     
     // Create reset report
     const resetReport = {
@@ -1947,8 +2610,8 @@ router.post('/reset-leaderboard', async (req, res) => {
         id: user.id
       },
       resetStats: {
-        claimRecordsDeleted: deleteResult.deletedCount,
-        usersPreserved: totalUsers,
+        claimRecordsDeleted: deleteResult,
+        usersPreserved: totalUsers.length,
         backupFile: backupFile
       }
     };
@@ -1956,11 +2619,11 @@ router.post('/reset-leaderboard', async (req, res) => {
     const reportFile = path.join(process.cwd(), 'leaderboard-reset-report.json');
     fs.writeFileSync(reportFile, JSON.stringify(resetReport, null, 2));
     
-    logger.info(`Leaderboard reset completed: ${deleteResult.deletedCount} claim records deleted, ${totalUsers} users preserved`);
+    logger.info(`Leaderboard reset completed: ${deleteResult} claim records deleted, ${totalUsers.length} users preserved`);
     
     // Send Discord notification
     const discordService = new DiscordNotificationService();
-    const resetMessage = `🔄 **Leaderboard Reset**\n\n**Admin:** ${user.username}\n**Records Deleted:** ${deleteResult.deletedCount}\n**Users Preserved:** ${totalUsers}\n**Backup Created:** ${backupFile}\n\nTime: ${new Date().toLocaleString()}`;
+    const resetMessage = `🔄 **Leaderboard Reset**\n\n**Admin:** ${user.username}\n**Records Deleted:** ${deleteResult}\n**Users Preserved:** ${totalUsers.length}\n**Backup Created:** ${backupFile}\n\nTime: ${new Date().toLocaleString()}`;
     
     try {
       await discordService.sendToChannel(process.env.SCHEDULER_CHANNEL_ID!, resetMessage);
@@ -1975,8 +2638,8 @@ router.post('/reset-leaderboard', async (req, res) => {
       success: true,
       message: 'Leaderboard reset successfully',
       stats: {
-        claimRecordsDeleted: deleteResult.deletedCount,
-        usersPreserved: totalUsers,
+        claimRecordsDeleted: deleteResult,
+        usersPreserved: totalUsers.length,
         backupFile: backupFile,
         reportFile: reportFile
       }
@@ -1997,7 +2660,7 @@ router.post('/reset-leaderboard', async (req, res) => {
 router.get('/bot-status', async (req, res) => {
   try {
     // Make a request to the Discord bot service to get current status
-    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    const botServiceUrl = 'http://localhost:2700'; // Use localhost for hybrid mode
     
     try {
       const response = await axios.get(`${botServiceUrl}/api/bot-status`, {
@@ -2054,7 +2717,7 @@ router.post('/bot-status', async (req, res) => {
     }
     
     // Make a request to the Discord bot service to change status
-    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    const botServiceUrl = 'http://localhost:2700'; // Use localhost for hybrid mode
     
     try {
       const response = await axios.post(`${botServiceUrl}/api/bot-status`, {

@@ -1,11 +1,12 @@
 import express from 'express';
 import { logger } from '../services/LoggerService';
-import { Registration } from '../models/Registration';
+import { DatabaseService } from '../services/DatabaseService';
 import { authenticateAdmin } from '../middleware/auth';
 import fs from 'fs';
 import path from 'path';
 
 const router = express.Router();
+const dbService = DatabaseService.getInstance();
 
 // Apply admin authentication to all routes
 router.use(authenticateAdmin);
@@ -13,7 +14,7 @@ router.use(authenticateAdmin);
 // Get screenshot folders and their contents
 router.get('/folders', async (req, res) => {
   try {
-    const screenshotsDir = path.join(__dirname, '../../../screenshots');
+    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
     const folders = [
       { name: 'confirmation', displayName: 'Confirmation Images' },
       { name: 'shop-page', displayName: 'Shop Page Screenshots' },
@@ -112,7 +113,7 @@ router.get('/view/:folder/:filename', async (req, res) => {
       });
     }
 
-    const screenshotsDir = path.join(__dirname, '../../../screenshots');
+    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
     const imagePath = path.join(screenshotsDir, folder, filename);
 
     if (!fs.existsSync(imagePath)) {
@@ -166,12 +167,11 @@ router.post('/clear-user', async (req, res) => {
     }
 
     // Find user by ID or username
-    const user = await Registration.findOne({
-      $or: [
-        { eightBallPoolId: userQuery },
-        { username: { $regex: userQuery, $options: 'i' } }
-      ]
-    });
+    const users = await dbService.findRegistrations();
+    const user = users.find(u => 
+      u.eightBallPoolId === userQuery || 
+      u.username.toLowerCase().includes(userQuery.toLowerCase())
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -180,7 +180,7 @@ router.post('/clear-user', async (req, res) => {
       });
     }
 
-    const screenshotsDir = path.join(__dirname, '../../../screenshots');
+    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
     let deletedCount = 0;
 
     // Clear screenshots for this specific user
@@ -242,7 +242,7 @@ router.post('/clear-user', async (req, res) => {
 // Clear all screenshots
 router.post('/clear-all', async (req, res) => {
   try {
-    const screenshotsDir = path.join(__dirname, '../../../screenshots');
+    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
     let deletedCount = 0;
 
     if (!fs.existsSync(screenshotsDir)) {

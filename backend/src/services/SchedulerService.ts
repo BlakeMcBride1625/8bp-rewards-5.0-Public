@@ -1,8 +1,9 @@
 import cron from 'node-cron';
 import { logger } from './LoggerService';
-import { Registration } from '../models/Registration';
-import { ClaimRecord } from '../models/ClaimRecord';
-const DiscordService = require('../../../services/discord-service');
+import { DatabaseService } from './DatabaseService';
+import ValidationService from './ValidationService';
+const DiscordService = require('../../../../services/discord-service');
+const dbService = DatabaseService.getInstance();
 
 interface ClaimResult {
   eightBallPoolId: string;
@@ -22,12 +23,14 @@ interface SchedulerSummary {
 
 class SchedulerService {
   private discordService: any;
+  private validationService: ValidationService;
   private isRunning: boolean = false;
   private lastRun: Date | null = null;
   private nextRun: Date | null = null;
 
   constructor() {
     this.discordService = new DiscordService();
+    this.validationService = new ValidationService();
     this.setupScheduler();
   }
 
@@ -97,7 +100,7 @@ class SchedulerService {
 
     try {
       // Get all registered users
-      const registrations = await Registration.getAllRegistrations();
+      const registrations = await dbService.findRegistrations();
       
       if (registrations.length === 0) {
         logger.info('No registered users found for scheduled claim', {
@@ -111,6 +114,42 @@ class SchedulerService {
       // Process each user
       for (const registration of registrations) {
         try {
+          // VALIDATION CHECK: Validate user before processing
+          logger.info(`Validating user ${registration.eightBallPoolId} before scheduled claim`, {
+            action: 'scheduler_validation',
+            eightBallPoolId: registration.eightBallPoolId
+          });
+          
+          const validationResult = await this.validationService.validateUser(
+            registration.eightBallPoolId, 
+            'scheduler-service', 
+            {
+              operation: 'scheduled_claim',
+              timestamp: new Date().toISOString()
+            }
+          );
+          
+          if (!validationResult.isValid) {
+            logger.warn(`User ${registration.eightBallPoolId} failed validation, skipping scheduled claim`, {
+              action: 'scheduler_validation_failed',
+              eightBallPoolId: registration.eightBallPoolId,
+              reason: validationResult.reason
+            });
+            
+            results.push({
+              eightBallPoolId: registration.eightBallPoolId,
+              websiteUserId: registration.username,
+              status: 'failed',
+              error: `Validation failed: ${validationResult.reason}`
+            });
+            continue;
+          }
+          
+          logger.info(`User ${registration.eightBallPoolId} validation passed, proceeding with claim`, {
+            action: 'scheduler_validation_success',
+            eightBallPoolId: registration.eightBallPoolId
+          });
+          
           const result = await this.claimRewardsForUser(registration);
           results.push(result);
           
@@ -206,7 +245,7 @@ class SchedulerService {
 
   private async logClaimRecord(registration: any, result: ClaimResult): Promise<void> {
     try {
-      const claimRecord = new ClaimRecord({
+      const claimData = {
         eightBallPoolId: registration.eightBallPoolId,
         websiteUserId: registration.username,
         status: result.status,
@@ -214,9 +253,23 @@ class SchedulerService {
         error: result.error,
         claimedAt: new Date(),
         schedulerRun: this.lastRun!
+      };
+      
+      logger.info('Scheduler saving claim record', {
+        action: 'scheduler_save_claim_record',
+        eightBallPoolId: registration.eightBallPoolId,
+        status: claimData.status,
+        itemsCount: claimData.itemsClaimed.length,
+        success: result.status === 'success'
       });
-
-      await claimRecord.save();
+      
+      await dbService.createClaimRecord(claimData);
+      
+      logger.info('Scheduler claim record saved', {
+        action: 'scheduler_claim_record_saved',
+        eightBallPoolId: registration.eightBallPoolId,
+        status: claimData.status
+      });
     } catch (error: any) {
       logger.error('Failed to log claim record', {
         action: 'log_claim_record_error',

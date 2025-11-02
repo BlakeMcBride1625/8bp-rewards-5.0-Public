@@ -3,13 +3,16 @@ import * as cron from 'node-cron';
 import { config } from './config';
 import { Logger } from './logger';
 import { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } from './claimer-utils';
+import ValidationService from '../services/validation-service';
 
 export class EightBallPoolClaimer {
   private browser: Browser | null = null;
   private logger: Logger;
+  private validationService: ValidationService;
 
   constructor() {
     this.logger = new Logger();
+    this.validationService = new ValidationService();
   }
 
   private async setupBrowser(): Promise<Browser> {
@@ -30,8 +33,8 @@ export class EightBallPoolClaimer {
         '--window-size=1920,1080',
         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       ],
-      timeout: 60000,
-      protocolTimeout: 60000
+      timeout: 20000,
+      protocolTimeout: 20000
     });
 
     this.logger.info('Browser setup complete');
@@ -277,6 +280,20 @@ export class EightBallPoolClaimer {
     try {
       this.logger.info(`Starting claim process for User ID: ${userId}`);
       
+      // VALIDATION CHECK: Validate user before any claiming operations
+      this.logger.info(`Validating user ${userId} before claiming...`);
+      const validationResult = await this.validationService.validateUser(userId, '8bp-claimer-ts', {
+        operation: 'claim_rewards',
+        timestamp: new Date().toISOString()
+      });
+      
+      if (!validationResult.isValid) {
+        this.logger.error(`User ${userId} failed validation: ${validationResult.reason} - Skipping claim`);
+        return false;
+      }
+      
+      this.logger.info(`User ${userId} validation passed - Proceeding with claim`);
+      
       // Ensure screenshot directories exist
       await this.ensureScreenshotDirectories();
       
@@ -366,7 +383,7 @@ export class EightBallPoolClaimer {
         }
 
         // Wait a moment for input to be processed
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(1000);
 
         // Take screenshot after entering ID
         await this.takeScreenshot(page, `screenshots/id-entry/after-id-entry-${userId}.png`, 'After ID entry');
@@ -574,7 +591,7 @@ export class EightBallPoolClaimer {
                   
                   if (dismissalSuccess) {
                     this.logger.info('✅ Modal dismissal successful');
-                    await page.waitForTimeout(2000);
+                    await page.waitForTimeout(1000);
                     // Now try normal click
                     await button.click();
                   } else {
@@ -616,7 +633,7 @@ export class EightBallPoolClaimer {
               
               // Wait between clicks to avoid rate limiting
               if (i < allFreeButtons.length - 1) {
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(1000);
               }
             }
           } catch (error) {
@@ -650,7 +667,7 @@ export class EightBallPoolClaimer {
                 totalClicked++;
               }
               
-              await page.waitForTimeout(2000);
+              await page.waitForTimeout(1000);
             }
           } catch (error) {
             continue;
@@ -681,7 +698,7 @@ export class EightBallPoolClaimer {
         this.logger.info('Successfully navigated to Free Daily Cue Piece page');
         
         // Wait for page to load
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(1000);
         
         // Look for FREE buttons in Free Daily Cue Piece section
         this.logger.info('Checking Free Daily Cue Piece section for FREE items...');
@@ -731,7 +748,7 @@ export class EightBallPoolClaimer {
                 
                 // Wait between clicks
                 if (i < cueFreeButtons.length - 1) {
-                  await page.waitForTimeout(2000);
+                  await page.waitForTimeout(1000);
                 }
               }
             } catch (error) {
@@ -749,7 +766,7 @@ export class EightBallPoolClaimer {
         }
         
         // Wait for cue actions to process
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(1000);
         
       } catch (error) {
         this.logger.error(`Failed to navigate to Free Daily Cue Piece section: ${error instanceof Error ? error.message : String(error)}`);
