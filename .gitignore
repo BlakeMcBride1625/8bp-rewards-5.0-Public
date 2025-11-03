@@ -50,6 +50,8 @@ jspm_packages/
 .env.*
 !.env.example
 !.env.template
+*.env.backup*
+*.backup
 env-template.txt
 
 # IDE files
