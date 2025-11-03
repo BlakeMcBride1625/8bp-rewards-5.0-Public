@@ -16,17 +16,41 @@ router.get('/', async (req, res): Promise<void> => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get all claim records within the timeframe with timeout
-    let claimRecords: any[] = [];
+    // Use optimized SQL aggregation instead of fetching all records
+    let leaderboardData: any[] = [];
     try {
-      claimRecords = await Promise.race([
-        dbService.findClaimRecords({
-          claimedAt: { $gte: startDate }
-        }),
-        new Promise<any[]>((_, reject) => 
+      // Optimized SQL query that aggregates in the database
+      const leaderboardQuery = `
+        SELECT 
+          eight_ball_pool_id,
+          COUNT(*) as total_claims,
+          COUNT(*) FILTER (WHERE status = 'success') as successful_claims,
+          COUNT(*) FILTER (WHERE status = 'failed') as failed_claims,
+          COALESCE(SUM(ARRAY_LENGTH(items_claimed, 1)) FILTER (WHERE status = 'success'), 0) as total_items_claimed,
+          MAX(claimed_at) as last_claimed
+        FROM claim_records
+        WHERE claimed_at >= $1
+        GROUP BY eight_ball_pool_id
+        ORDER BY total_items_claimed DESC
+        LIMIT $2
+      `;
+      
+      const result = await Promise.race([
+        dbService.executeQuery(leaderboardQuery, [startDate, limit]),
+        new Promise<any>((_, reject) => 
           setTimeout(() => reject(new Error('Query timeout')), 15000)
         )
       ]);
+      
+      leaderboardData = result.rows.map((row: any) => ({
+        eightBallPoolId: row.eight_ball_pool_id,
+        totalClaims: parseInt(row.total_claims),
+        successfulClaims: parseInt(row.successful_claims),
+        failedClaims: parseInt(row.failed_claims),
+        totalItemsClaimed: parseInt(row.total_items_claimed || 0),
+        lastClaimed: row.last_claimed
+      }));
+      
     } catch (error) {
       logger.error('Leaderboard query timeout or error', {
         action: 'leaderboard_query_error',
@@ -42,81 +66,49 @@ router.get('/', async (req, res): Promise<void> => {
       return;
     }
 
-    // Group by user and calculate stats
-    const userStats: { [key: string]: any } = {};
+    // Get user details for each entry with optimized batch query
+    const userIds = leaderboardData.map(entry => entry.eightBallPoolId);
+    let userMap = new Map<string, string>();
     
-    claimRecords.forEach((claim: any) => {
-      const userId = claim.eightBallPoolId;
-      if (!userStats[userId]) {
-        userStats[userId] = {
-          eightBallPoolId: userId,
-          totalClaims: 0,
-          successfulClaims: 0,
-          failedClaims: 0,
-          totalItemsClaimed: 0,
-          lastClaimed: null
-        };
+    if (userIds.length > 0) {
+      try {
+        // Batch fetch usernames in a single query
+        const usernameQuery = `
+          SELECT eight_ball_pool_id, username 
+          FROM registrations 
+          WHERE eight_ball_pool_id = ANY($1)
+        `;
+        const usernameResult = await Promise.race([
+          dbService.executeQuery(usernameQuery, [userIds]),
+          new Promise<any>((_, reject) => 
+            setTimeout(() => reject(new Error('Query timeout')), 3000)
+          )
+        ]);
+        
+        usernameResult.rows.forEach((row: any) => {
+          userMap.set(row.eight_ball_pool_id, row.username);
+        });
+      } catch (error) {
+        logger.warn('Failed to batch fetch usernames, will use individual lookups', {
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
-      
-      userStats[userId].totalClaims++;
-      if (claim.status === 'success') {
-        userStats[userId].successfulClaims++;
-        userStats[userId].totalItemsClaimed += claim.itemsClaimed?.length || 0;
-      } else {
-        userStats[userId].failedClaims++;
-      }
-      
-      if (!userStats[userId].lastClaimed || new Date(claim.claimedAt) > new Date(userStats[userId].lastClaimed)) {
-        userStats[userId].lastClaimed = claim.claimedAt;
-      }
-    });
-
-    // Convert to array and sort by total items claimed
-    const leaderboardData = Object.values(userStats)
-      .sort((a: any, b: any) => b.totalItemsClaimed - a.totalItemsClaimed)
-      .slice(0, limit);
-
-    // Get user details for each entry with timeout protection
-    const leaderboard = await Promise.all(
-      leaderboardData.map(async (entry: any, index: number) => {
-        try {
-          const registration = await Promise.race([
-            dbService.findRegistration({ eightBallPoolId: entry.eightBallPoolId }),
-            new Promise<any>((_, reject) => 
-              setTimeout(() => reject(new Error('Query timeout')), 2000)
-            )
-          ]);
-          return {
-            rank: index + 1,
-            eightBallPoolId: entry.eightBallPoolId,
-            username: registration?.username || 'Unknown',
-            totalClaims: entry.totalClaims,
-            successfulClaims: entry.successfulClaims,
-            failedClaims: entry.failedClaims,
-            totalItemsClaimed: entry.totalItemsClaimed,
-            successRate: entry.totalClaims > 0 
-              ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
-              : 0,
-            lastClaimed: entry.lastClaimed
-          };
-        } catch (error) {
-          // Return entry without username if query fails
-          return {
-            rank: index + 1,
-            eightBallPoolId: entry.eightBallPoolId,
-            username: 'Unknown',
-            totalClaims: entry.totalClaims,
-            successfulClaims: entry.successfulClaims,
-            failedClaims: entry.failedClaims,
-            totalItemsClaimed: entry.totalItemsClaimed,
-            successRate: entry.totalClaims > 0 
-              ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
-              : 0,
-            lastClaimed: entry.lastClaimed
-          };
-        }
-      })
-    );
+    }
+    
+    // Build leaderboard response
+    const leaderboard = leaderboardData.map((entry: any, index: number) => ({
+      rank: index + 1,
+      eightBallPoolId: entry.eightBallPoolId,
+      username: userMap.get(entry.eightBallPoolId) || 'Unknown',
+      totalClaims: entry.totalClaims,
+      successfulClaims: entry.successfulClaims,
+      failedClaims: entry.failedClaims,
+      totalItemsClaimed: entry.totalItemsClaimed,
+      successRate: entry.totalClaims > 0 
+        ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
+        : 0,
+      lastClaimed: entry.lastClaimed
+    }));
 
     res.json({
       timeframe,

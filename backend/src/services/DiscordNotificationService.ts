@@ -6,8 +6,20 @@ class DiscordNotificationService {
   private registrationChannelId: string;
 
   constructor() {
+    // Ensure dotenv is loaded
+    if (typeof require !== 'undefined') {
+      try {
+        require('dotenv').config();
+      } catch (e) {
+        // dotenv already loaded
+      }
+    }
     this.botToken = process.env.DISCORD_TOKEN || '';
     this.registrationChannelId = process.env.REGISTRATION_CHANNEL_ID || '';
+    
+    if (!this.botToken) {
+      logger.warn('DiscordNotificationService: DISCORD_TOKEN not found in environment');
+    }
   }
 
   /**
@@ -20,18 +32,31 @@ class DiscordNotificationService {
     }
 
     try {
+      // Discord API expects recipient_id as a string in the request body
       const response = await axios.post(
         'https://discord.com/api/v10/users/@me/channels',
         {
-          recipient_id: userId
+          recipient_id: userId.toString()
         },
         {
           headers: {
             'Authorization': `Bot ${this.botToken}`,
             'Content-Type': 'application/json'
-          }
+          },
+          validateStatus: (status) => status < 500 // Don't throw on 4xx errors
         }
       );
+
+      if (response.status >= 400) {
+        logger.error('Discord API returned error', {
+          action: 'discord_dm_channel_api_error',
+          status: response.status,
+          statusText: response.statusText,
+          data: response.data,
+          userId
+        });
+        return null;
+      }
 
       return response.data.id;
     } catch (error) {

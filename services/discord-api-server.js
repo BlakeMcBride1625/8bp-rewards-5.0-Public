@@ -2,6 +2,42 @@ const express = require('express');
 const cors = require('cors');
 const DiscordService = require('./discord-service');
 
+// Initialize heartbeat for service tracking
+let heartbeatInitialized = false;
+try {
+  const path = require('path');
+  const heartbeatPath = path.join(__dirname, '../backend/src/utils/heartbeat-client.ts');
+  const heartbeatJsPath = path.join(__dirname, '../backend/dist/backend/src/utils/heartbeat-client.js');
+  // Try to require compiled JS version first
+  if (require('fs').existsSync(heartbeatJsPath)) {
+    const { initModuleHeartbeat } = require(heartbeatJsPath);
+    initModuleHeartbeat(module, { service: 'discord-api' });
+    heartbeatInitialized = true;
+    console.log('✅ Heartbeat initialized for discord-api service');
+  } else {
+    // Fallback: manual heartbeat via HTTP request
+    const heartbeatUrl = process.env.HEARTBEAT_URL || `${process.env.PUBLIC_URL || 'http://localhost:2600'}/8bp-rewards/api/heartbeat/beat`;
+    const axios = require('axios');
+    const intervalMs = Math.max(5000, parseInt(process.env.HEARTBEAT_INTERVAL_MS || '5000', 10));
+    
+    const sendHeartbeat = () => {
+      axios.post(heartbeatUrl, {
+        moduleId: module.id || __filename,
+        filePath: __filename,
+        processId: process.pid,
+        service: 'discord-api'
+      }, { timeout: 2000 }).catch(() => {});
+    };
+    
+    sendHeartbeat();
+    setInterval(sendHeartbeat, intervalMs);
+    heartbeatInitialized = true;
+    console.log('✅ Heartbeat initialized for discord-api service (HTTP fallback)');
+  }
+} catch (error) {
+  console.log('⚠️ Could not initialize heartbeat:', error.message);
+}
+
 class DiscordApiServer {
   constructor() {
     this.app = express();

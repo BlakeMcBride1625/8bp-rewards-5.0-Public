@@ -128,9 +128,10 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
       
       if (response.data.emailSent) {
         setCodesSent(prev => ({ ...prev, email: true }));
-        setUserEmail(response.data.userEmail);
-        toast.success(`Email access code sent to ${response.data.userEmail}!`);
+        setUserEmail(response.data.userEmail || null);
+        toast.success(`Email access code sent to ${response.data.userEmail || 'your email'}!`);
         setTimeLeft(5 * 60); // 5 minutes
+        // Stay on 'request' step - input will appear below the button
       } else {
         toast.error('Failed to send email access code. Please check your email configuration.');
       }
@@ -396,11 +397,13 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
                       )}
                     </button>
                     
-                    {codesSent.email && userEmail && (
+                    {codesSent.email && (
                       <div className="space-y-2">
-                        <div className="text-xs text-text-secondary dark:text-text-dark-secondary text-center">
+                        {userEmail && (
+                          <div className="text-xs text-text-secondary dark:text-text-dark-secondary text-center">
                           📧 Code sent to: <span className="font-medium">{userEmail}</span>
                         </div>
+                        )}
                         <label className="block text-sm font-medium text-text-primary dark:text-text-dark-primary">
                           Email Access Code (6 digits)
                         </label>
@@ -409,7 +412,9 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
                           value={emailCode}
                           onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ''))}
                           placeholder="Enter 6-digit code"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-background-dark-tertiary text-text-primary dark:text-text-dark-primary focus:outline-none focus:ring-2 focus:ring-purple-500 text-center text-2xl tracking-widest font-mono"
+                          disabled={isLoading}
+                          autoFocus={codesSent.email}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-background-dark-tertiary text-text-primary dark:text-text-dark-primary focus:outline-none focus:ring-2 focus:ring-purple-500 text-center text-2xl tracking-widest font-mono disabled:opacity-50 disabled:cursor-not-allowed"
                           maxLength={6}
                         />
                       </div>

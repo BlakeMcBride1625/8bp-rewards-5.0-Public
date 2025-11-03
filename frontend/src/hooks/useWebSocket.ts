@@ -1,0 +1,197 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { io, Socket } from 'socket.io-client';
+import { WEBSOCKET_URL } from '../config/api';
+
+export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+
+export interface UseWebSocketOptions {
+  autoConnect?: boolean;
+  reconnection?: boolean;
+  reconnectionDelay?: number;
+  reconnectionDelayMax?: number;
+  reconnectionAttempts?: number;
+}
+
+export interface UseWebSocketReturn {
+  socket: Socket | null;
+  status: ConnectionStatus;
+  connect: () => void;
+  disconnect: () => void;
+  isConnected: boolean;
+}
+
+/**
+ * Custom hook for managing WebSocket connections
+ * Provides connection status, auto-reconnection, and cleanup
+ */
+export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
+  const {
+    autoConnect = true,
+    reconnection = true,
+    reconnectionDelay = 1000,
+    reconnectionDelayMax = 5000,
+    reconnectionAttempts = Infinity
+  } = options;
+
+  const [status, setStatus] = useState<ConnectionStatus>('disconnected');
+  const socketRef = useRef<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+
+  const connect = useCallback(() => {
+    if (socketRef.current?.connected) {
+      return; // Already connected
+    }
+
+    setStatus('connecting');
+
+    const socket = io(WEBSOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection,
+      reconnectionDelay,
+      reconnectionDelayMax,
+      reconnectionAttempts,
+      withCredentials: true, // Include cookies for session authentication
+      autoConnect: true,
+      path: '/8bp-rewards/socket.io' // Match backend path
+    });
+
+    socket.on('connect', () => {
+      setStatus('connected');
+      setIsConnected(true);
+      console.log('WebSocket connected:', socket.id);
+    });
+
+    socket.on('disconnect', (reason) => {
+      setStatus('disconnected');
+      setIsConnected(false);
+      console.log('WebSocket disconnected:', reason);
+      
+      // If disconnected due to server closing or transport close, try to reconnect
+      if (reason === 'io server disconnect' || reason === 'transport close') {
+        setStatus('connecting');
+      }
+    });
+
+    socket.on('connect_error', (error) => {
+      setStatus('error');
+      setIsConnected(false);
+      console.error('WebSocket connection error:', error);
+    });
+
+    socket.on('reconnect', (attemptNumber) => {
+      setStatus('connected');
+      setIsConnected(true);
+      console.log('WebSocket reconnected after', attemptNumber, 'attempts');
+    });
+
+    socket.on('reconnect_attempt', (attemptNumber) => {
+      setStatus('connecting');
+      console.log('WebSocket reconnection attempt', attemptNumber);
+    });
+
+    socket.on('reconnect_error', (error) => {
+      setStatus('error');
+      console.error('WebSocket reconnection error:', error);
+    });
+
+    socket.on('reconnect_failed', () => {
+      setStatus('error');
+      setIsConnected(false);
+      console.error('WebSocket reconnection failed');
+    });
+
+    socketRef.current = socket;
+  }, [reconnection, reconnectionDelay, reconnectionDelayMax, reconnectionAttempts]);
+
+  const disconnect = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+      setStatus('disconnected');
+      setIsConnected(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (autoConnect) {
+      connect();
+    }
+
+    return () => {
+      disconnect();
+    };
+  }, [autoConnect, connect, disconnect]);
+
+  return {
+    socket: socketRef.current,
+    status,
+    connect,
+    disconnect,
+    isConnected
+  };
+}
+
+/**
+ * Hook specifically for listening to claim progress events
+ */
+export function useClaimProgress(processId: string | null) {
+  const { socket, status, isConnected } = useWebSocket({ autoConnect: !!processId });
+  const [progress, setProgress] = useState<any>(null);
+
+  useEffect(() => {
+    if (!socket || !processId || !isConnected) {
+      return;
+    }
+
+    // Join the claim progress room
+    socket.emit('join-claim-progress', processId);
+
+    // Listen for claim progress updates
+    const handleProgress = (data: any) => {
+      if (data.processId === processId) {
+        setProgress(data);
+      }
+    };
+
+    socket.on('claim-progress', handleProgress);
+
+    return () => {
+      socket.off('claim-progress', handleProgress);
+      socket.emit('leave-claim-progress', processId);
+    };
+  }, [socket, processId, isConnected]);
+
+  return { progress, status, isConnected };
+}
+
+/**
+ * Hook specifically for listening to VPS stats events
+ */
+export function useVPSStats() {
+  const { socket, status, isConnected } = useWebSocket({ autoConnect: true });
+  const [stats, setStats] = useState<any>(null);
+
+  useEffect(() => {
+    if (!socket || !isConnected) {
+      return;
+    }
+
+    // Join the VPS stats room
+    socket.emit('join-vps-stats');
+
+    // Listen for VPS stats updates
+    const handleStats = (data: any) => {
+      setStats(data);
+    };
+
+    socket.on('vps-stats', handleStats);
+
+    return () => {
+      socket.off('vps-stats', handleStats);
+      socket.emit('leave-vps-stats');
+    };
+  }, [socket, isConnected]);
+
+  return { stats, status, isConnected };
+}
+

@@ -292,8 +292,14 @@ class EightBallPoolClaimer {
     try {
       // Launch browser
       console.log('🌐 Launching browser...');
+      
+      // Set executable path for Playwright Chromium
+      // Prefer regular chromium over headless_shell for better compatibility
+      const chromiumPath = process.env.CHROMIUM_PATH || '/ms-playwright/chromium-1193/chrome-linux/chrome';
+      
       const launchOptions = {
         headless: this.headless,
+        executablePath: chromiumPath, // Explicitly set chromium path
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -1053,31 +1059,57 @@ class EightBallPoolClaimer {
 
   async sendDiscordConfirmation(userId, screenshotPath, claimedItems) {
     try {
-      // Find username from user mapping
-      const fs = require('fs');
+      // Find username from database
       let username = 'Unknown User';
       
       try {
-        const mappingData = fs.readFileSync('user-mapping.json', 'utf8');
-        const mappings = JSON.parse(mappingData).userMappings;
-        const userMapping = mappings.find(mapping => mapping.bpAccountId === userId);
-        if (userMapping) {
-          username = userMapping.username;
+        // Try to get username from database
+        const users = await this.dbService.getAllUsers();
+        const user = users.find(u => u.eightBallPoolId === userId);
+        if (user) {
+          username = user.username || 'Unknown User';
         }
       } catch (error) {
-        console.log('⚠️ Could not load user mapping for username');
+        console.log('⚠️ Could not load username from database, trying user-mapping.json');
+        try {
+          // Fallback to user-mapping.json if database fails
+          const fs = require('fs');
+          const mappingData = fs.readFileSync('user-mapping.json', 'utf8');
+          const mappings = JSON.parse(mappingData).userMappings;
+          const userMapping = mappings.find(mapping => mapping.bpAccountId === userId);
+          if (userMapping) {
+            username = userMapping.username;
+          }
+        } catch (mappingError) {
+          console.log('⚠️ Could not load user mapping for username');
+        }
       }
 
-      // Create confirmation image
-      const confirmationImagePath = await this.imageGenerator.createConfirmationImage(
-        userId, 
-        username, 
-        claimedItems, 
-        screenshotPath
-      );
+      // Try to create confirmation image if ImageGenerator is available
+      let confirmationImagePath = screenshotPath; // Default to screenshot
+      
+      if (this.imageGenerator) {
+        try {
+          const generatedPath = await this.imageGenerator.createConfirmationImage(
+            userId, 
+            username, 
+            claimedItems, 
+            screenshotPath
+          );
+          if (generatedPath) {
+            confirmationImagePath = generatedPath;
+            console.log(`✅ Confirmation image created for user ${userId}`);
+          }
+        } catch (imageError) {
+          console.log(`⚠️ Could not create confirmation image, using screenshot: ${imageError.message}`);
+          // Fallback to screenshot if image generation fails
+        }
+      } else {
+        console.log('ℹ️ ImageGenerator not available, using screenshot for Discord confirmation');
+      }
 
+      // Send Discord confirmation (will use screenshot if confirmation image not available)
       if (confirmationImagePath) {
-        // Send Discord confirmation
         const success = await this.discordService.sendConfirmation(
           userId, 
           confirmationImagePath, 
@@ -1090,7 +1122,7 @@ class EightBallPoolClaimer {
           console.log(`⚠️ Failed to send Discord confirmation for user ${userId}`);
         }
       } else {
-        console.log(`⚠️ Could not create confirmation image for user ${userId}`);
+        console.log(`⚠️ No screenshot or confirmation image available for user ${userId}`);
       }
 
     } catch (error) {
@@ -1201,6 +1233,30 @@ class EightBallPoolClaimer {
 
 // LAYER 2: Helper functions are imported from claimer-utils.js
 // See: const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
+
+// Initialize heartbeat for service tracking
+let heartbeatInitialized = false;
+try {
+  const heartbeatUrl = process.env.HEARTBEAT_URL || `${process.env.PUBLIC_URL || 'http://localhost:2600'}/8bp-rewards/api/heartbeat/beat`;
+  const axios = require('axios');
+  const intervalMs = Math.max(5000, parseInt(process.env.HEARTBEAT_INTERVAL_MS || '5000', 10));
+  
+  const sendHeartbeat = () => {
+    axios.post(heartbeatUrl, {
+      moduleId: __filename,
+      filePath: __filename,
+      processId: process.pid,
+      service: 'claimer'
+    }, { timeout: 2000 }).catch(() => {});
+  };
+  
+  sendHeartbeat();
+  setInterval(sendHeartbeat, intervalMs);
+  heartbeatInitialized = true;
+  console.log('✅ Heartbeat initialized for claimer service');
+} catch (error) {
+  console.log('⚠️ Could not initialize heartbeat:', error.message);
+}
 
 // Main execution
 async function main() {

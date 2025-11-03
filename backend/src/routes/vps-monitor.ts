@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { readFileSync } from 'fs';
 import os from 'os';
 import { logger } from '../services/LoggerService';
+import WebSocketService from '../services/WebSocketService';
 
 const execAsync = promisify(exec);
 const router = express.Router();
@@ -103,7 +104,10 @@ async function getDiskUsage(): Promise<any> {
       usagePercent: parseInt(parts[4].replace('%', ''))
     };
   } catch (error) {
-    console.error('Error getting disk usage:', error);
+    logger.warn('Error getting disk usage', {
+      action: 'disk_usage_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return { total: '0', used: '0', free: '0', usagePercent: 0 };
   }
 }
@@ -118,7 +122,10 @@ async function getDiskInodes(): Promise<any> {
       free: parseInt(parts[3])
     };
   } catch (error) {
-    console.error('Error getting disk inodes:', error);
+    logger.warn('Error getting disk inodes', {
+      action: 'disk_inodes_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return { total: 0, used: 0, free: 0 };
   }
 }
@@ -158,7 +165,10 @@ async function getNetworkStats(): Promise<Array<{
     
     return interfaces;
   } catch (error) {
-    console.error('Error getting network stats:', error);
+    logger.warn('Error getting network stats', {
+      action: 'network_stats_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return [];
   }
 }
@@ -205,7 +215,10 @@ async function getProcessStats(): Promise<{
     
     return { total, running, sleeping, zombie };
   } catch (error) {
-    console.error('Error getting process stats:', error);
+    logger.warn('Error getting process stats', {
+      action: 'process_stats_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return { total: 0, running: 0, sleeping: 0, zombie: 0 };
   }
 }
@@ -243,7 +256,10 @@ async function getServiceStats(): Promise<Array<{
     
     return services;
   } catch (error) {
-    console.error('Error getting service stats:', error);
+    logger.warn('Error getting service stats', {
+      action: 'service_stats_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return [];
   }
 }
@@ -268,119 +284,132 @@ async function getCPULoad(): Promise<number> {
   }
 }
 
+// Helper function to collect and format VPS stats (extracted for reuse)
+async function collectVPSStats(): Promise<VPSStats> {
+  const timestamp = new Date().toISOString();
+  
+  // Get system info
+  const hostname = os.hostname();
+  const uptime = os.uptime();
+  const platform = os.platform();
+  const arch = os.arch();
+  const nodeVersion = process.version;
+  
+  // Get CPU info
+  const cpuUsage = await getCPULoad();
+  const cpuCores = os.cpus().length;
+  const loadAverage = os.loadavg();
+  const cpuTemperature = await getCPUTemperature();
+  
+  // Get memory info
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const memUsagePercent = (usedMem / totalMem) * 100;
+  
+  // Get swap info (Linux)
+  let swapInfo = { total: 0, free: 0, used: 0 };
+  try {
+    const swapOutput = await execAsync('free -b | grep Swap');
+    const swapParts = swapOutput.stdout.trim().split(/\s+/);
+    swapInfo = {
+      total: parseInt(swapParts[1]),
+      used: parseInt(swapParts[2]),
+      free: parseInt(swapParts[3])
+    };
+  } catch {
+    // Swap info not available or failed
+  }
+  
+  // Get disk info
+  const diskUsage = await getDiskUsage();
+  const diskInodes = await getDiskInodes();
+  
+  // Get network info
+  const networkInterfaces = await getNetworkStats();
+  const networkConnections = await getNetworkConnections();
+  
+  // Get process info
+  const processStats = await getProcessStats();
+  
+  // Get service info
+  const serviceStats = await getServiceStats();
+  
+  // Get ping times
+  const pingResults = await Promise.all([
+    pingHost('google.com'),
+    pingHost('1.1.1.1'),
+    pingHost('127.0.0.1')
+  ]);
+  
+  const stats: VPSStats = {
+    timestamp,
+    system: {
+      hostname,
+      uptime,
+      platform,
+      arch,
+      nodeVersion
+    },
+    cpu: {
+      usage: Math.round(cpuUsage * 100) / 100,
+      cores: cpuCores,
+      loadAverage: loadAverage.map(load => Math.round(load * 100) / 100),
+      temperature: cpuTemperature
+    },
+    memory: {
+      total: totalMem,
+      free: freeMem,
+      used: usedMem,
+      available: freeMem,
+      usagePercent: Math.round(memUsagePercent * 100) / 100,
+      swap: swapInfo
+    },
+    disk: {
+      total: 0, // Will be filled by diskUsage
+      free: 0,
+      used: 0,
+      usagePercent: diskUsage.usagePercent,
+      inodes: diskInodes
+    },
+    network: {
+      interfaces: networkInterfaces,
+      connections: networkConnections
+    },
+    processes: processStats,
+    services: serviceStats,
+    ping: {
+      google: pingResults[0],
+      cloudflare: pingResults[1],
+      localhost: pingResults[2]
+    },
+    uptime: formatUptime(uptime)
+  };
+  
+  // Fill disk info from string values
+  if (diskUsage.total !== '0') {
+    stats.disk.total = parseSize(diskUsage.total);
+    stats.disk.used = parseSize(diskUsage.used);
+    stats.disk.free = parseSize(diskUsage.free);
+  }
+  
+  return stats;
+}
+
 // GET /api/vps-monitor/stats - Get comprehensive VPS statistics
 router.get('/stats', async (req, res) => {
   try {
-    const timestamp = new Date().toISOString();
+    const stats = await collectVPSStats();
     
-    // Get system info
-    const hostname = os.hostname();
-    const uptime = os.uptime();
-    const platform = os.platform();
-    const arch = os.arch();
-    const nodeVersion = process.version;
-    
-    // Get CPU info
-    const cpuUsage = await getCPULoad();
-    const cpuCores = os.cpus().length;
-    const loadAverage = os.loadavg();
-    const cpuTemperature = await getCPUTemperature();
-    
-    // Get memory info
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    const memUsagePercent = (usedMem / totalMem) * 100;
-    
-    // Get swap info (Linux)
-    let swapInfo = { total: 0, free: 0, used: 0 };
-    try {
-      const swapOutput = await execAsync('free -b | grep Swap');
-      const swapParts = swapOutput.stdout.trim().split(/\s+/);
-      swapInfo = {
-        total: parseInt(swapParts[1]),
-        used: parseInt(swapParts[2]),
-        free: parseInt(swapParts[3])
-      };
-    } catch {
-      // Swap info not available or failed
-    }
-    
-    // Get disk info
-    const diskUsage = await getDiskUsage();
-    const diskInodes = await getDiskInodes();
-    
-    // Get network info
-    const networkInterfaces = await getNetworkStats();
-    const networkConnections = await getNetworkConnections();
-    
-    // Get process info
-    const processStats = await getProcessStats();
-    
-    // Get service info
-    const serviceStats = await getServiceStats();
-    
-    // Get ping times
-    const pingResults = await Promise.all([
-      pingHost('google.com'),
-      pingHost('1.1.1.1'),
-      pingHost('127.0.0.1')
-    ]);
-    
-    const stats: VPSStats = {
-      timestamp,
-      system: {
-        hostname,
-        uptime,
-        platform,
-        arch,
-        nodeVersion
-      },
-      cpu: {
-        usage: Math.round(cpuUsage * 100) / 100,
-        cores: cpuCores,
-        loadAverage: loadAverage.map(load => Math.round(load * 100) / 100),
-        temperature: cpuTemperature
-      },
-      memory: {
-        total: totalMem,
-        free: freeMem,
-        used: usedMem,
-        available: freeMem,
-        usagePercent: Math.round(memUsagePercent * 100) / 100,
-        swap: swapInfo
-      },
-      disk: {
-        total: 0, // Will be filled by diskUsage
-        free: 0,
-        used: 0,
-        usagePercent: diskUsage.usagePercent,
-        inodes: diskInodes
-      },
-      network: {
-        interfaces: networkInterfaces,
-        connections: networkConnections
-      },
-      processes: processStats,
-      services: serviceStats,
-      ping: {
-        google: pingResults[0],
-        cloudflare: pingResults[1],
-        localhost: pingResults[2]
-      },
-      uptime: formatUptime(uptime)
-    };
-    
-    // Fill disk info from string values
-    if (diskUsage.total !== '0') {
-      stats.disk.total = parseSize(diskUsage.total);
-      stats.disk.used = parseSize(diskUsage.used);
-      stats.disk.free = parseSize(diskUsage.free);
-    }
+    // Emit VPS stats via WebSocket for real-time updates
+    WebSocketService.emitVPSStats(stats);
     
     res.json(stats);
   } catch (error) {
-    console.error('Error getting VPS stats:', error);
+    logger.error('Error getting VPS stats', {
+      action: 'vps_stats_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({ error: 'Failed to get VPS statistics' });
   }
 });
@@ -418,5 +447,49 @@ function formatUptime(seconds: number): string {
   
   return parts.join(' ') || '0s';
 }
+
+// Background service: Periodically emit VPS stats via WebSocket (every 1 second)
+let vpsStatsInterval: NodeJS.Timeout | null = null;
+
+function startVPSStatsBroadcast() {
+  // Only start if not already running
+  if (vpsStatsInterval) {
+    return;
+  }
+
+  logger.info('Starting VPS stats broadcast service', {
+    action: 'vps_stats_broadcast_start',
+    interval: '1000ms'
+  });
+
+  vpsStatsInterval = setInterval(async () => {
+    try {
+      const stats = await collectVPSStats();
+      WebSocketService.emitVPSStats(stats);
+    } catch (error) {
+      logger.warn('Error broadcasting VPS stats', {
+        action: 'vps_stats_broadcast_error',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }, 1000); // Broadcast every 1 second for real-time updates
+}
+
+function stopVPSStatsBroadcast() {
+  if (vpsStatsInterval) {
+    clearInterval(vpsStatsInterval);
+    vpsStatsInterval = null;
+    logger.info('Stopped VPS stats broadcast service', {
+      action: 'vps_stats_broadcast_stop'
+    });
+  }
+}
+
+// Start broadcasting on module load
+startVPSStatsBroadcast();
+
+// Cleanup on process exit
+process.on('SIGTERM', stopVPSStatsBroadcast);
+process.on('SIGINT', stopVPSStatsBroadcast);
 
 export default router;

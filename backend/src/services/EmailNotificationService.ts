@@ -5,15 +5,41 @@ export class EmailNotificationService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
+    // Ensure dotenv is loaded
+    if (typeof require !== 'undefined') {
+      try {
+        require('dotenv').config();
+      } catch (e) {
+        // dotenv already loaded
+      }
+    }
+    
+    // Port 587 uses STARTTLS (secure: false), port 465 uses SSL (secure: true)
+    const port = parseInt(process.env.SMTP_PORT || '587');
+    const secure = port === 465 || process.env.SMTP_SECURE === 'true';
+    
     this.transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
+      port: port,
+      secure: secure, // false for 587 (STARTTLS), true for 465 (SSL)
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
+      },
+      tls: {
+        // Do not fail on invalid certificates (for testing)
+        rejectUnauthorized: false
       }
     });
+    
+    if (!this.isConfigured()) {
+      logger.warn('EmailNotificationService: SMTP not fully configured', {
+        hasHost: !!process.env.SMTP_HOST,
+        hasUser: !!process.env.SMTP_USER,
+        hasPass: !!process.env.SMTP_PASS,
+        hasFrom: !!process.env.MAIL_FROM
+      });
+    }
   }
 
   /**
@@ -84,20 +110,25 @@ export class EmailNotificationService {
 
       const info = await this.transporter.sendMail(mailOptions);
       
-      logger.info('PIN code email sent', {
+      logger.info('PIN code email sent successfully', {
         action: 'pin_code_email_sent',
         email,
         purpose,
-        messageId: info.messageId
+        messageId: info.messageId,
+        response: info.response
       });
 
       return true;
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to send PIN code email', {
         action: 'pin_code_email_error',
         email,
         purpose,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        errorCode: error?.code,
+        errorCommand: error?.command,
+        errorResponse: error?.response,
+        stack: error instanceof Error ? error.stack : undefined
       });
       return false;
     }

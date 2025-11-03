@@ -1,9 +1,17 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Users, Clock, Shield, Trophy, ExternalLink } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 const HomePage: React.FC = () => {
+  const { isAuthenticated, isAdmin, isLoading } = useAuth();
+
+  // Redirect admins to dashboard
+  if (!isLoading && isAuthenticated && isAdmin) {
+    return <Navigate to="/admin-dashboard" replace />;
+  }
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}

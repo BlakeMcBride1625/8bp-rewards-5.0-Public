@@ -119,7 +119,7 @@ router.post('/', validateContactForm, async (req, res) => {
           <div style="margin-top: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px;">
             <p style="margin: 0; color: #6c757d; font-size: 14px;">
               <strong>8 Ball Pool Rewards System</strong><br>
-              Website: <a href="${process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk/8bp-rewards'}">${process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk/8bp-rewards'}</a>
+              Website: <a href="${process.env.PUBLIC_URL || 'https://8ballpool.website/8bp-rewards'}">${process.env.PUBLIC_URL || 'https://8ballpool.website/8bp-rewards'}</a>
             </p>
           </div>
         </div>
@@ -140,7 +140,7 @@ router.post('/', validateContactForm, async (req, res) => {
         
         ---
         8 Ball Pool Rewards System
-        Website: ${process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk/8bp-rewards'}
+        Website: ${process.env.PUBLIC_URL || 'https://8ballpool.website/8bp-rewards'}
       `
     };
 

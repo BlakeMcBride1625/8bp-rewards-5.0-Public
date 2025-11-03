@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../services/LoggerService';
+import { validateRegistrationData } from '../utils/validation';
 
 export const authenticateAdmin = (req: Request, res: Response, next: NextFunction): void => {
   // Development bypass - auto-authenticate as admin in development mode

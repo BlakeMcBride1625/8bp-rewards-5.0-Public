@@ -1,1 +1,0 @@
-../shell/check-port-conflicts.sh

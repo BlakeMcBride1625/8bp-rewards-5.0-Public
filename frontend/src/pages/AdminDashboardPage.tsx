@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Navigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS, getAdminUserBlockEndpoint, getAdminRegistrationDeleteEndpoint } from '../config/api';
+import { useVPSStats } from '../hooks/useWebSocket';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import PostgreSQLDBManager from '../components/PostgreSQLDBManager';
 import { 
@@ -187,6 +188,9 @@ const AdminDashboardPage: React.FC = () => {
   const [vpsStats, setVpsStats] = useState<VPSStats | null>(null);
   const [isLoadingVpsStats, setIsLoadingVpsStats] = useState(false);
   const [autoRefreshVps, setAutoRefreshVps] = useState(true);
+
+  // Use WebSocket for real-time VPS stats updates
+  const { stats: wsVpsStats, status: wsStatus, isConnected: wsConnected } = useVPSStats();
   const [screenshotUserQuery, setScreenshotUserQuery] = useState('');
   const [isClearingScreenshots, setIsClearingScreenshots] = useState(false);
   const [screenshotFolders, setScreenshotFolders] = useState<any[]>([]);
@@ -380,16 +384,61 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, [isAuthenticated, isAdmin, activeTab]);
 
-  // Auto-refresh VPS stats when on VPS tab
+  // Update VPS stats from WebSocket when received
   useEffect(() => {
-    if (activeTab === 'vps' && autoRefreshVps) {
-      const interval = setInterval(() => {
-        fetchVpsStats();
-      }, 1000); // Refresh every 1 second for real-time graphs
+    if (wsVpsStats) {
+      setVpsStats(wsVpsStats as VPSStats);
+      setIsLoadingVpsStats(false);
       
-      return () => clearInterval(interval);
+      // Update chart data with new reading
+      const now = new Date();
+      const timeString = now.toLocaleTimeString('en-US', { 
+        hour12: false, 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit' 
+      });
+      const newDataPoint = {
+        time: timeString,
+        cpu: wsVpsStats.cpu.usage,
+        memory: wsVpsStats.memory.usagePercent,
+        timestamp: now.getTime()
+      };
+      
+      setChartData(prevData => {
+        const filtered = prevData.filter(d => now.getTime() - d.timestamp < 60000); // Keep last 60 seconds
+        return [...filtered, newDataPoint];
+      });
     }
-  }, [activeTab, autoRefreshVps, fetchVpsStats]);
+  }, [wsVpsStats]);
+
+  // Initial VPS stats fetch on tab switch (fallback)
+  useEffect(() => {
+    if (activeTab === 'vps' && !vpsStats && !wsVpsStats) {
+      fetchVpsStats();
+    }
+  }, [activeTab, vpsStats, wsVpsStats, fetchVpsStats]);
+
+  // Polling fallback for VPS stats updates (if WebSocket not connected or not receiving updates)
+  useEffect(() => {
+    if (activeTab !== 'vps') {
+      return; // Only poll when on VPS tab
+    }
+
+    // Poll every 1 second for real-time updates
+    const pollInterval = setInterval(() => {
+      // Only poll if WebSocket is not connected or not receiving updates in last 5 seconds
+      const lastUpdate = chartData.length > 0 ? chartData[chartData.length - 1].timestamp : 0;
+      const timeSinceLastUpdate = Date.now() - lastUpdate;
+      const shouldPoll = !wsConnected || timeSinceLastUpdate > 5000;
+
+      if (shouldPoll) {
+        fetchVpsStats();
+      }
+    }, 1000); // Poll every 1 second
+
+    return () => clearInterval(pollInterval);
+  }, [activeTab, wsConnected, chartData, fetchVpsStats]);
 
   const fetchUserIp = async () => {
     try {
@@ -818,7 +867,7 @@ const AdminDashboardPage: React.FC = () => {
   const fetchDeregisteredUsers = async () => {
     setIsLoadingDeregisteredUsers(true);
     try {
-      const response = await axios.get('/api/validation/deregistered-users', { withCredentials: true });
+      const response = await axios.get(API_ENDPOINTS.VALIDATION_DEREGISTERED_USERS, { withCredentials: true });
       setDeregisteredUsers(response.data.users || []);
     } catch (error: any) {
       console.error('Error fetching deregistered users:', error);
@@ -828,13 +877,44 @@ const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  // Revalidate a specific user
+  const handleRevalidateUser = async (eightBallPoolId: string) => {
+    try {
+      toast.loading('Revalidating user...', { id: 'revalidate-user' });
+      
+      const response = await axios.post(
+        API_ENDPOINTS.VALIDATION_REVALIDATE_USER,
+        { uniqueId: eightBallPoolId },
+        { withCredentials: true }
+      );
+
+      if (response.data.success) {
+        toast.success('User revalidated successfully!', { id: 'revalidate-user' });
+        
+        // Refresh the deregistered users list
+        await fetchDeregisteredUsers();
+        
+        // If validation passed, the user should be removed from invalid_users table
+        // and potentially re-registered
+      } else {
+        toast.error(response.data.error || 'Revalidation failed', { id: 'revalidate-user' });
+      }
+    } catch (error: any) {
+      console.error('Error revalidating user:', error);
+      toast.error(
+        error.response?.data?.error || error.response?.data?.details || 'Failed to revalidate user',
+        { id: 'revalidate-user' }
+      );
+    }
+  };
+
   // Fetch system integration data
   const fetchSystemIntegrationData = async () => {
     setIsLoadingSystemIntegration(true);
     try {
       const [integrationResponse, healthResponse] = await Promise.all([
-        axios.get('/api/validation/system-integration', { withCredentials: true }),
-        axios.get('/api/validation/system-health', { withCredentials: true })
+        axios.get(`${API_ENDPOINTS.BASE_URL}/8bp-rewards/api/validation/system-integration`, { withCredentials: true }).catch(() => ({ data: { success: false, message: 'Endpoint not available' } })),
+        axios.get(`${API_ENDPOINTS.BASE_URL}/8bp-rewards/api/validation/system-health`, { withCredentials: true }).catch(() => ({ data: { success: false, message: 'Endpoint not available' } }))
       ]);
       
       setSystemIntegrationData(integrationResponse.data);
@@ -1061,7 +1141,7 @@ const AdminDashboardPage: React.FC = () => {
   }
 
   if (!isAuthenticated || !isAdmin) {
-    return <Navigate to="/home" replace />;
+    return <Navigate to="/8bp-rewards/home" replace />;
   }
 
   const filteredRegistrations = registrations.filter(reg =>
@@ -1663,11 +1743,9 @@ const AdminDashboardPage: React.FC = () => {
                           </td>
                           <td className="py-3 px-4">
                             <button
-                              onClick={() => {
-                                // TODO: Implement revalidation
-                                toast('Revalidation feature coming soon', { icon: 'ℹ️' });
-                              }}
-                              className="btn-secondary text-sm"
+                              onClick={() => handleRevalidateUser(user.eight_ball_pool_id)}
+                              className="btn-secondary text-sm hover:bg-blue-100 dark:hover:bg-blue-900"
+                              title={`Revalidate user ${user.eight_ball_pool_id}`}
                             >
                               Revalidate
                             </button>
@@ -3019,22 +3097,30 @@ const AdminDashboardPage: React.FC = () => {
                   <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">
                     VPS Monitor
                   </h2>
-                  {autoRefreshVps && (
+                  {wsConnected && wsStatus === 'connected' ? (
                     <div className="flex items-center space-x-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       <span className="text-xs text-green-600 dark:text-green-400 font-medium">
-                        Live
+                        Live Updates
+                      </span>
+                    </div>
+                  ) : wsStatus === 'connecting' ? (
+                    <div className="flex items-center space-x-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-yellow-600 dark:text-yellow-400" />
+                      <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                        Connecting...
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-2">
+                      <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+                      <span className="text-xs text-red-600 dark:text-red-400 font-medium">
+                        Disconnected
                       </span>
                     </div>
                   )}
                 </div>
                 <div className="flex items-center space-x-3">
-                  <button
-                    onClick={() => setAutoRefreshVps(!autoRefreshVps)}
-                    className={`btn ${autoRefreshVps ? 'btn-primary' : 'btn-outline'} text-sm px-3 py-1`}
-                  >
-                    {autoRefreshVps ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
-                  </button>
                   <button
                     onClick={fetchVpsStats}
                     disabled={isLoadingVpsStats}

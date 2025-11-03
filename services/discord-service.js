@@ -52,11 +52,11 @@ class DiscordService {
       this.client.user.setPresence({
         status: botStatus,
         activities: [{
-          name: 'https://8bp.epildevconnect.uk/8bp-rewards/home',
+          name: 'https://8ballpool.website/8bp-rewards/home',
           type: ActivityType.Watching
         }]
       });
-      console.log(`👁️ Bot status set to ${botStatus.toUpperCase()} - Watching https://8bp.epildevconnect.uk/8bp-rewards/home`);
+      console.log(`👁️ Bot status set to ${botStatus.toUpperCase()} - Watching https://8ballpool.website/8bp-rewards/home`);
       
       // Register slash commands
       await this.registerSlashCommands();
@@ -419,7 +419,7 @@ class DiscordService {
       async execute(interaction, service) {
         const embed = new EmbedBuilder()
           .setTitle('📚 8BP Rewards System Documentation')
-          .setDescription('## Overview\n\nThe 8 Ball Pool Rewards System automatically claims daily rewards for registered users.\n\n## Features\n\n- 🎯 **Automated Claiming**: Claims rewards every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)\n- 🆔 **Multiple User Support**: Supports multiple registered accounts\n- 📝 **Comprehensive Logging**: All activities are logged\n- 🤖 **Discord Integration**: Notifications and admin commands\n- 🌐 **Web Interface**: Full admin dashboard and user registration\n\n## Registration\n\n1. Visit the website: https://8bp.epildevconnect.uk/8bp-rewards/register\n2. Enter your 8 Ball Pool User ID and username\n3. Your account will be automatically included in the reward claiming schedule\n\n## Admin Commands\n\nAll commands require administrator privileges.\n\n- `/register` - Register a new account\n- `/list-accounts` - List all registered accounts\n- `/check-accounts` - Check account statuses\n- `/deregister` - Remove an account\n- `/help` - Show help information\n- `/server-status` - Check bot server status\n- `/website-status` - Check website status\n\n## Support\n\nFor support, visit: https://8bp.epildevconnect.uk/8bp-rewards/contact')
+          .setDescription('## Overview\n\nThe 8 Ball Pool Rewards System automatically claims daily rewards for registered users.\n\n## Features\n\n- 🎯 **Automated Claiming**: Claims rewards every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)\n- 🆔 **Multiple User Support**: Supports multiple registered accounts\n- 📝 **Comprehensive Logging**: All activities are logged\n- 🤖 **Discord Integration**: Notifications and admin commands\n- 🌐 **Web Interface**: Full admin dashboard and user registration\n\n## Registration\n\n1. Visit the website: https://8ballpool.website/8bp-rewards/register\n2. Enter your 8 Ball Pool User ID and username\n3. Your account will be automatically included in the reward claiming schedule\n\n## Admin Commands\n\nAll commands require administrator privileges.\n\n- `/register` - Register a new account\n- `/list-accounts` - List all registered accounts\n- `/check-accounts` - Check account statuses\n- `/deregister` - Remove an account\n- `/help` - Show help information\n- `/server-status` - Check bot server status\n- `/website-status` - Check website status\n\n## Support\n\nFor support, visit: https://8ballpool.website/8bp-rewards/contact')
           .setColor(0x0099FF)
           .setTimestamp();
 
@@ -471,7 +471,7 @@ class DiscordService {
         try {
           await interaction.deferReply({ ephemeral: interaction.inGuild() });
 
-          const baseUrl = process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk/8bp-rewards';
+          const baseUrl = process.env.PUBLIC_URL || 'https://8ballpool.website/8bp-rewards';
           
           // Check backend health
           let backendStatus = '❌ Unknown';
@@ -556,7 +556,7 @@ class DiscordService {
         try {
           await interaction.deferReply({ ephemeral: interaction.inGuild() });
 
-          const baseUrl = process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk/8bp-rewards';
+          const baseUrl = process.env.PUBLIC_URL || 'https://8ballpool.website/8bp-rewards';
           const startTime = Date.now();
           
           const response = await axios.get(`${baseUrl}/api/status`, { timeout: 10000 });
@@ -579,7 +579,7 @@ class DiscordService {
           const embed = new EmbedBuilder()
             .setTitle('🏓 Website Ping')
             .addFields(
-              { name: '🌐 Website', value: process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk/8bp-rewards', inline: false },
+              { name: '🌐 Website', value: process.env.PUBLIC_URL || 'https://8ballpool.website/8bp-rewards', inline: false },
               { name: '⏱️ Response Time', value: 'Timeout', inline: true },
               { name: '📊 Status', value: '❌ Offline', inline: true }
             )
@@ -814,7 +814,7 @@ class DiscordService {
       await this.client.user.setPresence({
         status: actualStatus,
         activities: [{
-          name: 'https://8bp.epildevconnect.uk/8bp-rewards/home',
+          name: 'https://8ballpool.website/8bp-rewards/home',
           type: ActivityType.Watching
         }]
       });

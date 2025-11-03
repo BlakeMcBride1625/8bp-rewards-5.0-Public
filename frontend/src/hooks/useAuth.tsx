@@ -44,6 +44,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const checkAuthStatus = async () => {
+    // Set loading to false immediately to allow app to render
+    setIsLoading(false);
+    
     try {
       // Check if user manually logged out (development mode)
       const devLoggedOut = localStorage.getItem('dev_logged_out');
@@ -51,26 +54,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setIsAuthenticated(false);
         setIsAdmin(false);
         setUser(null);
-        setIsLoading(false);
         return;
       }
       
-      // Call backend auth status endpoint
+      // Call backend auth status endpoint with timeout
       const response = await axios.get(API_ENDPOINTS.AUTH_STATUS, {
-        withCredentials: true
+        withCredentials: true,
+        timeout: 5000, // 5 second timeout
       });
+      
       const { authenticated, isAdmin: adminStatus, user: userData } = response.data;
       
       setIsAuthenticated(authenticated);
       setIsAdmin(adminStatus);
       setUser(authenticated ? userData : null);
     } catch (error) {
-      console.error('Auth status check failed:', error);
+      // Silently fail - user just won't be authenticated
       setIsAuthenticated(false);
       setIsAdmin(false);
       setUser(null);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -91,15 +93,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsAdmin(false);
       setUser(null);
       
-      // Redirect to home after logout
-      window.location.href = '/home';
+      // Redirect to home after logout (with correct base path)
+      window.location.href = '/8bp-rewards/home';
     } catch (error) {
       console.error('Logout failed:', error);
       // Still log out locally even if backend fails
       setIsAuthenticated(false);
       setIsAdmin(false);
       setUser(null);
-      window.location.href = '/home';
+      window.location.href = '/8bp-rewards/home';
     }
   };
 

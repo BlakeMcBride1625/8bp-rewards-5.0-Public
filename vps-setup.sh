@@ -1,1 +1,0 @@
-shell/vps-setup.sh

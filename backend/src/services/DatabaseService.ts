@@ -1,10 +1,15 @@
 import { Pool } from 'pg';
 import { logger } from './LoggerService';
 
-// Import PostgreSQL models
-const postgresModels = require('../../../models/postgresql/Registration');
-const PostgresRegistration = postgresModels.Registration;
-const PostgresClaimRecord = postgresModels.ClaimRecord;
+// Import PostgreSQL models - use absolute path from project root
+import path from 'path';
+// When compiled: __dirname = dist/backend/backend/src/services
+// Go up 5 levels to reach project root: dist/backend/backend/src/services -> dist/backend/backend/src -> dist/backend/backend -> dist/backend -> dist -> (project root)
+const projectRoot = path.resolve(__dirname, '../../../../..');
+const modelsPath = path.join(projectRoot, 'models/postgresql/Registration');
+const postgresModels = require(modelsPath);
+const PostgresRegistration = postgresModels.Registration || postgresModels.default?.Registration;
+const PostgresClaimRecord = postgresModels.ClaimRecord || postgresModels.default?.ClaimRecord;
 
 export class DatabaseService {
   private static instance: DatabaseService;
@@ -50,6 +55,7 @@ export class DatabaseService {
     });
     
     // Connect to host PostgreSQL (no Docker-specific logic)
+    // Optimized pool configuration based on typical web application patterns
     this.postgresPool = new Pool({
       host: process.env.POSTGRES_HOST || 'localhost',
       port: parseInt(process.env.POSTGRES_PORT || '5432'),
@@ -57,10 +63,17 @@ export class DatabaseService {
       user: process.env.POSTGRES_USER || 'admin',
       password: process.env.POSTGRES_PASSWORD,
       ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-      query_timeout: 30000,
+      // Connection pool settings
+      max: parseInt(process.env.POSTGRES_POOL_MAX || '20'), // Maximum number of clients in the pool
+      min: parseInt(process.env.POSTGRES_POOL_MIN || '5'),   // Minimum number of clients to maintain
+      // Connection lifecycle
+      idleTimeoutMillis: parseInt(process.env.POSTGRES_IDLE_TIMEOUT || '30000'), // Close idle clients after 30s
+      connectionTimeoutMillis: parseInt(process.env.POSTGRES_CONNECTION_TIMEOUT || '20000'), // Wait 20s for connection
+      // Query settings
+      query_timeout: parseInt(process.env.POSTGRES_QUERY_TIMEOUT || '30000'), // Query timeout 30s
+      // Keep-alive settings to prevent connection drops
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000, // Start sending keep-alive after 10s
     });
 
     // Test connection with retry
@@ -69,9 +82,9 @@ export class DatabaseService {
     
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const client = await this.postgresPool.connect();
-        await client.query('SELECT NOW()');
-        client.release();
+    const client = await this.postgresPool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
         connected = true;
         break;
       } catch (error) {
@@ -589,6 +602,457 @@ export class DatabaseService {
     } catch (error) {
       logger.error('❌ Failed to remove user:', { error: error instanceof Error ? error.message : 'Unknown error' });
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // ==================== VPS Codes Storage ====================
+  
+  /**
+   * Store VPS code for a user
+   */
+  async storeVPSCode(data: {
+    userId: string;
+    discordCode: string;
+    telegramCode: string;
+    emailCode: string;
+    userEmail?: string;
+    username: string;
+    expiresAt: Date;
+    discordMessageId?: string;
+    telegramMessageId?: string;
+  }): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        `INSERT INTO vps_codes (user_id, discord_code, telegram_code, email_code, user_email, username, expires_at, discord_message_id, telegram_message_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (user_id) 
+         DO UPDATE SET 
+           discord_code = EXCLUDED.discord_code,
+           telegram_code = EXCLUDED.telegram_code,
+           email_code = EXCLUDED.email_code,
+           user_email = EXCLUDED.user_email,
+           username = EXCLUDED.username,
+           expires_at = EXCLUDED.expires_at,
+           attempts = 0,
+           is_used = FALSE,
+           discord_message_id = EXCLUDED.discord_message_id,
+           telegram_message_id = EXCLUDED.telegram_message_id,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          data.userId,
+          data.discordCode,
+          data.telegramCode,
+          data.emailCode,
+          data.userEmail || null,
+          data.username,
+          data.expiresAt,
+          data.discordMessageId || null,
+          data.telegramMessageId || null
+        ]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get VPS code for a user
+   */
+  async getVPSCode(userId: string): Promise<{
+    discordCode: string;
+    telegramCode: string;
+    emailCode: string;
+    userEmail?: string;
+    username: string;
+    expiresAt: Date;
+    attempts: number;
+    isUsed: boolean;
+    discordMessageId?: string;
+    telegramMessageId?: string;
+  } | null> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      const result = await client.query(
+        'SELECT * FROM vps_codes WHERE user_id = $1',
+        [userId]
+      );
+
+      if (result.rows.length === 0) return null;
+
+      const row = result.rows[0];
+      return {
+        discordCode: row.discord_code,
+        telegramCode: row.telegram_code,
+        emailCode: row.email_code,
+        userEmail: row.user_email,
+        username: row.username,
+        expiresAt: row.expires_at,
+        attempts: row.attempts,
+        isUsed: row.is_used,
+        discordMessageId: row.discord_message_id,
+        telegramMessageId: row.telegram_message_id
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Increment attempts for VPS code
+   */
+  async incrementVPSCodeAttempts(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        'UPDATE vps_codes SET attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+        [userId]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Mark VPS code as used
+   */
+  async markVPSCodeAsUsed(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        'UPDATE vps_codes SET is_used = TRUE, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+        [userId]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete VPS code
+   */
+  async deleteVPSCode(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query('DELETE FROM vps_codes WHERE user_id = $1', [userId]);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Store VPS access grant
+   */
+  async storeVPSAccess(data: {
+    userId: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        `INSERT INTO vps_access (user_id, expires_at)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) 
+         DO UPDATE SET 
+           granted_at = CURRENT_TIMESTAMP,
+           expires_at = EXCLUDED.expires_at`,
+        [data.userId, data.expiresAt]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get VPS access for a user
+   */
+  async getVPSAccess(userId: string): Promise<{
+    grantedAt: Date;
+    expiresAt: Date;
+  } | null> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      const result = await client.query(
+        'SELECT * FROM vps_access WHERE user_id = $1',
+        [userId]
+      );
+
+      if (result.rows.length === 0) return null;
+
+      const row = result.rows[0];
+      return {
+        grantedAt: row.granted_at,
+        expiresAt: row.expires_at
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete VPS access
+   */
+  async deleteVPSAccess(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query('DELETE FROM vps_access WHERE user_id = $1', [userId]);
+    } finally {
+      client.release();
+    }
+  }
+
+  // ==================== Reset Leaderboard Codes Storage ====================
+  
+  /**
+   * Store reset leaderboard code for a user
+   */
+  async storeResetLeaderboardCode(data: {
+    userId: string;
+    discordCode: string;
+    telegramCode: string;
+    emailCode: string;
+    userEmail?: string;
+    username: string;
+    expiresAt: Date;
+    discordMessageId?: string;
+    telegramMessageId?: string;
+  }): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        `INSERT INTO reset_leaderboard_codes (user_id, discord_code, telegram_code, email_code, user_email, username, expires_at, discord_message_id, telegram_message_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (user_id) 
+         DO UPDATE SET 
+           discord_code = EXCLUDED.discord_code,
+           telegram_code = EXCLUDED.telegram_code,
+           email_code = EXCLUDED.email_code,
+           user_email = EXCLUDED.user_email,
+           username = EXCLUDED.username,
+           expires_at = EXCLUDED.expires_at,
+           attempts = 0,
+           is_used = FALSE,
+           discord_message_id = EXCLUDED.discord_message_id,
+           telegram_message_id = EXCLUDED.telegram_message_id,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          data.userId,
+          data.discordCode,
+          data.telegramCode,
+          data.emailCode,
+          data.userEmail || null,
+          data.username,
+          data.expiresAt,
+          data.discordMessageId || null,
+          data.telegramMessageId || null
+        ]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get reset leaderboard code for a user
+   */
+  async getResetLeaderboardCode(userId: string): Promise<{
+    discordCode: string;
+    telegramCode: string;
+    emailCode: string;
+    userEmail?: string;
+    username: string;
+    expiresAt: Date;
+    attempts: number;
+    isUsed: boolean;
+    discordMessageId?: string;
+    telegramMessageId?: string;
+  } | null> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      const result = await client.query(
+        'SELECT * FROM reset_leaderboard_codes WHERE user_id = $1',
+        [userId]
+      );
+
+      if (result.rows.length === 0) return null;
+
+      const row = result.rows[0];
+      return {
+        discordCode: row.discord_code,
+        telegramCode: row.telegram_code,
+        emailCode: row.email_code,
+        userEmail: row.user_email,
+        username: row.username,
+        expiresAt: row.expires_at,
+        attempts: row.attempts,
+        isUsed: row.is_used,
+        discordMessageId: row.discord_message_id,
+        telegramMessageId: row.telegram_message_id
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Increment attempts for reset leaderboard code
+   */
+  async incrementResetLeaderboardCodeAttempts(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        'UPDATE reset_leaderboard_codes SET attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+        [userId]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Mark reset leaderboard code as used
+   */
+  async markResetLeaderboardCodeAsUsed(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        'UPDATE reset_leaderboard_codes SET is_used = TRUE, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+        [userId]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete reset leaderboard code
+   */
+  async deleteResetLeaderboardCode(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query('DELETE FROM reset_leaderboard_codes WHERE user_id = $1', [userId]);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Store reset leaderboard access grant
+   */
+  async storeResetLeaderboardAccess(data: {
+    userId: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query(
+        `INSERT INTO reset_leaderboard_access (user_id, expires_at)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) 
+         DO UPDATE SET 
+           granted_at = CURRENT_TIMESTAMP,
+           expires_at = EXCLUDED.expires_at`,
+        [data.userId, data.expiresAt]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get reset leaderboard access for a user
+   */
+  async getResetLeaderboardAccess(userId: string): Promise<{
+    grantedAt: Date;
+    expiresAt: Date;
+  } | null> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      const result = await client.query(
+        'SELECT * FROM reset_leaderboard_access WHERE user_id = $1',
+        [userId]
+      );
+
+      if (result.rows.length === 0) return null;
+
+      const row = result.rows[0];
+      return {
+        grantedAt: row.granted_at,
+        expiresAt: row.expires_at
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Delete reset leaderboard access
+   */
+  async deleteResetLeaderboardAccess(userId: string): Promise<void> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      await client.query('DELETE FROM reset_leaderboard_access WHERE user_id = $1', [userId]);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Clean up expired codes and access (should be run periodically)
+   */
+  async cleanupExpiredVPSCodes(): Promise<number> {
+    if (!this.postgresPool) throw new Error('Database not connected');
+
+    const client = await this.postgresPool.connect();
+    try {
+      const result1 = await client.query(
+        'DELETE FROM vps_codes WHERE expires_at < NOW() AND is_used = TRUE'
+      );
+      const result2 = await client.query(
+        'DELETE FROM vps_access WHERE expires_at < NOW()'
+      );
+      const result3 = await client.query(
+        'DELETE FROM reset_leaderboard_codes WHERE expires_at < NOW() AND is_used = TRUE'
+      );
+      const result4 = await client.query(
+        'DELETE FROM reset_leaderboard_access WHERE expires_at < NOW()'
+      );
+
+      return (result1.rowCount || 0) + (result2.rowCount || 0) + (result3.rowCount || 0) + (result4.rowCount || 0);
+    } finally {
+      client.release();
     }
   }
 }

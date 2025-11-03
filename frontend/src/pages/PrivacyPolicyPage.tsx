@@ -169,7 +169,7 @@ const PrivacyPolicyPage: React.FC = () => {
             <div className="mt-3 p-4 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg">
               <p className="text-text-secondary dark:text-text-dark-secondary">
                 <strong>Email:</strong> connectwithme@epildevconnect.uk<br />
-                <strong>Website:</strong> https://8bp.epildevconnect.uk/8bp-rewards/contact
+                <strong>Website:</strong> https://8ballpool.website/8bp-rewards/contact
               </p>
             </div>
           </section>

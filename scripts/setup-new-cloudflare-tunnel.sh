@@ -65,7 +65,7 @@ echo ""
 
 # Create DNS route
 echo "🌐 Creating DNS route..."
-cloudflared tunnel route dns 8bp-rewards-tunnel 8bp.epildevconnect.uk || {
+cloudflared tunnel route dns 8bp-rewards-tunnel 8ballpool.website || {
     echo "⚠️  DNS route may already exist (this is OK)"
 }
 echo ""
@@ -84,10 +84,10 @@ credentials-file: $HOME/.cloudflared/${TUNNEL_UUID}.json
 ingress:
   # All traffic (frontend + backend API) goes to backend port 2600
   # Backend serves frontend static files under /8bp-rewards route
-  - hostname: 8bp.epildevconnect.uk
+  - hostname: 8ballpool.website
     service: http://localhost:2600
     originRequest:
-      httpHostHeader: 8bp.epildevconnect.uk
+      httpHostHeader: 8ballpool.website
       noHappyEyeballs: true
 
   # Catch-all rule (must be last)
@@ -109,10 +109,10 @@ credentials-file: $HOME/.cloudflared/${TUNNEL_UUID}.json
 ingress:
   # All traffic (frontend + backend API) now goes to backend port 2600
   # Backend serves frontend static files under /8bp-rewards route
-  - hostname: 8bp.epildevconnect.uk
+  - hostname: 8ballpool.website
     service: http://localhost:2600
     originRequest:
-      httpHostHeader: 8bp.epildevconnect.uk
+      httpHostHeader: 8ballpool.website
       noHappyEyeballs: true
 
   # Catch-all rule (must be last)
@@ -186,6 +186,6 @@ echo "   Restart:      sudo systemctl restart cloudflared-tunnel.service"
 echo "   Stop:         sudo systemctl stop cloudflared-tunnel.service"
 echo ""
 echo "🌐 Your application will be available at:"
-echo "   https://8bp.epildevconnect.uk/8bp-rewards/"
+echo "   https://8ballpool.website/8bp-rewards/"
 echo ""
 

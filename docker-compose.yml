@@ -1,0 +1,228 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database Service
+  postgres:
+    image: postgres:16-alpine
+    container_name: 8bp-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-8bp_rewards}
+      POSTGRES_USER: ${POSTGRES_USER:-8bp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-8bp_user} -d ${POSTGRES_DB:-8bp_rewards}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - 8bp-network
+
+  # Backend API Service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 8bp-backend
+    environment:
+      # Load all environment variables from .env
+      - NODE_ENV=${NODE_ENV:-production}
+      - BACKEND_PORT=${BACKEND_PORT:-2600}
+      - FRONTEND_PORT=${FRONTEND_PORT:-2500}
+      - POSTGRES_HOST=postgres
+      - DISCORD_BOT_SERVICE_URL=http://discord-api:2700
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-8bp_rewards}
+      - POSTGRES_USER=${POSTGRES_USER:-8bp_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_SSL=${POSTGRES_SSL:-false}
+      - DATABASE_TYPE=${DATABASE_TYPE:-postgresql}
+      - MONGO_URI=${MONGO_URI}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI}
+      - ALLOWED_ADMINS=${ALLOWED_ADMINS}
+      - SCHEDULER_CHANNEL_ID=${SCHEDULER_CHANNEL_ID}
+      - REWARDS_CHANNEL_ID=${REWARDS_CHANNEL_ID}
+      - REGISTRATION_CHANNEL_ID=${REGISTRATION_CHANNEL_ID}
+      - DISCORD_BOT_STATUS=${DISCORD_BOT_STATUS:-dnd}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - ALLOWED_TELEGRAM_USERS=${ALLOWED_TELEGRAM_USERS}
+      - DISCORD_API_PORT=${DISCORD_API_PORT:-2700}
+      - STATUS_PORT=${STATUS_PORT:-2750}
+      - REACT_APP_BACKEND_PORT=${REACT_APP_BACKEND_PORT:-2600}
+      - REACT_APP_FRONTEND_PORT=${REACT_APP_FRONTEND_PORT:-2500}
+      - PUBLIC_URL=${PUBLIC_URL}
+      - HOME_URL=${HOME_URL}
+      - REGISTER_URL=${REGISTER_URL}
+      - CONTACT_URL=${CONTACT_URL}
+      - LEADERBOARD_URL=${LEADERBOARD_URL}
+      - SOCIALS_URL=${SOCIALS_URL}
+      - SYSTEM_STATUS_URL=${SYSTEM_STATUS_URL}
+      - ADMIN_DASHBOARD_URL=${ADMIN_DASHBOARD_URL}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_SECURE=${SMTP_SECURE}
+      - MAIL_FROM=${MAIL_FROM}
+      - MAIL_TO=${MAIL_TO}
+      - JWT_SECRET=${JWT_SECRET}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - REACT_APP_SOCIAL_FACEBOOK=${REACT_APP_SOCIAL_FACEBOOK}
+      - REACT_APP_SOCIAL_TIKTOK=${REACT_APP_SOCIAL_TIKTOK}
+      - REACT_APP_SOCIAL_YOUTUBE=${REACT_APP_SOCIAL_YOUTUBE}
+      - REACT_APP_SOCIAL_DISCORD=${REACT_APP_SOCIAL_DISCORD}
+      - REACT_APP_SOCIAL_INSTAGRAM=${REACT_APP_SOCIAL_INSTAGRAM}
+      - REACT_APP_SOCIAL_X=${REACT_APP_SOCIAL_X}
+      - USER_IDS=${USER_IDS}
+      - SHOP_URL=${SHOP_URL}
+      - HEADLESS=${HEADLESS:-true}
+      - TIMEOUT=${TIMEOUT:-20000}
+      - DELAY_BETWEEN_USERS=${DELAY_BETWEEN_USERS:-10000}
+      - TZ=${TZ:-Europe/London}
+      - VPS_OWNERS=${VPS_OWNERS}
+      - ALLOWED_VPS_ADMINS=${ALLOWED_VPS_ADMINS}
+      - DISCORD_TO_TELEGRAM_MAPPING=${DISCORD_TO_TELEGRAM_MAPPING}
+      - DISCORD_TO_EMAIL_MAPPING=${DISCORD_TO_EMAIL_MAPPING}
+      - DISCORD_SPECIAL_USERS=${DISCORD_SPECIAL_USERS}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
+      - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
+      - TEST_USERS=${TEST_USERS}
+      - TARGET_USER_IDS=${TARGET_USER_IDS}
+    ports:
+      - "${BACKEND_PORT:-2600}:${BACKEND_PORT:-2600}"
+    volumes:
+      - ./logs:/app/logs
+      - ./backend/logs:/app/backend/logs
+      - ./screenshots:/app/screenshots
+      - ./backend/screenshots:/app/backend/screenshots
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:${BACKEND_PORT:-2600}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - 8bp-network
+    command: ["node", "dist/backend/backend/src/server.js"]
+
+  # Discord API Service (Discord Bot + API Server)
+  discord-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 8bp-discord-api
+    environment:
+      # Load all environment variables from .env
+      - NODE_ENV=${NODE_ENV:-production}
+      - DISCORD_API_PORT=${DISCORD_API_PORT:-2700}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+      - ALLOWED_ADMINS=${ALLOWED_ADMINS}
+      - SCHEDULER_CHANNEL_ID=${SCHEDULER_CHANNEL_ID}
+      - REWARDS_CHANNEL_ID=${REWARDS_CHANNEL_ID}
+      - REGISTRATION_CHANNEL_ID=${REGISTRATION_CHANNEL_ID}
+      - DISCORD_BOT_STATUS=${DISCORD_BOT_STATUS:-dnd}
+      - POSTGRES_HOST=postgres
+      - DISCORD_BOT_SERVICE_URL=http://discord-api:2700
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-8bp_rewards}
+      - POSTGRES_USER=${POSTGRES_USER:-8bp_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_SSL=${POSTGRES_SSL:-false}
+      - DATABASE_TYPE=${DATABASE_TYPE:-postgresql}
+      - MONGO_URI=${MONGO_URI}
+      - USER_IDS=${USER_IDS}
+      - SHOP_URL=${SHOP_URL}
+      - HEADLESS=${HEADLESS:-true}
+      - TIMEOUT=${TIMEOUT:-20000}
+      - DELAY_BETWEEN_USERS=${DELAY_BETWEEN_USERS:-10000}
+      - TZ=${TZ:-Europe/London}
+      - TARGET_USER_IDS=${TARGET_USER_IDS}
+    ports:
+      - "${DISCORD_API_PORT:-2700}:${DISCORD_API_PORT:-2700}"
+    volumes:
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:${DISCORD_API_PORT:-2700}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - 8bp-network
+    command: ["node", "services/discord-api-server.js"]
+
+  # Claimer Service - Scheduled Claims
+  claimer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 8bp-claimer
+    environment:
+      # Load all environment variables from .env
+      - NODE_ENV=${NODE_ENV:-production}
+      - POSTGRES_HOST=postgres
+      - DISCORD_BOT_SERVICE_URL=http://discord-api:2700
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-8bp_rewards}
+      - POSTGRES_USER=${POSTGRES_USER:-8bp_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_SSL=${POSTGRES_SSL:-false}
+      - DATABASE_TYPE=${DATABASE_TYPE:-postgresql}
+      - MONGO_URI=${MONGO_URI}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+      - ALLOWED_ADMINS=${ALLOWED_ADMINS}
+      - SCHEDULER_CHANNEL_ID=${SCHEDULER_CHANNEL_ID}
+      - REWARDS_CHANNEL_ID=${REWARDS_CHANNEL_ID}
+      - REGISTRATION_CHANNEL_ID=${REGISTRATION_CHANNEL_ID}
+      - USER_IDS=${USER_IDS}
+      - SHOP_URL=${SHOP_URL:-https://8ballpool.com/en/shop}
+      - HEADLESS=${HEADLESS:-true}
+      - TIMEOUT=${TIMEOUT:-20000}
+      - DELAY_BETWEEN_USERS=${DELAY_BETWEEN_USERS:-10000}
+      - TZ=${TZ:-Europe/London}
+      - TARGET_USER_IDS=${TARGET_USER_IDS}
+    volumes:
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discord-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - 8bp-network
+    command: node playwright-claimer-discord.js --schedule
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  8bp-network:
+    driver: bridge
+

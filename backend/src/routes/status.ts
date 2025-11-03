@@ -1,5 +1,4 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import { logger } from '../services/LoggerService';
 import { DatabaseService } from '../services/DatabaseService';
 
@@ -102,12 +101,12 @@ router.get('/scheduler', async (req, res): Promise<void> => {
       return;
     } catch (importError) {
       // If import fails, return basic status
-      res.json({
+    res.json({
         status: 'unknown',
         message: 'Scheduler service unavailable',
-        schedule: '00:00, 06:00, 12:00, 18:00 UTC',
-        timezone: 'UTC'
-      });
+      schedule: '00:00, 06:00, 12:00, 18:00 UTC',
+      timezone: 'UTC'
+    });
       return;
     }
 

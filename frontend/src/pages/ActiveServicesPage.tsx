@@ -123,11 +123,11 @@ const ActiveServicesPage: React.FC = () => {
   }, []);
 
   if (!isAuthenticated) {
-    return <Navigate to="/home" replace />;
+    return <Navigate to="/8bp-rewards/home" replace />;
   }
 
   if (!isAdmin) {
-    return <Navigate to="/home" replace />;
+    return <Navigate to="/8bp-rewards/home" replace />;
   }
 
   const getStatusIcon = (status: string) => {

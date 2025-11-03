@@ -13,14 +13,12 @@ import { BlockingService } from '../services/BlockingService';
 import { checkDeviceBlocking, logDeviceInfo } from '../middleware/deviceBlocking';
 import crypto from 'crypto';
 import axios from 'axios';
+import WebSocketService from '../services/WebSocketService';
+import { isAllowedForVPS, isAllowedForTelegram, isAllowedForEmail } from '../utils/permissions';
+import { AdminRequest } from '../types/auth';
 
-// Global type declarations for in-memory storage
-declare global {
-  var vpsCodes: Map<string, { discordCode: string; telegramCode: string; emailCode: string; userEmail: string; userId: string; username: string; expiresAt: Date; attempts: number; discordMessageId?: string; telegramMessageId?: string }> | undefined;
-  var vpsAccess: Map<string, { grantedAt: Date; expiresAt: Date }> | undefined;
-  var resetLeaderboardCodes: Map<string, { discordCode: string; telegramCode: string; emailCode: string; userEmail: string; userId: string; username: string; expiresAt: Date; attempts: number; discordMessageId?: string; telegramMessageId?: string }> | undefined;
-  var resetLeaderboardAccess: Map<string, { grantedAt: Date; expiresAt: Date }> | undefined;
-}
+// VPS codes and access are now stored in the database (see DatabaseService methods)
+// Removed global in-memory storage declarations
 
 const router = express.Router();
 const dbService = DatabaseService.getInstance();
@@ -31,7 +29,12 @@ const blockingService = BlockingService.getInstance();
 router.get('/bot-status-public', async (req, res) => {
   try {
     // Make a request to the Discord bot service to get current status
-    const botServiceUrl = 'http://localhost:2700'; // Use localhost for hybrid mode
+    const discordPort = process.env.DISCORD_API_PORT || '2700';
+    // In Docker, use service name; otherwise use localhost
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 
+      (process.env.NODE_ENV === 'production' && process.env.POSTGRES_HOST === 'postgres' 
+        ? `http://discord-api:${discordPort}` 
+        : `http://localhost:${discordPort}`);
     
     try {
       const response = await axios.get(`${botServiceUrl}/api/bot-status`, {
@@ -75,15 +78,23 @@ router.get('/overview', async (req, res) => {
   try {
     const user = req.user as any;
     
-    // Get registration count
-    const totalRegistrations = await dbService.findRegistrations();
+    // Get registration count - need to get array length
+    const allRegistrations = await dbService.findRegistrations();
+    const totalRegistrationsCount = Array.isArray(allRegistrations) ? allRegistrations.length : 0;
     
-    // Get recent registrations (last 7 days)
+    // Get recent registrations (last 7 days) using direct SQL query
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const recentRegistrations = await dbService.findRegistrations({
-      createdAt: { $gte: sevenDaysAgo }
-    });
+    let recentRegistrationsCount = 0;
+    try {
+      const result = await dbService.executeQuery(
+        'SELECT COUNT(*) as count FROM registrations WHERE created_at >= $1',
+        [sevenDaysAgo]
+      );
+      recentRegistrationsCount = parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.warn('Failed to get recent registrations count', { error: error instanceof Error ? error.message : 'Unknown error' });
+    }
 
     // Get claim statistics (all-time)
     const claimStats = await dbService.getClaimStats(); // Get all-time stats
@@ -139,8 +150,8 @@ router.get('/overview', async (req, res) => {
 
     res.json({
       registrations: {
-        total: totalRegistrations.length,
-        recent: recentRegistrations.length,
+        total: totalRegistrationsCount,
+        recent: recentRegistrationsCount,
         period: '7 days'
       },
       claims: claimStats,
@@ -157,7 +168,7 @@ router.get('/overview', async (req, res) => {
     logger.error('Failed to retrieve admin overview', {
       action: 'admin_overview_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -174,6 +185,66 @@ router.get('/heartbeat/summary', async (req, res) => {
 router.get('/heartbeat/active', async (req, res) => {
   const registry = HeartbeatRegistry.getInstance();
   return res.json({ success: true, data: registry.getActiveRecords() });
+});
+
+// Get user count from database
+router.get('/user-count', async (req, res) => {
+  try {
+    await dbService.connect();
+    
+    // Get total user count
+    const query = `
+      SELECT COUNT(*) as total FROM registrations
+    `;
+    const result = await dbService.executeQuery(query);
+    const totalUsers = parseInt(result.rows[0].total);
+    
+    // Get active user count
+    const activeQuery = `
+      SELECT COUNT(*) as total 
+      FROM registrations 
+      WHERE status = 'active' OR status IS NULL
+    `;
+    const activeResult = await dbService.executeQuery(activeQuery);
+    const activeUsers = parseInt(activeResult.rows[0].total);
+    
+    // Get inactive user count
+    const inactiveQuery = `
+      SELECT COUNT(*) as total 
+      FROM registrations 
+      WHERE status != 'active' AND status IS NOT NULL
+    `;
+    const inactiveResult = await dbService.executeQuery(inactiveQuery);
+    const inactiveUsers = parseInt(inactiveResult.rows[0].total);
+    
+    // Get invalid users count
+    const invalidQuery = 'SELECT COUNT(*) as total FROM invalid_users';
+    const invalidResult = await dbService.executeQuery(invalidQuery);
+    const invalidUsers = parseInt(invalidResult.rows[0].total);
+    
+    res.json({
+      success: true,
+      data: {
+        total: totalUsers,
+        active: activeUsers,
+        inactive: inactiveUsers,
+        invalid: invalidUsers,
+        expected: 63,
+        matches: totalUsers === 63
+      }
+    });
+  } catch (error: any) {
+    logger.error('Failed to get user count', {
+      action: 'get_user_count_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user count',
+      details: error.message
+    });
+  }
 });
 
 // Get test users configuration
@@ -214,7 +285,7 @@ router.get('/test-users', async (req, res) => {
     logger.error('Failed to retrieve test users', {
       action: 'admin_test_users_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -230,18 +301,52 @@ router.get('/registrations', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 50;
     const search = req.query.search as string;
 
-    let filter = {};
+    // Use direct SQL query for PostgreSQL with search support
+    let sql = 'SELECT * FROM registrations WHERE 1=1';
+    const values: any[] = [];
+    let paramCount = 0;
+
     if (search) {
-      filter = {
-        $or: [
-          { eightBallPoolId: { $regex: search, $options: 'i' } },
-          { username: { $regex: search, $options: 'i' } }
-        ]
-      };
+      sql += ` AND (eight_ball_pool_id ILIKE $${++paramCount} OR username ILIKE $${++paramCount})`;
+      const searchPattern = `%${search}%`;
+      values.push(searchPattern, searchPattern);
     }
 
-    const registrations = await dbService.findRegistrations(filter);
-    const total = registrations.length;
+    sql += ' ORDER BY created_at DESC';
+    
+    // Apply pagination
+    const offset = (page - 1) * limit;
+    sql += ` LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+    values.push(limit, offset);
+
+    const result = await dbService.executeQuery(sql, values);
+    
+    // Get total count for pagination
+    let countSql = 'SELECT COUNT(*) as total FROM registrations WHERE 1=1';
+    const countValues: any[] = [];
+    let countParamCount = 0;
+    
+    if (search) {
+      countSql += ` AND (eight_ball_pool_id ILIKE $${++countParamCount} OR username ILIKE $${++countParamCount})`;
+      const searchPattern = `%${search}%`;
+      countValues.push(searchPattern, searchPattern);
+    }
+    
+    const countResult = await dbService.executeQuery(countSql, countValues);
+    const total = parseInt(countResult.rows[0].total);
+
+    // Map results to expected format
+    const registrations = result.rows.map((row: any) => ({
+      _id: row.id,
+      eightBallPoolId: row.eight_ball_pool_id,
+      username: row.username,
+      email: row.email,
+      discordId: row.discord_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      isActive: row.is_active,
+      metadata: row.metadata
+    }));
 
     res.json({
       registrations,
@@ -257,7 +362,7 @@ router.get('/registrations', async (req, res) => {
     logger.error('Failed to retrieve registrations for admin', {
       action: 'admin_registrations_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -288,7 +393,10 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
     }
 
     // Extract client IP with better proxy handling
-    console.log('🔍 Admin IP Detection Debug - Starting IP detection for user:', username);
+    logger.debug('Admin IP Detection Debug - Starting IP detection', {
+      action: 'admin_ip_detection',
+      username
+    });
     const clientIP = req.ip || 
                      req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
                      req.headers['x-real-ip']?.toString() ||
@@ -296,7 +404,11 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
                      req.connection?.remoteAddress ||
                      req.socket?.remoteAddress ||
                      'Admin Dashboard';
-    console.log('🔍 Admin IP Detection Debug - Final clientIP:', clientIP);
+    logger.debug('Admin IP Detection Debug - Final clientIP', {
+      action: 'admin_ip_detection',
+      username,
+      clientIP
+    });
 
     // Extract device information
     const deviceInfo = deviceDetectionService.extractDeviceInfo(req);
@@ -321,7 +433,7 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
       lastLoginAt: new Date()
     });
 
-    logger.logAdminAction((req.user as any)?.id, 'add_registration', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'add_registration', {
       eightBallPoolId,
       username
     });
@@ -360,7 +472,7 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
         logger.info('Initializing Discord service for claim', { eightBallPoolId });
         await claimer.initializeDiscord();
         
-        logger.info('Connecting to MongoDB for claim', { eightBallPoolId });
+        logger.info('Connecting to database for claim', { eightBallPoolId });
         await claimer.connectToDatabase();
         
         logger.info('Starting claim process', { eightBallPoolId });
@@ -397,7 +509,7 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
     logger.error('Failed to add registration', {
       action: 'admin_add_registration_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -422,7 +534,7 @@ router.delete('/registrations/:eightBallPoolId', async (req, res): Promise<void>
 
     await dbService.deleteRegistration(eightBallPoolId);
 
-    logger.logAdminAction((req.user as any)?.id, 'remove_registration', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'remove_registration', {
       eightBallPoolId,
       username: registration.username
     });
@@ -436,7 +548,7 @@ router.delete('/registrations/:eightBallPoolId', async (req, res): Promise<void>
     logger.error('Failed to remove registration', {
       action: 'admin_remove_registration_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id,
+      adminId: (req as AdminRequest).user?.id,
       eightBallPoolId: req.params.eightBallPoolId
     });
 
@@ -451,7 +563,7 @@ router.delete('/claim-records/failed', async (req, res): Promise<void> => {
   try {
     const deletedCount = await dbService.deleteClaimRecords({ status: 'failed' });
 
-    logger.logAdminAction((req.user as any)?.id, 'clear_failed_claims', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'clear_failed_claims', {
       deletedCount
     });
 
@@ -464,7 +576,7 @@ router.delete('/claim-records/failed', async (req, res): Promise<void> => {
     logger.error('Failed to remove failed claims', {
       action: 'admin_clear_failed_claims_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -572,7 +684,10 @@ router.get('/logs', async (req, res) => {
       
       return;
     } catch (dbError) {
-      console.error('Database query error:', dbError);
+      logger.error('Database query error', {
+        action: 'database_query_error',
+        error: dbError instanceof Error ? dbError.message : 'Unknown error'
+      });
       await pool.end();
       
       // Fallback to reading from log files
@@ -644,7 +759,7 @@ router.get('/logs', async (req, res) => {
     logger.error('Failed to retrieve logs for admin', {
       action: 'admin_logs_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -655,6 +770,39 @@ router.get('/logs', async (req, res) => {
 
 // In-memory storage for progress tracking
 const claimProgress = new Map<string, any>();
+
+// Helper function to emit claim progress via WebSocket
+function emitClaimProgressUpdate(processId: string, progress: any): void {
+  if (!progress) return;
+  
+  try {
+    const progressEvent = {
+      processId: processId,
+      status: progress.status || 'running',
+      startTime: progress.startTime instanceof Date ? progress.startTime.toISOString() : (typeof progress.startTime === 'string' ? progress.startTime : new Date().toISOString()),
+      endTime: progress.endTime instanceof Date ? progress.endTime.toISOString() : (progress.endTime || undefined),
+      currentUser: progress.currentUser || null,
+      totalUsers: progress.totalUsers || 0,
+      completedUsers: progress.completedUsers || 0,
+      failedUsers: progress.failedUsers || 0,
+      userProgress: progress.userProgress || [],
+      logs: (progress.logs || []).map((log: any) => ({
+        level: log.type || log.level || 'info',
+        message: log.message || log.toString(),
+        timestamp: log.timestamp instanceof Date ? log.timestamp.toISOString() : (log.timestamp || new Date().toISOString())
+      })),
+      exitCode: progress.exitCode
+    };
+    
+    WebSocketService.emitClaimProgress(processId, progressEvent);
+  } catch (error) {
+    logger.error('Failed to emit claim progress via WebSocket', {
+      action: 'websocket_emit_error',
+      processId,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+}
 
 // Manual claim for specific users (admin)
 router.post('/claim-users', async (req, res): Promise<any> => {
@@ -667,7 +815,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
       });
     }
 
-    logger.logAdminAction((req.user as any)?.id, 'manual_claim_users_trigger', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'manual_claim_users_trigger', {
       userIds,
       count: userIds.length,
       timestamp: new Date().toISOString()
@@ -679,7 +827,6 @@ router.post('/claim-users', async (req, res): Promise<any> => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        MONGO_URI: process.env.MONGO_URI,
         ENABLE_PROGRESS_TRACKING: 'true',
         TARGET_USER_IDS: userIds.join(',') // Pass specific user IDs
       },
@@ -690,7 +837,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
     const processId = claimProcess.pid?.toString() || Date.now().toString();
     
     // Initialize progress tracking
-    claimProgress.set(processId, {
+    const initialProgress = {
       status: 'starting',
       startTime: new Date(),
       currentUser: null,
@@ -700,7 +847,9 @@ router.post('/claim-users', async (req, res): Promise<any> => {
       userProgress: [],
       logs: [],
       targetUsers: userIds
-    });
+    };
+    claimProgress.set(processId, initialProgress);
+    emitClaimProgressUpdate(processId, initialProgress);
 
     // Log process output for debugging and progress tracking
     claimProcess.stdout.on('data', (data: Buffer) => {
@@ -769,6 +918,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
         }
 
         claimProgress.set(processId, progress);
+        emitClaimProgressUpdate(processId, progress);
       }
     });
 
@@ -789,6 +939,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
           type: 'error'
         });
         claimProgress.set(processId, progress);
+        emitClaimProgressUpdate(processId, progress);
       }
     });
 
@@ -806,6 +957,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
         progress.endTime = new Date();
         progress.exitCode = code;
         claimProgress.set(processId, progress);
+        emitClaimProgressUpdate(processId, progress);
       }
     });
 
@@ -815,7 +967,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
     logger.info('Manual claim process started for specific users', {
       action: 'manual_claim_users_started',
       pid: claimProcess.pid,
-      adminId: (req.user as any)?.id,
+      adminId: (req as AdminRequest).user?.id,
       targetUsers: userIds
     });
 
@@ -831,7 +983,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
     logger.error('Failed to trigger manual claim for specific users', {
       action: 'admin_manual_claim_users_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -843,7 +995,7 @@ router.post('/claim-users', async (req, res): Promise<any> => {
 // Manual claim trigger (admin) - keep existing functionality
 router.post('/claim-all', async (req, res) => {
   try {
-    logger.logAdminAction((req.user as any)?.id, 'manual_claim_trigger', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'manual_claim_trigger', {
       timestamp: new Date().toISOString()
     });
 
@@ -853,7 +1005,6 @@ router.post('/claim-all', async (req, res) => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        MONGO_URI: process.env.MONGO_URI,
         ENABLE_PROGRESS_TRACKING: 'true'
       },
       detached: true,
@@ -863,7 +1014,7 @@ router.post('/claim-all', async (req, res) => {
     const processId = claimProcess.pid?.toString() || Date.now().toString();
     
     // Initialize progress tracking
-    claimProgress.set(processId, {
+    const initialProgress = {
       status: 'starting',
       startTime: new Date(),
       currentUser: null,
@@ -872,7 +1023,9 @@ router.post('/claim-all', async (req, res) => {
       failedUsers: 0,
       userProgress: [],
       logs: []
-    });
+    };
+    claimProgress.set(processId, initialProgress);
+    emitClaimProgressUpdate(processId, initialProgress);
 
     // Log process output for debugging and progress tracking
     claimProcess.stdout.on('data', (data: Buffer) => {
@@ -1004,6 +1157,7 @@ router.post('/claim-all', async (req, res) => {
         }
 
         claimProgress.set(processId, progress);
+        emitClaimProgressUpdate(processId, progress);
       }
     });
 
@@ -1023,6 +1177,7 @@ router.post('/claim-all', async (req, res) => {
           type: 'error'
         });
         claimProgress.set(processId, progress);
+        emitClaimProgressUpdate(processId, progress);
       }
     });
 
@@ -1039,6 +1194,7 @@ router.post('/claim-all', async (req, res) => {
         progress.endTime = new Date();
         progress.exitCode = code;
         claimProgress.set(processId, progress);
+        emitClaimProgressUpdate(processId, progress);
       }
     });
 
@@ -1048,7 +1204,7 @@ router.post('/claim-all', async (req, res) => {
     logger.info('Manual claim process started', {
       action: 'manual_claim_started',
       pid: claimProcess.pid,
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.json({
@@ -1062,7 +1218,7 @@ router.post('/claim-all', async (req, res) => {
     logger.error('Failed to trigger manual claim', {
       action: 'admin_manual_claim_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -1164,7 +1320,7 @@ router.get('/claim-totals', async (req, res) => {
     logger.error('Failed to retrieve claim totals', {
       action: 'admin_claim_totals_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -1227,7 +1383,7 @@ router.get('/search', async (req, res): Promise<void> => {
     logger.error('Admin search failed', {
       action: 'admin_search_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id,
+      adminId: (req as AdminRequest).user?.id,
       query: req.query.q
     });
 
@@ -1242,7 +1398,7 @@ router.post('/notifications/toggle', async (req, res) => {
   try {
     const { enabled } = req.body;
 
-    logger.logAdminAction((req.user as any)?.id, 'toggle_notifications', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'toggle_notifications', {
       enabled,
       timestamp: new Date().toISOString()
     });
@@ -1257,7 +1413,7 @@ router.post('/notifications/toggle', async (req, res) => {
     logger.error('Failed to toggle notifications', {
       action: 'admin_toggle_notifications_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -1296,9 +1452,10 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
                        'Admin Dashboard';
 
       // Block all devices associated with this user
+      const adminId = (req as AdminRequest).user?.id || 'admin';
       const blockedDevices = await blockingService.blockUserByEightBallPoolId(
         eightBallPoolId,
-        (req.user as any)?.id || 'admin',
+        adminId,
         reason || 'Blocked by admin'
       );
 
@@ -1307,7 +1464,7 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
         eightBallPoolId,
         username: registration.username,
         blockedDevicesCount: blockedDevices.length,
-        adminId: (req.user as any)?.id,
+        adminId: (req as AdminRequest).user?.id,
         reason
       });
     } else {
@@ -1326,11 +1483,11 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
         eightBallPoolId,
         username: registration.username,
         unblockedDevicesCount: userBlockedDevices.length,
-        adminId: (req.user as any)?.id
+        adminId: (req as AdminRequest).user?.id
       });
     }
 
-    logger.logAdminAction((req.user as any)?.id, isBlocked ? 'block_user' : 'unblock_user', {
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', isBlocked ? 'block_user' : 'unblock_user', {
       eightBallPoolId,
       username: registration.username,
       reason
@@ -1353,7 +1510,7 @@ router.post('/users/:eightBallPoolId/block', async (req, res): Promise<void> => 
     logger.error('Failed to block/unblock user', {
       action: 'admin_block_user_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
 
     res.status(500).json({
@@ -1388,7 +1545,7 @@ router.get('/blocked-devices', authenticateAdmin, async (req, res): Promise<void
     logger.error('Failed to get blocked devices', {
       action: 'get_blocked_devices_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
     
     res.status(500).json({
@@ -1419,7 +1576,7 @@ router.post('/blocked-devices/:deviceId/unblock', authenticateAdmin, async (req,
       action: 'unblock_device_error',
       error: error instanceof Error ? error.message : 'Unknown error',
       deviceId: req.params.deviceId,
-      adminId: (req.user as any)?.id
+      adminId: (req as AdminRequest).user?.id
     });
     
     res.status(500).json({
@@ -1429,32 +1586,8 @@ router.post('/blocked-devices/:deviceId/unblock', authenticateAdmin, async (req,
 });
 
 // VPS Monitor Multi-Channel Authentication System
-interface VPSCode {
-  discordCode: string;
-  telegramCode: string;
-  emailCode: string;
-  userEmail: string;
-  userId: string;
-  username: string;
-  expiresAt: Date;
-  discordMessageId?: string;
-  telegramMessageId?: string;
-  isUsed: boolean;
-}
-
-// In-memory storage for VPS codes (in production, use Redis or database)
-// Key format: userId, Value: VPSCode object
-const vpsCodes = new Map<string, VPSCode>();
-
-// Clean up expired codes every minute
-setInterval(() => {
-  const now = new Date();
-  for (const [userId, vpsCode] of vpsCodes.entries()) {
-    if (vpsCode.expiresAt < now) {
-      vpsCodes.delete(userId);
-    }
-  }
-}, 60000);
+// Codes and access are now stored in the database via DatabaseService
+// Cleanup runs via DatabaseService.cleanupExpiredVPSCodes() (should be scheduled via cron)
 
 // Generate 16-character random code
 function generateVPSCode(): string {
@@ -1466,27 +1599,7 @@ function generate6DigitPin(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Check if user is allowed VPS access
-function isAllowedForVPS(userId: string): boolean {
-  const allowedAdmins = process.env.ALLOWED_VPS_ADMINS?.split(',').map(id => id.trim()) || [];
-  return allowedAdmins.includes(userId);
-}
-
-// Check if user is allowed Telegram access (by Discord user ID)
-function isAllowedForTelegram(discordUserId: string): boolean {
-  const allowedVpsAdmins = process.env.ALLOWED_VPS_ADMINS?.split(',').map(id => id.trim()) || [];
-  return allowedVpsAdmins.includes(discordUserId);
-}
-
-// Check if user's email is allowed for email authentication
-function isAllowedForEmail(userEmail: string): boolean {
-  if (!userEmail) return false;
-  
-  const allowedEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim().toLowerCase()) || [];
-  if (allowedEmails.length === 0) return false; // No emails configured
-  
-  return allowedEmails.includes(userEmail.toLowerCase());
-}
+// Permission functions moved to utils/permissions.ts
 
 // Request VPS access codes (Discord or Telegram)
 router.post('/vps/request-access', async (req, res) => {
@@ -1497,7 +1610,8 @@ router.post('/vps/request-access', async (req, res) => {
     const { channel, email } = req.body; // 'discord', 'telegram', or undefined for both, plus optional email
 
     // Debug logging (can be removed in production)
-    console.log('VPS request access debug:', {
+    logger.debug('VPS request access debug', {
+      action: 'vps_request_debug',
       hasUser: !!user,
       userId,
       username,
@@ -1520,38 +1634,42 @@ router.post('/vps/request-access', async (req, res) => {
       });
     }
 
-    // Get or create codes for this user
-    let vpsCode = vpsCodes.get(userId);
+    // Get or create codes for this user from database
+    let vpsCodeData = await dbService.getVPSCode(userId);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    if (!vpsCode) {
+    let discordCode: string;
+    let telegramCode: string;
+    let emailCode: string;
+    let discordMessageId: string | undefined;
+    let telegramMessageId: string | undefined;
+
+    if (!vpsCodeData || vpsCodeData.isUsed) {
       // Generate new codes
-      const discordCode = generateVPSCode();
-      const telegramCode = generateVPSCode();
-      const emailCode = generate6DigitPin();
-      
-      vpsCode = {
-        discordCode,
-        telegramCode,
-        emailCode,
-        userEmail: email || user.email || '', // Use provided email or Discord email
-        userId,
-        username,
-        expiresAt,
-        isUsed: false
-      };
-      
-      vpsCodes.set(userId, vpsCode);
+      discordCode = generateVPSCode();
+      telegramCode = generateVPSCode();
+      emailCode = generate6DigitPin();
     } else {
-      // Update expiration time and regenerate email code if requested
-      vpsCode.expiresAt = expiresAt;
-      if (!vpsCode.emailCode) {
-        vpsCode.emailCode = generate6DigitPin();
-      }
-      if (!vpsCode.userEmail) {
-        vpsCode.userEmail = user.email || '';
-      }
+      // Reuse existing codes
+      discordCode = vpsCodeData.discordCode;
+      telegramCode = vpsCodeData.telegramCode;
+      emailCode = vpsCodeData.emailCode || generate6DigitPin();
+      discordMessageId = vpsCodeData.discordMessageId;
+      telegramMessageId = vpsCodeData.telegramMessageId;
     }
+    
+    // Store codes in database
+    await dbService.storeVPSCode({
+      userId,
+      discordCode,
+      telegramCode,
+      emailCode,
+      userEmail: email || user.email || '',
+      username,
+      expiresAt,
+      discordMessageId,
+      telegramMessageId
+    });
 
     let discordSent = false;
     let telegramSent = false;
@@ -1564,20 +1682,49 @@ router.post('/vps/request-access', async (req, res) => {
         const discordMessage = await discordService.sendDirectMessage(
           userId,
           `🔐 **VPS Monitor Access Code (Discord)**\n\n` +
-          `Your Discord access code is: **${vpsCode.discordCode}**\n` +
+          `Your Discord access code is: **${discordCode}**\n` +
           `This code expires in 5 minutes.\n\n` +
           `⚠️ **Security Notice**: This code is required for VPS Monitor access.`
         );
 
-        discordSent = discordMessage !== null;
+        discordSent = discordMessage !== null && discordMessage !== undefined;
+        
+        logger.info('Discord code sending attempt', {
+          action: 'discord_code_send_attempt',
+          userId,
+          username,
+          discordSent,
+          hasMessage: !!discordMessage,
+          messageId: discordMessage?.id
+        });
         
         // Store Discord message ID for cleanup
         if (discordMessage && discordMessage.id) {
-          vpsCode.discordMessageId = discordMessage.id;
+          discordMessageId = discordMessage.id;
+          // Update in database
+          await dbService.storeVPSCode({
+            userId,
+            discordCode,
+            telegramCode,
+            emailCode,
+            userEmail: email || user.email || '',
+            username,
+            expiresAt,
+            discordMessageId: discordMessage.id,
+            telegramMessageId
+          });
         }
 
       } catch (discordError) {
-        console.error('Failed to send Discord DM:', discordError);
+        logger.error('Failed to send Discord DM', {
+          action: 'discord_dm_error',
+          userId,
+          username,
+          error: discordError instanceof Error ? discordError.message : 'Unknown error',
+          stack: discordError instanceof Error ? discordError.stack : undefined,
+          hasToken: !!process.env.DISCORD_TOKEN
+        });
+        discordSent = false;
       }
     }
 
@@ -1606,7 +1753,7 @@ router.post('/vps/request-access', async (req, res) => {
           const telegramMessage = await telegramService.sendDirectMessage(
             telegramUserId,
             `🔐 *VPS Monitor Access Code (Telegram)*\n\n` +
-            `Your Telegram access code is: *${vpsCode.telegramCode}*\n` +
+            `Your Telegram access code is: *${telegramCode}*\n` +
             `This code expires in 5 minutes.\n\n` +
             `⚠️ *Security Notice*: This code is required for VPS Monitor access.`
           );
@@ -1615,18 +1762,36 @@ router.post('/vps/request-access', async (req, res) => {
           
           // Store Telegram message ID for cleanup
           if (telegramMessage && telegramMessage.id) {
-            vpsCode.telegramMessageId = telegramMessage.id;
+            telegramMessageId = telegramMessage.id;
+            // Update in database
+            await dbService.storeVPSCode({
+              userId,
+              discordCode,
+              telegramCode,
+              emailCode,
+              userEmail: email || user.email || '',
+              username,
+              expiresAt,
+              discordMessageId,
+              telegramMessageId: telegramMessage.id
+            });
           }
         } else {
           logger.warn('No Telegram mapping found for Discord user', {
             action: 'telegram_mapping_not_found',
             userId,
-            username
+            username,
+            hasMapping: !!process.env.DISCORD_TO_TELEGRAM_MAPPING
           });
         }
 
       } catch (telegramError) {
-        console.error('Failed to send Telegram DM:', telegramError);
+        logger.error('Failed to send Telegram DM', {
+          action: 'telegram_dm_error',
+          userId,
+          username,
+          error: telegramError instanceof Error ? telegramError.message : 'Unknown error'
+        });
         logger.warn('Telegram bot not working', {
           action: 'telegram_error',
           userId,
@@ -1644,14 +1809,107 @@ router.post('/vps/request-access', async (req, res) => {
     }
 
     // Send Email code if requested
-    if ((!channel || channel === 'email') && vpsCode.userEmail) {
+    // Use email from ADMIN_EMAILS mapped to Discord user ID, not from Discord OAuth profile
+    const allowedEmails = process.env.ADMIN_EMAILS?.split(',').map((e: string) => e.trim()) || [];
+    let vpsUserEmail = email || '';
+    
+    // If no email provided, try to map Discord user ID to email from DISCORD_TO_EMAIL_MAPPING
+    // Format: DISCORD_TO_EMAIL_MAPPING=discord_id1:email1,discord_id2:email2
+    if (!vpsUserEmail) {
+      const emailMappingEnv = process.env.DISCORD_TO_EMAIL_MAPPING || '';
+      const emailMapping: Record<string, string> = {};
+      
+      if (emailMappingEnv) {
+        emailMappingEnv.split(',').forEach(mapping => {
+          const [discordId, emailAddr] = mapping.trim().split(':');
+          if (discordId && emailAddr) {
+            emailMapping[discordId.trim()] = emailAddr.trim();
+          }
+        });
+      }
+      
+      // Check if there's a mapping for this user
+      if (emailMapping[userId]) {
+        vpsUserEmail = emailMapping[userId];
+        logger.info('Email mapped from DISCORD_TO_EMAIL_MAPPING', {
+          action: 'email_mapped_from_config',
+          userId,
+          username,
+          mappedEmail: vpsUserEmail
+        });
+      } else if (allowedEmails.length === 1) {
+        // Fallback: if only one email configured, use it
+        vpsUserEmail = allowedEmails[0];
+        logger.info('No email mapping found, using single email from ADMIN_EMAILS', {
+          action: 'email_auto_selected',
+          userId,
+          username,
+          selectedEmail: vpsUserEmail
+        });
+      }
+    }
+    
+    // Log email request attempt
+    logger.info('Email code request attempt', {
+      action: 'email_code_request_attempt',
+      userId,
+      username,
+      channel,
+      hasEmailParam: !!email,
+      vpsUserEmail: vpsUserEmail || 'MISSING',
+      allowedEmails: allowedEmails.map(e => e.toLowerCase()),
+      adminEmailsCount: allowedEmails.length
+    });
+    
+    if (channel === 'email' && !vpsUserEmail) {
+      logger.error('Email code requested but no email provided', {
+        action: 'email_code_no_email',
+        userId,
+        username,
+        hasEmailParam: !!email,
+        adminEmailsCount: allowedEmails.length,
+        adminEmails: allowedEmails
+      });
+      
+      if (allowedEmails.length === 0) {
+        return res.status(400).json({
+          error: 'Email authentication is not configured. No admin emails found in ADMIN_EMAILS.',
+          details: 'Please configure ADMIN_EMAILS in your environment variables.'
+        });
+      } else if (allowedEmails.length > 1) {
+        // Check if DISCORD_TO_EMAIL_MAPPING is configured
+        const emailMappingEnv = process.env.DISCORD_TO_EMAIL_MAPPING || '';
+        if (!emailMappingEnv) {
+          return res.status(400).json({
+            error: 'Email address is required. Multiple admin emails are configured but DISCORD_TO_EMAIL_MAPPING is not set.',
+            details: `Please configure DISCORD_TO_EMAIL_MAPPING in your .env file. Format: DISCORD_TO_EMAIL_MAPPING=discord_id1:email1,discord_id2:email2`,
+            availableEmails: allowedEmails
+          });
+        }
+        // If mapping exists but user not found, return specific error
+        return res.status(400).json({
+          error: 'Email address is required. Your Discord user ID is not mapped to an email in DISCORD_TO_EMAIL_MAPPING.',
+          details: `Please contact an administrator to add your Discord ID (${userId}) to DISCORD_TO_EMAIL_MAPPING.`,
+          userId,
+          availableEmails: allowedEmails
+        });
+      } else {
+        return res.status(400).json({
+          error: 'Email address is required for email authentication.',
+          details: 'Please provide your email address.'
+        });
+      }
+    }
+    
+    if ((!channel || channel === 'email') && vpsUserEmail) {
       // Check if user's email is in the allowed list
-      if (!isAllowedForEmail(vpsCode.userEmail)) {
+      if (!isAllowedForEmail(vpsUserEmail)) {
         logger.warn('Email not in ADMIN_EMAILS whitelist', {
           action: 'email_not_whitelisted',
           userId,
           username,
-          email: vpsCode.userEmail
+          email: vpsUserEmail,
+          allowedEmails: process.env.ADMIN_EMAILS?.split(',').map((e: string) => e.trim().toLowerCase()) || []
         });
         
         if (channel === 'email') {
@@ -1659,48 +1917,99 @@ router.post('/vps/request-access', async (req, res) => {
             error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
           });
         }
+        emailSent = false;
       } else {
         try {
           const emailService = new EmailNotificationService();
           
           if (emailService.isConfigured()) {
+            logger.info('Attempting to send email code', {
+              action: 'email_send_attempt',
+              userId,
+              username,
+              email: vpsUserEmail,
+              smtpHost: process.env.SMTP_HOST
+            });
+            
             emailSent = await emailService.sendPinCode(
-              vpsCode.userEmail,
-              vpsCode.emailCode,
+              vpsUserEmail,
+              emailCode,
               'VPS Monitor Access'
             );
             
+            // Update the database with the email address used
+            if (emailSent && vpsUserEmail) {
+              await dbService.storeVPSCode({
+                userId,
+                discordCode,
+                telegramCode,
+                emailCode,
+                userEmail: vpsUserEmail,
+                username,
+                expiresAt,
+                discordMessageId,
+                telegramMessageId
+              });
+            }
+            
             if (emailSent) {
-              logger.info('VPS access email code sent', {
+              logger.info('VPS access email code sent successfully', {
                 action: 'vps_email_sent',
                 userId,
                 username,
-                email: vpsCode.userEmail
+                email: vpsUserEmail
+              });
+            } else {
+              logger.warn('Email service returned false (email not sent)', {
+                action: 'email_send_returned_false',
+                userId,
+                username,
+                email: vpsUserEmail
               });
             }
           } else {
             logger.warn('Email service not configured', {
               action: 'email_not_configured',
               userId,
-              username
+              username,
+              hasHost: !!process.env.SMTP_HOST,
+              hasUser: !!process.env.SMTP_USER,
+              hasPass: !!process.env.SMTP_PASS,
+              hasFrom: !!process.env.MAIL_FROM
             });
+            emailSent = false;
           }
         } catch (emailError) {
-          console.error('Failed to send email:', emailError);
-          logger.warn('Email sending failed', {
-            action: 'email_error',
+          logger.error('Failed to send email - exception thrown', {
+            action: 'email_send_error',
             userId,
             username,
-            error: emailError instanceof Error ? emailError.message : 'Unknown error'
+            email: vpsUserEmail,
+            error: emailError instanceof Error ? emailError.message : 'Unknown error',
+            stack: emailError instanceof Error ? emailError.stack : undefined,
+            smtpConfigured: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+            errorType: emailError?.constructor?.name || 'Unknown'
           });
+          emailSent = false;
         }
       }
+    } else if (channel === 'email') {
+      // Channel is email but no email available
+      emailSent = false;
     }
 
     // Check if the requested channel succeeded
     if (channel === 'discord' && !discordSent) {
+      logger.error('Discord code sending failed for user', {
+        action: 'discord_code_send_failed',
+        userId,
+        username,
+        channel,
+        hasToken: !!process.env.DISCORD_TOKEN
+      });
       return res.status(500).json({
-        error: 'Failed to send Discord access code. Please try again.'
+        error: 'Failed to send Discord access code. Please check logs and try again.',
+        details: 'Discord DM failed to send. Check backend logs for details.'
       });
     }
     
@@ -1711,8 +2020,28 @@ router.post('/vps/request-access', async (req, res) => {
     }
     
     if (channel === 'email' && !emailSent) {
+      logger.error('Email code sending failed - returning error', {
+        action: 'email_code_final_check_failed',
+        userId,
+        username,
+        vpsUserEmail: vpsUserEmail || 'MISSING',
+        hasEmail: !!vpsUserEmail,
+        emailAllowed: vpsUserEmail ? isAllowedForEmail(vpsUserEmail) : false
+      });
+      
+      // Provide more specific error message
+      let errorMessage = 'Failed to send email access code.';
+      if (!vpsUserEmail) {
+        errorMessage = 'Email address is required but not found. Please provide your email.';
+      } else if (!isAllowedForEmail(vpsUserEmail)) {
+        errorMessage = 'Your email is not authorized for email authentication.';
+      } else {
+        errorMessage = 'Failed to send email access code. Please check your email configuration and try again.';
+      }
+      
       return res.status(500).json({
-        error: 'Failed to send email access code. Please check your email configuration.'
+        error: errorMessage,
+        details: vpsUserEmail ? `Attempted to send to: ${vpsUserEmail}` : 'No email address available'
       });
     }
 
@@ -1732,14 +2061,21 @@ router.post('/vps/request-access', async (req, res) => {
       discordSent,
       telegramSent,
       emailSent,
-      userEmail: vpsCode.userEmail || null,
+      userEmail: email || user.email || null,
       expiresIn: 5 * 60 * 1000 // 5 minutes in milliseconds
     });
 
   } catch (error) {
-    console.error('VPS access request error:', error);
+    logger.error('VPS access request error', {
+      action: 'vps_access_request_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      userId: (req.user as any)?.id,
+      username: (req.user as any)?.username
+    });
     return res.status(500).json({
-      error: 'Failed to process access request'
+      error: 'Failed to process access request',
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -1761,25 +2097,25 @@ router.post('/vps/verify-access', async (req, res) => {
       });
     }
 
-    // Find the codes for this user
-    const vpsCode = vpsCodes.get(userId);
+    // Find the codes for this user from database
+    const vpsCodeData = await dbService.getVPSCode(userId);
     
-    if (!vpsCode) {
+    if (!vpsCodeData) {
       return res.status(400).json({
         error: 'No access codes found. Please request access first.'
       });
     }
 
     // Check if codes are expired
-    if (vpsCode.expiresAt < new Date()) {
-      vpsCodes.delete(userId);
+    if (vpsCodeData.expiresAt < new Date()) {
+      await dbService.deleteVPSCode(userId);
       return res.status(400).json({
         error: 'Access codes have expired. Please request new codes.'
       });
     }
 
     // Check if codes are already used
-    if (vpsCode.isUsed) {
+    if (vpsCodeData.isUsed) {
       return res.status(400).json({
         error: 'Access codes have already been used'
       });
@@ -1789,7 +2125,8 @@ router.post('/vps/verify-access', async (req, res) => {
 
     // Verify Email code if provided
     if (hasEmail && !hasDiscordTelegram) {
-      if (vpsCode.emailCode !== emailCode.trim()) {
+      if (vpsCodeData.emailCode !== emailCode.trim()) {
+        await dbService.incrementVPSCodeAttempts(userId);
         return res.status(400).json({
           error: 'Invalid email access code.'
         });
@@ -1799,7 +2136,8 @@ router.post('/vps/verify-access', async (req, res) => {
     // Verify Discord + Telegram codes if provided
     else if (hasDiscordTelegram) {
       // Verify Discord code
-      if (vpsCode.discordCode !== discordCode.toUpperCase()) {
+      if (vpsCodeData.discordCode !== discordCode.toUpperCase()) {
+        await dbService.incrementVPSCodeAttempts(userId);
         return res.status(400).json({
           error: 'Invalid Discord access code.'
         });
@@ -1807,7 +2145,8 @@ router.post('/vps/verify-access', async (req, res) => {
 
       // Verify Telegram code (only if user is allowed for Telegram)
       if (isAllowedForTelegram(userId)) {
-        if (vpsCode.telegramCode !== telegramCode.toUpperCase()) {
+        if (vpsCodeData.telegramCode !== telegramCode.toUpperCase()) {
+          await dbService.incrementVPSCodeAttempts(userId);
           return res.status(400).json({
             error: 'Invalid Telegram access code.'
           });
@@ -1816,6 +2155,7 @@ router.post('/vps/verify-access', async (req, res) => {
       } else {
         // If user is not allowed for Telegram, they should not have a Telegram code
         if (telegramCode && telegramCode.trim()) {
+          await dbService.incrementVPSCodeAttempts(userId);
           return res.status(400).json({
             error: 'You are not authorized to use Telegram authentication.'
           });
@@ -1824,8 +2164,8 @@ router.post('/vps/verify-access', async (req, res) => {
       }
     }
 
-    // Mark codes as used
-    vpsCode.isUsed = true;
+    // Mark codes as used in database
+    await dbService.markVPSCodeAsUsed(userId);
 
     // Send approval messages and schedule cleanup
     try {
@@ -1833,18 +2173,18 @@ router.post('/vps/verify-access', async (req, res) => {
       if (verificationMethod === 'email') {
         // Send email approval
         const emailService = new EmailNotificationService();
-        if (emailService.isConfigured() && vpsCode.userEmail) {
+        if (emailService.isConfigured() && vpsCodeData.userEmail) {
           await emailService.sendPinCode(
-            vpsCode.userEmail,
+            vpsCodeData.userEmail,
             '✅ ACCESS GRANTED',
             'VPS Monitor Access Approved'
           );
         }
 
         logger.logAdminAction(userId, 'vps_access_granted', {
-          username: vpsCode.username,
+          username: vpsCodeData.username,
           verificationMethod: 'email',
-          emailUsed: vpsCode.userEmail
+          emailUsed: vpsCodeData.userEmail
         });
       } else {
         // Send Discord/Telegram approval messages
@@ -1852,19 +2192,27 @@ router.post('/vps/verify-access', async (req, res) => {
         const telegramService = new TelegramNotificationService();
         
         // Delete the original code messages
-        if (vpsCode.discordMessageId) {
+        if (vpsCodeData.discordMessageId) {
           try {
-            await discordService.deleteMessage(userId, vpsCode.discordMessageId);
+            await discordService.deleteMessage(userId, vpsCodeData.discordMessageId);
           } catch (deleteError) {
-            console.error('Failed to delete Discord code message:', deleteError);
+            logger.error('Failed to delete Discord code message', {
+              action: 'delete_discord_message_error',
+              userId,
+              error: deleteError instanceof Error ? deleteError.message : 'Unknown error'
+            });
           }
         }
 
-        if (vpsCode.telegramMessageId) {
+        if (vpsCodeData.telegramMessageId) {
           try {
-            await telegramService.deleteMessage(userId, vpsCode.telegramMessageId);
+            await telegramService.deleteMessage(userId, vpsCodeData.telegramMessageId);
           } catch (deleteError) {
-            console.error('Failed to delete Telegram code message:', deleteError);
+            logger.error('Failed to delete Telegram code message', {
+              action: 'delete_telegram_message_error',
+              userId,
+              error: deleteError instanceof Error ? deleteError.message : 'Unknown error'
+            });
           }
         }
 
@@ -1896,7 +2244,10 @@ router.post('/vps/verify-access', async (req, res) => {
               try {
                 await telegramService.deleteMessage(userId, telegramApproval.id!);
               } catch (deleteError) {
-                console.error('Failed to delete Telegram approval message:', deleteError);
+                logger.error('Failed to delete Telegram approval message', {
+                  action: 'delete_telegram_message_error',
+                  error: deleteError instanceof Error ? deleteError.message : 'Unknown error'
+                });
               }
             }, 24 * 60 * 60 * 1000); // 24 hours
           }
@@ -1908,21 +2259,31 @@ router.post('/vps/verify-access', async (req, res) => {
             try {
               await discordService.deleteMessage(userId, discordApproval.id!);
             } catch (deleteError) {
-              console.error('Failed to delete Discord approval message:', deleteError);
+              logger.error('Failed to delete Discord approval message', {
+                action: 'delete_discord_message_error',
+                error: deleteError instanceof Error ? deleteError.message : 'Unknown error'
+              });
             }
           }, 24 * 60 * 60 * 1000); // 24 hours
         }
 
         logger.logAdminAction(userId, 'vps_access_granted', {
-          username: vpsCode.username,
+          username: vpsCodeData.username,
           verificationMethod,
           discordCodeUsed: discordCode,
           telegramCodeUsed: telegramCode
         });
       }
 
-      // Clean up the codes
-      vpsCodes.delete(userId);
+      // Grant access (store in database)
+      const accessExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      await dbService.storeVPSAccess({
+        userId,
+        expiresAt: accessExpiresAt
+      });
+
+      // Clean up the codes from database (already marked as used)
+      await dbService.deleteVPSCode(userId);
 
       return res.json({
         message: `Access granted - ${verificationMethod === 'email' ? 'email code' : 'codes'} verified successfully`,
@@ -1930,14 +2291,20 @@ router.post('/vps/verify-access', async (req, res) => {
       });
 
     } catch (approvalError) {
-      console.error('Failed to send approval messages:', approvalError);
+      logger.error('Failed to send approval messages', {
+        action: 'approval_messages_error',
+        error: approvalError instanceof Error ? approvalError.message : 'Unknown error'
+      });
       return res.status(500).json({
         error: 'Access granted but failed to send confirmation messages'
       });
     }
 
   } catch (error) {
-    console.error('VPS access verification error:', error);
+    logger.error('VPS access verification error', {
+      action: 'vps_access_verification_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return res.status(500).json({
       error: 'Failed to verify access codes'
     });
@@ -1953,8 +2320,8 @@ router.get('/vps/access-status', async (req, res) => {
     // Check if user is allowed VPS access
     const isAllowed = isAllowedForVPS(userId);
     
-    // Check if user has active codes
-    const userVpsCode = vpsCodes.get(userId);
+    // Check if user has active codes from database
+    const userVpsCode = await dbService.getVPSCode(userId);
     const hasActiveCodes = userVpsCode && !userVpsCode.isUsed && userVpsCode.expiresAt > new Date();
     
     res.json({
@@ -1964,7 +2331,10 @@ router.get('/vps/access-status', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('VPS access status error:', error);
+    logger.error('VPS access status error', {
+      action: 'vps_access_status_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       error: 'Failed to check access status'
     });
@@ -1996,7 +2366,10 @@ router.post('/vps/test-discord', async (req, res) => {
     });
 
   } catch (error: any) {
-    console.error('Discord bot test error:', error);
+    logger.error('Discord bot test error', {
+      action: 'discord_bot_test_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return res.status(500).json({
       error: 'Failed to send test message',
       details: error.message
@@ -2029,7 +2402,10 @@ router.post('/vps/test-telegram', async (req, res) => {
     });
 
   } catch (error: any) {
-    console.error('Telegram bot test error:', error);
+    logger.error('Telegram bot test error', {
+      action: 'telegram_bot_test_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return res.status(500).json({
       error: 'Failed to send test message',
       details: error.message
@@ -2107,41 +2483,42 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
       });
     }
 
-    // Get or create codes for this user
-    let resetCode = global.resetLeaderboardCodes?.get(userId);
+    // Get or create codes for this user from database
+    let resetCodeData = await dbService.getResetLeaderboardCode(userId);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    if (!resetCode) {
+    let discordCode: string;
+    let telegramCode: string;
+    let emailCode: string;
+    let discordMessageId: string | undefined;
+    let telegramMessageId: string | undefined;
+
+    if (!resetCodeData || resetCodeData.isUsed) {
       // Generate new codes
-      const discordCode = generateVPSCode();
-      const telegramCode = generateVPSCode();
-      const emailCode = generate6DigitPin();
-      
-      resetCode = {
-        discordCode,
-        telegramCode,
-        emailCode,
-        userEmail: user.email || '',
-        userId,
-        username,
-        expiresAt,
-        attempts: 0
-      };
-      
-      if (!global.resetLeaderboardCodes) {
-        global.resetLeaderboardCodes = new Map();
-      }
-      global.resetLeaderboardCodes.set(userId, resetCode);
+      discordCode = generateVPSCode();
+      telegramCode = generateVPSCode();
+      emailCode = generate6DigitPin();
     } else {
-      // Update expiration time and regenerate email code if requested
-      resetCode.expiresAt = expiresAt;
-      if (!resetCode.emailCode) {
-        resetCode.emailCode = generate6DigitPin();
-      }
-      if (!resetCode.userEmail) {
-        resetCode.userEmail = user.email || '';
-      }
+      // Reuse existing codes
+      discordCode = resetCodeData.discordCode;
+      telegramCode = resetCodeData.telegramCode;
+      emailCode = resetCodeData.emailCode || generate6DigitPin();
+      discordMessageId = resetCodeData.discordMessageId;
+      telegramMessageId = resetCodeData.telegramMessageId;
     }
+    
+    // Store codes in database
+    await dbService.storeResetLeaderboardCode({
+      userId,
+      discordCode,
+      telegramCode,
+      emailCode,
+      userEmail: user.email || '',
+      username,
+      expiresAt,
+      discordMessageId,
+      telegramMessageId
+    });
 
     let discordSent = false;
     let telegramSent = false;
@@ -2154,7 +2531,7 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
         const discordMessage = await discordService.sendDirectMessage(
           userId,
           `🔐 **Reset Leaderboard Access Code (Discord)**\n\n` +
-          `Your Discord access code is: **${resetCode.discordCode}**\n` +
+          `Your Discord access code is: **${discordCode}**\n` +
           `This code expires in 5 minutes.\n\n` +
           `⚠️ **Security Notice**: This code is required for leaderboard reset access.`
         );
@@ -2163,11 +2540,28 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
         
         // Store Discord message ID for cleanup
         if (discordMessage && discordMessage.id) {
-          resetCode.discordMessageId = discordMessage.id;
+          discordMessageId = discordMessage.id;
+          // Update in database
+          await dbService.storeResetLeaderboardCode({
+            userId,
+            discordCode,
+            telegramCode,
+            emailCode,
+            userEmail: user.email || '',
+            username,
+            expiresAt,
+            discordMessageId: discordMessage.id,
+            telegramMessageId
+          });
         }
 
       } catch (discordError) {
-        console.error('Failed to send Discord DM:', discordError);
+        logger.error('Failed to send Discord DM', {
+          action: 'discord_dm_error',
+          userId,
+          username,
+          error: discordError instanceof Error ? discordError.message : 'Unknown error'
+        });
       }
     }
 
@@ -2181,7 +2575,7 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
         const telegramMessage = await telegramService.sendDirectMessage(
           telegramUserId,
           `🔐 *Reset Leaderboard Access Code (Telegram)*\n\n` +
-          `Your Telegram access code is: *${resetCode.telegramCode}*\n` +
+          `Your Telegram access code is: *${telegramCode}*\n` +
           `This code expires in 5 minutes.\n\n` +
           `⚠️ *Security Notice*: This code is required for leaderboard reset access.`
         );
@@ -2190,11 +2584,28 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
         
         // Store Telegram message ID for cleanup
         if (telegramMessage && telegramMessage.id) {
-          resetCode.telegramMessageId = telegramMessage.id;
+          telegramMessageId = telegramMessage.id;
+          // Update in database
+          await dbService.storeResetLeaderboardCode({
+            userId,
+            discordCode,
+            telegramCode,
+            emailCode,
+            userEmail: user.email || '',
+            username,
+            expiresAt,
+            discordMessageId,
+            telegramMessageId: telegramMessage.id
+          });
         }
 
       } catch (telegramError) {
-        console.error('Failed to send Telegram DM:', telegramError);
+        logger.error('Failed to send Telegram DM', {
+          action: 'telegram_dm_error',
+          userId,
+          username,
+          error: telegramError instanceof Error ? telegramError.message : 'Unknown error'
+        });
         logger.warn('Telegram bot not working', {
           action: 'telegram_error',
           userId,
@@ -2212,14 +2623,15 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
     }
 
     // Send Email code if requested
-    if ((!channel || channel === 'email') && resetCode.userEmail) {
+    const resetUserEmail = user.email || '';
+    if ((!channel || channel === 'email') && resetUserEmail) {
       // Check if user's email is in the allowed list
-      if (!isAllowedForEmail(resetCode.userEmail)) {
+      if (!isAllowedForEmail(resetUserEmail)) {
         logger.warn('Email not in ADMIN_EMAILS whitelist for leaderboard reset', {
           action: 'email_not_whitelisted',
           userId,
           username,
-          email: resetCode.userEmail
+          email: resetUserEmail
         });
         
         if (channel === 'email') {
@@ -2233,8 +2645,8 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
           
           if (emailService.isConfigured()) {
             emailSent = await emailService.sendPinCode(
-              resetCode.userEmail,
-              resetCode.emailCode,
+              resetUserEmail,
+              emailCode,
               'Leaderboard Reset Access'
             );
             
@@ -2243,7 +2655,7 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
                 action: 'reset_leaderboard_email_sent',
                 userId,
                 username,
-                email: resetCode.userEmail
+                email: resetUserEmail
               });
             }
           } else {
@@ -2254,7 +2666,12 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
             });
           }
         } catch (emailError) {
-          console.error('Failed to send email:', emailError);
+          logger.error('Failed to send email', {
+            action: 'email_send_error',
+            userId,
+            username,
+            error: emailError instanceof Error ? emailError.message : 'Unknown error'
+          });
           logger.warn('Email sending failed', {
             action: 'email_error',
             userId,
@@ -2300,12 +2717,15 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
       discordSent,
       telegramSent,
       emailSent,
-      userEmail: resetCode.userEmail || null,
+      userEmail: user.email || null,
       expiresIn: 5 * 60 * 1000 // 5 minutes in milliseconds
     });
 
   } catch (error) {
-    console.error('Reset leaderboard access request error:', error);
+    logger.error('Reset leaderboard access request error', {
+      action: 'reset_leaderboard_request_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     return res.status(500).json({
       error: 'Failed to process access request'
     });
@@ -2326,14 +2746,8 @@ router.post('/reset-leaderboard/verify-access', async (req, res) => {
       });
     }
 
-    // Check if user has a pending verification code
-    if (!global.resetLeaderboardCodes || !global.resetLeaderboardCodes.has(userId)) {
-      return res.status(400).json({
-        error: 'No verification codes found. Please request access first.'
-      });
-    }
-
-    const verificationData = global.resetLeaderboardCodes.get(userId);
+    // Check if user has a pending verification code from database
+    const verificationData = await dbService.getResetLeaderboardCode(userId);
     
     if (!verificationData) {
       return res.status(400).json({
@@ -2343,7 +2757,7 @@ router.post('/reset-leaderboard/verify-access', async (req, res) => {
     
     // Check if codes have expired
     if (new Date() > verificationData.expiresAt) {
-      global.resetLeaderboardCodes.delete(userId);
+      await dbService.deleteResetLeaderboardCode(userId);
       return res.status(400).json({
         error: 'Verification codes have expired. Please request new ones.'
       });
@@ -2351,7 +2765,7 @@ router.post('/reset-leaderboard/verify-access', async (req, res) => {
 
     // Check attempt limit (max 3 attempts)
     if (verificationData.attempts >= 3) {
-      global.resetLeaderboardCodes.delete(userId);
+      await dbService.deleteResetLeaderboardCode(userId);
       return res.status(400).json({
         error: 'Too many failed attempts. Please request new verification codes.'
       });
@@ -2359,12 +2773,12 @@ router.post('/reset-leaderboard/verify-access', async (req, res) => {
 
     // Verify Discord code
     if (discordCode !== verificationData.discordCode) {
-      verificationData.attempts++;
-      global.resetLeaderboardCodes.set(userId, verificationData);
+      await dbService.incrementResetLeaderboardCodeAttempts(userId);
+      const updatedData = await dbService.getResetLeaderboardCode(userId);
       
       return res.status(400).json({
         error: 'Invalid Discord verification code',
-        attemptsRemaining: 3 - verificationData.attempts
+        attemptsRemaining: updatedData ? 3 - updatedData.attempts : 0
       });
     }
 
@@ -2379,18 +2793,18 @@ router.post('/reset-leaderboard/verify-access', async (req, res) => {
       }
 
       if (telegramCode !== verificationData.telegramCode) {
-        verificationData.attempts++;
-        global.resetLeaderboardCodes.set(userId, verificationData);
+        await dbService.incrementResetLeaderboardCodeAttempts(userId);
+        const updatedData = await dbService.getResetLeaderboardCode(userId);
         
         return res.status(400).json({
           error: 'Invalid Telegram verification code',
-          attemptsRemaining: 3 - verificationData.attempts
+          attemptsRemaining: updatedData ? 3 - updatedData.attempts : 0
         });
       }
     }
 
-    // All codes are valid - delete the verification codes and grant access
-    global.resetLeaderboardCodes.delete(userId);
+    // All codes are valid - mark as used and grant access
+    await dbService.markResetLeaderboardCodeAsUsed(userId);
     
     // Delete the original verification messages
     try {
@@ -2448,11 +2862,8 @@ router.post('/reset-leaderboard/verify-access', async (req, res) => {
     
     // Grant access for 10 minutes
     const accessExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    if (!global.resetLeaderboardAccess) {
-      global.resetLeaderboardAccess = new Map();
-    }
-    global.resetLeaderboardAccess.set(userId, {
-      grantedAt: new Date(),
+    await dbService.storeResetLeaderboardAccess({
+      userId,
       expiresAt: accessExpiresAt
     });
 
@@ -2481,7 +2892,8 @@ router.get('/reset-leaderboard/access-status', async (req, res) => {
 
     // Check if user is allowed VPS access
     const isAllowed = isAllowedForVPS(userId);
-    const hasActiveCode = global.resetLeaderboardCodes?.has(userId) || false;
+    const resetCodeData = await dbService.getResetLeaderboardCode(userId);
+    const hasActiveCode = resetCodeData !== null && !resetCodeData.isUsed && resetCodeData.expiresAt > new Date();
     const dualChannelAuth = isAllowedForTelegram(userId) && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'your_telegram_bot_token_here';
 
     if (!isAllowed) {
@@ -2490,17 +2902,7 @@ router.get('/reset-leaderboard/access-status', async (req, res) => {
       });
     }
 
-    if (!global.resetLeaderboardAccess || !global.resetLeaderboardAccess.has(userId)) {
-      return res.json({
-        isAllowed: true,
-        hasActiveCode,
-        dualChannelAuth,
-        hasAccess: false,
-        message: 'No access granted'
-      });
-    }
-
-    const accessData = global.resetLeaderboardAccess.get(userId);
+    const accessData = await dbService.getResetLeaderboardAccess(userId);
     
     if (!accessData) {
       return res.json({
@@ -2514,7 +2916,7 @@ router.get('/reset-leaderboard/access-status', async (req, res) => {
     
     // Check if access has expired
     if (new Date() > accessData.expiresAt) {
-      global.resetLeaderboardAccess.delete(userId);
+      await dbService.deleteResetLeaderboardAccess(userId);
       return res.json({
         isAllowed: true,
         hasActiveCode,
@@ -2547,14 +2949,8 @@ router.post('/reset-leaderboard', async (req, res) => {
     const user = req.user as any;
     const userId = user.id;
 
-    // Check if user has valid access
-    if (!global.resetLeaderboardAccess || !global.resetLeaderboardAccess.has(userId)) {
-      return res.status(403).json({
-        error: 'Access denied. Please request access first.'
-      });
-    }
-
-    const accessData = global.resetLeaderboardAccess.get(userId);
+    // Check if user has valid access from database
+    const accessData = await dbService.getResetLeaderboardAccess(userId);
     
     if (!accessData) {
       return res.status(403).json({
@@ -2564,14 +2960,14 @@ router.post('/reset-leaderboard', async (req, res) => {
     
     // Check if access has expired
     if (new Date() > accessData.expiresAt) {
-      global.resetLeaderboardAccess.delete(userId);
+      await dbService.deleteResetLeaderboardAccess(userId);
       return res.status(403).json({
         error: 'Access has expired. Please request access again.'
       });
     }
 
     // Remove access after use
-    global.resetLeaderboardAccess.delete(userId);
+    await dbService.deleteResetLeaderboardAccess(userId);
     
     logger.info(`Admin ${user.username} (${user.id}) initiated leaderboard reset`);
     
@@ -2660,7 +3056,12 @@ router.post('/reset-leaderboard', async (req, res) => {
 router.get('/bot-status', async (req, res) => {
   try {
     // Make a request to the Discord bot service to get current status
-    const botServiceUrl = 'http://localhost:2700'; // Use localhost for hybrid mode
+    const discordPort = process.env.DISCORD_API_PORT || '2700';
+    // In Docker, use service name; otherwise use localhost
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 
+      (process.env.NODE_ENV === 'production' && process.env.POSTGRES_HOST === 'postgres' 
+        ? `http://discord-api:${discordPort}` 
+        : `http://localhost:${discordPort}`);
     
     try {
       const response = await axios.get(`${botServiceUrl}/api/bot-status`, {
@@ -2717,7 +3118,12 @@ router.post('/bot-status', async (req, res) => {
     }
     
     // Make a request to the Discord bot service to change status
-    const botServiceUrl = 'http://localhost:2700'; // Use localhost for hybrid mode
+    const discordPort = process.env.DISCORD_API_PORT || '2700';
+    // In Docker, use service name; otherwise use localhost
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 
+      (process.env.NODE_ENV === 'production' && process.env.POSTGRES_HOST === 'postgres' 
+        ? `http://discord-api:${discordPort}` 
+        : `http://localhost:${discordPort}`);
     
     try {
       const response = await axios.post(`${botServiceUrl}/api/bot-status`, {
@@ -2771,7 +3177,12 @@ router.post('/bot-toggle', async (req, res) => {
     }
 
     // Make a request to the Discord bot service to toggle bot
-    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-bot:2700';
+    const discordPort = process.env.DISCORD_API_PORT || '2700';
+    // In Docker, use service name; otherwise use localhost
+    const botServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 
+      (process.env.NODE_ENV === 'production' && process.env.POSTGRES_HOST === 'postgres' 
+        ? `http://discord-api:${discordPort}` 
+        : `http://localhost:${discordPort}`);
     
     try {
       const response = await axios.post(`${botServiceUrl}/api/bot-toggle`, {

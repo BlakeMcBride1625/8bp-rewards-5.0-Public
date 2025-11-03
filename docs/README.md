@@ -1,361 +1,300 @@
-[Docs Index](./index.md) · [Shell Utilities](./shell.md)
+# 📖 8BP Rewards System - Technical Documentation
 
-# 8 Ball Pool Rewards System (Full Stack) — Deep Documentation
+Complete technical documentation for the 8BP Rewards System architecture, implementation, and operations.
 
-This repository contains a production-grade system that automates claiming rewards from the 8 Ball Pool shop, exposes an admin web interface, integrates with Discord for status and notifications, and persists data in MongoDB. It includes a React frontend, a Node.js/Express backend, Discord bot, Playwright automation, screenshots management, and a complete deployment toolchain (systemd and Docker).
+## 📋 Documentation Structure
 
-This README is an exhaustive, practical guide to every feature, configuration, script, and operational task in the project.
+This documentation is organized into 5 main files:
 
-## Contents
-- Overview and Goals
-- System Architecture
-- Directory Walkthrough
-- Frontend (React + TS + Tailwind)
-- Backend (Express + TS)
-- Automation (Playwright Claimers)
-- Screenshots and Confirmation Images
-- Discord Bot and Service
-- Database Models and Data Flow
-- Logging, Metrics, and Health
-- Configuration (.env)
-- Local Development
-- Production Deployment (systemd, Docker, Cloudflare)
-- Operations: Backups, Maintenance, and Cleanup
-- Troubleshooting and FAQ
+1. **[README.md](./README.md)** (this file) - System architecture and technical overview
+2. **[SETUP.md](./SETUP.md)** - Installation, deployment, and server setup
+3. **[CONFIGURATION.md](./CONFIGURATION.md)** - Environment variables, database, and port configuration
+4. **[INTEGRATION.md](./INTEGRATION.md)** - Discord, Telegram, Cloudflare, and authentication setup
+5. **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues, solutions, and advanced topics
 
 ---
 
-## Overview and Goals
+## 🏗️ System Architecture
 
-- Automate reward claims for registered users reliably and safely
-- Provide an admin dashboard for monitoring, user management, and tooling
-- Notify admins on Discord for runs, successes, and failures
-- Persist state and logs in MongoDB for auditability
-- Offer flexible deployment: bare metal (systemd) or Docker
+### Overview
 
-Key traits:
-- Robust error handling with retries and clear logging
-- Tunable concurrency for Playwright to match server capacity
-- Screenshot capture for each stage; optional confirmation image generation
-- Secure access to admin features via Discord OAuth2
-
----
-
-## System Architecture
+The 8BP Rewards System is a full-stack application that automates daily reward claims for registered users on the 8 Ball Pool website.
 
 ```
-Browser (User) → Frontend (React) → Backend API (Express) → MongoDB
-                                     ↘ Discord Bot (discord.js)
-Automation (Playwright claimers) → Backend + Discord + Screenshots
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│   Frontend  │────▶│   Backend    │────▶│ PostgreSQL │
+│   (React)   │     │   (Express)   │     │  Database  │
+└─────────────┘     └──────────────┘     └─────────────┘
+                            │
+                            ├────▶ Discord Bot Service
+                            ├────▶ Claimer Service
+                            └────▶ WebSocket Service
 ```
 
-- Frontend serves the admin UI and public pages
-- Backend exposes REST endpoints, authentication, and screenshot APIs
-- Discord bot offers slash-commands and notifications
-- Playwright claimers run scheduled or on-demand claim tasks
-- MongoDB stores registrations, claim records, and logs
+### Core Components
 
-Ports and hosting:
-- Backend default port: 2600
-- Frontend hosted at `PUBLIC_URL` (build assumes `/8bp-rewards/` path)
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Frontend** | React 18 + TypeScript | User dashboard and admin interface |
+| **Backend API** | Node.js + Express + TypeScript | REST API and data management |
+| **Database** | PostgreSQL 16 | User data and claim records |
+| **Automation** | Playwright | Browser automation for claiming |
+| **Discord Bot** | Discord.js | User notifications and management |
+| **Scheduler** | node-cron | Automated daily claiming |
+| **Deployment** | Docker Compose | Containerized services |
 
 ---
 
-## Directory Walkthrough
+## 🗂️ Directory Structure
 
 ```
 8bp-rewards/
 ├── backend/
-│   └── src/
-│       ├── middleware/        # auth, errors, request logging
-│       ├── models/            # TS models/interfaces (compiled to dist)
-│       ├── routes/            # Express routes (e.g., screenshots API)
-│       ├── services/          # Business logic (database, schedulers)
-│       └── server.ts          # Express app bootstrap
-├── dist/backend/              # Compiled backend (tsc)
-├── frontend/
-│   ├── public/                # favicon, logos, static assets
-│   │   └── assets/logos/8logo.png  # High-quality site logo
 │   ├── src/
-│   │   ├── components/        # Layout, modals, trackers, etc.
-│   │   ├── pages/             # Admin dashboard, status, register, etc.
-│   │   └── hooks/             # Authentication hook
-│   └── build/                 # Production build output
-├── screenshots/               # Captured site screenshots
-│   ├── confirmation/          # Confirmation images (featured first)
-│   ├── final-page/
-│   ├── go-click/
-│   ├── id-entry/
-│   ├── login/
-│   └── shop-page/
-├── services/database-service.js # MongoDB connection + DB methods
-├── playwright-claimer.js        # Claimer (web) runner
-├── playwright-claimer-discord.js# Claimer with Discord confirmations
-├── browser-pool.js              # Concurrency control
-├── discord-bot.js               # Discord bot entrypoint
-├── discord-service.js           # Discord helpers
-├── scripts/                     # Utilities (migration, port checks)
-├── docker-compose.yml + Dockerfiles
-└── setup-, deploy-, env-*.md    # Guides and setup scripts
+│   │   ├── routes/        # Express API routes
+│   │   ├── services/      # Business logic (DatabaseService, SchedulerService)
+│   │   ├── middleware/   # Authentication, error handling
+│   │   └── server.ts      # Express app initialization
+│   ├── logs/              # Backend application logs
+│   └── screenshots/       # Claim screenshots
+│
+├── frontend/
+│   ├── src/
+│   │   ├── pages/         # Page components (Admin, Leaderboard, etc.)
+│   │   ├── components/    # Reusable UI components
+│   │   ├── hooks/         # React hooks (useAuth, useWebSocket)
+│   │   └── config/        # API configuration
+│   └── build/             # Production build output
+│
+├── scripts/
+│   ├── system/            # System management scripts
+│   ├── cloudflare/        # Cloudflare tunnel scripts
+│   ├── database/          # Database operation scripts
+│   └── README.md          # Script documentation
+│
+├── services/              # Service files (discord-service.js, etc.)
+├── models/                # Data models
+├── migrations/            # Database migrations
+├── screenshots/           # Claim screenshots (organized by stage)
+├── logs/                  # Application logs
+│
+├── docker-compose.yml     # Docker orchestration
+├── Dockerfile             # Multi-stage Docker build
+├── .env                   # Environment variables (not in git)
+└── package.json           # Dependencies and scripts
 ```
 
 ---
 
-## Frontend (React + TypeScript + Tailwind)
+## 📊 Database Schema
 
-Highlights:
-- Pages: Home, Register, Contact, Leaderboard, System Status, Admin Dashboard
-- Secure admin access via Discord OAuth2
-- Header uses the project logo at `/assets/logos/8logo.png`
-- Favicon and PWA icons: `favicon.ico`, `logo192.png`, `logo512.png`
-- Screenshots admin UI uses the backend screenshots API
+### PostgreSQL Tables
 
-Key files:
-- `frontend/src/components/Layout.tsx`: Navigation, branding, auth-aware header
-- `frontend/src/pages/*`: Page-level features
-- `frontend/src/config/api.ts`: API host configuration
+**`registrations`**
+- User registrations with 8 Ball Pool IDs
+- Fields: `eight_ball_pool_id`, `username`, `is_active`, `is_blocked`, `created_at`
 
-Build and run:
-```bash
-npm run build:frontend
-cd frontend && npm start
-```
+**`claim_records`**
+- History of all claim attempts
+- Fields: `id`, `eight_ball_pool_id`, `website_user_id`, `status`, `items_claimed`, `claimed_at`
 
----
+**`log_entries`**
+- System logs and audit trail
+- Fields: `id`, `level`, `message`, `timestamp`, `metadata`
 
-## Backend (Express + TypeScript)
+**`user_mappings`**
+- Mappings between 8BP IDs and website user IDs
+- Fields: `id`, `eight_ball_pool_id`, `website_user_id`
 
-Highlights:
-- REST API with session auth and Discord OAuth2 for admin routes
-- Screenshot management API including folder ordering and deletion
-- Health endpoints for system status
+**`invalid_users`**
+- Deregistered/invalid users
+- Fields: `id`, `eight_ball_pool_id`, `deregistration_reason`, `source_module`
 
-Key files:
-- `backend/src/server.ts`: App bootstrap and middleware
-- `backend/src/routes/screenshots.ts`: Screenshot folders, listing, view, clear
-- `backend/src/services/*`: Business logic (e.g., schedulers)
-
-Build and run:
-```bash
-npm run build:backend
-npm run start:backend
-```
+**`vps_codes`**
+- Multi-factor authentication codes for VPS access
+- Fields: `id`, `user_id`, `discord_code`, `telegram_code`, `email_code`, `expires_at`
 
 ---
 
-## Automation (Playwright Claimers)
+## 🔄 Data Flow
 
-- `playwright-claimer.js`: Core claiming logic and optional scheduling
-- `playwright-claimer-discord.js`: Same as above with Discord confirmations
-- `browser-pool.js`: Controls concurrency; default set to 6 for stability
+### User Registration Flow
 
-Typical usage:
-```bash
-npm run claim              # One-off run
-npm run schedule           # Run on a schedule (web)
-npm run claim-discord      # One-off run with Discord confirmations
-npm run schedule-discord   # Scheduled with Discord confirmations
-```
+1. User registers via Discord bot (`/register <8bp_id>`)
+2. Backend validates and stores in `registrations` table
+3. Validation runs before first claim
+4. Invalid users automatically removed
 
-Tuning:
-- To reduce errors like “Target page/context closed,” adjust `browser-pool.js` max concurrency
-- Ensure Playwright browsers are installed on the host: `npx playwright install`
+### Claim Flow
 
----
+1. Scheduler triggers or admin manual claim
+2. Claimer service reads users from database
+3. Playwright opens browsers (concurrent pool)
+4. For each user:
+   - Navigate to shop
+   - Login if needed
+   - Enter 8BP ID
+   - Click claim button
+   - Capture screenshots
+   - Verify claim success
+5. Store results in `claim_records` table
+6. Send Discord notifications (if configured)
+7. Update leaderboard data
 
-## Screenshots and Confirmation Images
+### WebSocket Real-Time Updates
 
-- Capture at multiple stages: `shop-page`, `id-entry`, `login`, `go-click`, `final-page`
-- Confirmation images are generated to `screenshots/confirmation/`
-- Backend exposes folders to the admin UI; order is:
-  1) confirmation, 2) shop-page, 3) id-entry, 4) go-click, 5) login, 6) initial, 7) final-page
-
-Permissions:
-- Ensure the `screenshots/` directory is writable by the runtime user
-  ```bash
-  chmod -R 775 screenshots
-  ```
-
-Cleanup:
-- Admin endpoints allow clearing per-user or all screenshots (auth required)
+- Backend broadcasts VPS stats every 1 second
+- Frontend receives updates via WebSocket
+- Falls back to HTTP polling if WebSocket unavailable
+- Updates charts in real-time
 
 ---
 
-## Discord Bot and Service
+## 🔐 Authentication & Authorization
 
-Features:
-- Slash-commands for status checks and administration
-- Notifies scheduler results and important failures
+### Discord OAuth2
 
-Run locally:
-```bash
-npm run bot
-```
+- Admin access via Discord login
+- Session-based authentication
+- Environment: `ALLOWED_ADMINS` (comma-separated Discord IDs)
 
-Notes:
-- Confirmation sending uses `playwright-claimer-discord.js` logic; the core `discord-service.js` stays minimal (no custom `sendConfirmation` method is required by design).
+### VPS Monitor Multi-Factor Auth
 
----
+Three authentication channels:
+1. **Discord**: 16-character hex code via DM
+2. **Telegram**: 16-character hex code via Telegram bot
+3. **Email**: 6-digit PIN via SMTP
 
-## Database Models and Data Flow
-
-Collections (conceptual):
-- Registration: `{ eightBallPoolId, username, createdAt, updatedAt }`
-- ClaimRecord: `{ eightBallPoolId, websiteUserId, status, itemsClaimed[], error?, claimedAt, schedulerRun }`
-- Logs: Stored via Winston transports (file and/or MongoDB)
-
-DB access:
-- `services/database-service.js` encapsulates MongoDB connection and CRUD helpers used across the app and scripts.
-
-Backups:
-- JSON backups stored under `database-backups/` (various scripts generate them before destructive operations)
+Configuration:
+- `VPS_OWNERS`: Discord IDs allowed VPS access
+- `DISCORD_TO_TELEGRAM_MAPPING`: Map Discord → Telegram IDs
+- `DISCORD_TO_EMAIL_MAPPING`: Map Discord → Email addresses
 
 ---
 
-## Logging, Metrics, and Health
+## 🚀 Deployment Architecture
 
-Health endpoints (examples):
-- `GET /api/status` — overall status
-- `GET /api/status/database` — DB health
-- `GET /api/status/scheduler` — scheduler status
+### Docker (Recommended)
 
-Logs:
-- Application logs in `logs/` and rotated combined logs at root for historical reference
-- Discord and backend service logs in respective `*.log` files and systemd journal
+**Services:**
+- `postgres` - PostgreSQL database
+- `backend` - Express API + Frontend
+- `discord-api` - Discord bot service
+- `claimer` - Automated claiming service
 
----
+**Network:**
+- All services on Docker bridge network
+- Internal communication via service names
+- Database host: `postgres` (Docker network)
 
-## Configuration (.env)
+**Volumes:**
+- `postgres_data`: Database persistence
+- `./logs`: Application logs
+- `./screenshots`: Claim screenshots
 
-Copy template and update values:
-```bash
-cp env-template.txt .env
-```
+### Host Services (Legacy)
 
-Important variables (representative):
-- `MONGO_URI` — MongoDB connection string
-- `BACKEND_PORT` / `FRONTEND_PORT` — service ports
-- `PUBLIC_URL` — public base URL, used by frontend build
-- Discord OAuth2: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `OAUTH_REDIRECT_URI`, `ALLOWED_ADMINS`
-- Email: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `MAIL_TO`
-
----
-
-## Local Development
-
-Install all dependencies:
-```bash
-npm run install:all
-```
-
-Start everything for development:
-```bash
-npm run dev
-```
-
-Individually:
-```bash
-npm run dev:backend
-cd frontend && npm start
-```
+- PostgreSQL on host system
+- Backend and frontend as systemd services
+- Manual process management
 
 ---
 
-## Production Deployment
+## 📈 Performance & Scalability
 
-### Systemd (example names)
-- Backend service: `8bp-rewards-backend`
-- Discord service: `8bp-rewards-discord`
+### Browser Concurrency
 
-Common commands:
-```bash
-sudo systemctl status 8bp-rewards-backend
-sudo systemctl restart 8bp-rewards-backend
-sudo journalctl -u 8bp-rewards-backend -f
-```
+- Default: 6 concurrent browsers
+- Configurable in `browser-pool.js`
+- Balance between speed and stability
 
-### Docker
-```bash
-npm run docker:build
-npm run docker:up
-npm run docker:logs
-```
+### Database Optimization
 
-### Cloudflare Tunnels
-Use `setup-cloudflare-tunnel.sh` and `cloudflare-tunnel.yml` to expose services securely.
+- Connection pooling enabled
+- Indexed queries for common operations
+- Regular cleanup of old data
+
+### Caching
+
+- Frontend build served statically
+- API responses cached where appropriate
+- WebSocket for real-time data (no polling overhead)
 
 ---
 
-## Operations: Backups, Maintenance, and Cleanup
+## 🔍 Monitoring & Logging
 
-- `remove-failed-claims.js` — purge failed claims (creates backups before mutation)
-- `scripts/migrate-to-mongodb.js` — data migrations when needed
-- `fix-screenshot-permissions.sh` — reset screenshot directory permissions
-- `check-port-conflicts.sh` — detect conflicting services (e.g., port 2600 in use)
+### Logging
 
-Housekeeping tips:
-- Rotate logs regularly (or ship to a centralized log store)
-- Periodically clean old screenshots if storage is limited
-- Keep Playwright browsers installed and caches cleaned
+- **Backend**: Winston logger with file and console transports
+- **Discord**: Service-specific logs
+- **Claimer**: Detailed claim progress logs
 
----
+### Health Checks
 
-## Troubleshooting and FAQ
+- `/health` - Basic health check
+- `/api/status` - Detailed system status
+- `/api/status/database` - Database connection status
 
-1) Too many Playwright timeouts / Target closed
-- Reduce concurrency in `browser-pool.js` (e.g., `maxConcurrent = 6`)
-- Ensure adequate CPU/RAM and that no zombie Playwright processes exist
+### Metrics
 
-2) Screenshots failing with EACCES
-- Fix permissions: `chmod -R 775 screenshots`
-- Ensure service user owns the directories
-
-3) Discord bot not online / DND state unexpected
-- Check token and intents; restart the service
-- Verify network/firewall access
-
-4) API returns HTML instead of JSON
-- Confirm you are calling the correct backend port (default 2600)
-
-5) Images missing on the website
-- Place brand assets in `frontend/public/` (favicon, logo192, logo512)
-- Header logo path should be `/assets/logos/8logo.png`
-
-6) Deleting screenshots removed other assets?
-- Screenshot tooling only affects the `screenshots/` directory; public assets live under `frontend/public/`
+- Real-time VPS stats (CPU, memory, network)
+- Claim success rates
+- User statistics
+- Service heartbeat tracking
 
 ---
 
-## Scripts Reference (root `package.json`)
+## 🔄 Scheduler
 
-```json
-{
-  "build": "npm run build:backend && npm run build:frontend",
-  "build:backend": "tsc -p tsconfig.backend.json",
-  "build:frontend": "cd frontend && npm run build",
-  "start": "npm run start:backend",
-  "start:backend": "node dist/backend/server.js",
-  "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-  "dev:backend": "nodemon --exec ts-node backend/src/server.ts",
-  "dev:frontend": "cd frontend && npm start",
-  "claim": "node playwright-claimer.js",
-  "claim-discord": "node playwright-claimer-discord.js",
-  "schedule": "node playwright-claimer.js --schedule",
-  "schedule-discord": "node playwright-claimer-discord.js --schedule",
-  "test-discord": "node test-discord.js",
-  "test-mongodb": "node test-mongodb.js",
-  "docker:build": "docker-compose build",
-  "docker:up": "docker-compose up -d"
-}
-```
+### Automated Claims
+
+- **Frequency**: 4 times daily
+- **Times**: 00:00, 06:00, 12:00, 18:00 UTC
+- **Implementation**: `SchedulerService.ts`
+- **Notifications**: Discord channel (if configured)
+
+### Manual Triggers
+
+- Claim all users
+- Claim single user
+- Claim test users (quick buttons)
 
 ---
 
-## License
+## 🛡️ Security
 
-MIT — see `LICENSE` if present. Use responsibly and comply with the upstream website’s terms of service.
+### Authentication
+
+- Discord OAuth2 for admin access
+- Session-based authentication
+- Multi-factor auth for sensitive features
+
+### Data Protection
+
+- Environment variables for secrets
+- `.env` file in `.gitignore`
+- Secure password hashing (if implemented)
+- Database credentials secured
+
+### Network Security
+
+- Cloudflare Tunnel (recommended)
+- No exposed ports required
+- Automatic SSL/TLS
+- DDoS protection
 
 ---
 
-Version: 2.0.0
-Last Updated: 2025-10-06
+## 📚 Additional Documentation
+
+For specific topics, see:
+
+- **[SETUP.md](./SETUP.md)** - Installation and deployment
+- **[CONFIGURATION.md](./CONFIGURATION.md)** - Environment variables and configuration
+- **[INTEGRATION.md](./INTEGRATION.md)** - External service integration
+- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
+
+---
+
+*Last Updated: November 3, 2025*

@@ -16,7 +16,7 @@ DATABASE_TYPE=postgresql
 DISCORD_TOKEN=your_discord_bot_token_here
 DISCORD_CLIENT_ID=your_discord_oauth_client_id_here
 DISCORD_CLIENT_SECRET=your_discord_oauth_client_secret_here
-OAUTH_REDIRECT_URI=https://8bp.epildevconnect.uk/8bp-rewards/auth/discord/callback
+OAUTH_REDIRECT_URI=https://8ballpool.website/8bp-rewards/auth/discord/callback
 ALLOWED_ADMINS=850726663289700373,1111185974748270622
 SCHEDULER_CHANNEL_ID=your_scheduler_channel_id_here
 REWARDS_CHANNEL_ID=your_rewards_channel_id_here
@@ -37,19 +37,25 @@ ALLOWED_TELEGRAM_USERS=your_telegram_user_id_here,your_friend_telegram_user_id_h
 FRONTEND_PORT=2500
 BACKEND_PORT=2600
 DISCORD_API_PORT=2700
+STATUS_PORT=2750
+
+# React App Port Configuration (for frontend build)
+# These are used at build time, must be prefixed with REACT_APP_
+REACT_APP_BACKEND_PORT=2600
+REACT_APP_FRONTEND_PORT=2500
 
 # Service URLs (for internal communication)
-DISCORD_BOT_SERVICE_URL=http://8bp.epildevconnect.uk:2700
+DISCORD_BOT_SERVICE_URL=http://8ballpool.website:2700
 
 # Public URLs
-PUBLIC_URL=https://8bp.epildevconnect.uk/8bp-rewards
-HOME_URL=https://8bp.epildevconnect.uk/8bp-rewards/home
-REGISTER_URL=https://8bp.epildevconnect.uk/8bp-rewards/register
-CONTACT_URL=https://8bp.epildevconnect.uk/8bp-rewards/contact
-LEADERBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/leaderboard
-SOCIALS_URL=https://8bp.epildevconnect.uk/8bp-rewards/socials
-SYSTEM_STATUS_URL=https://8bp.epildevconnect.uk/8bp-rewards/system-status
-ADMIN_DASHBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/admin-dashboard
+PUBLIC_URL=https://8ballpool.website/8bp-rewards
+HOME_URL=https://8ballpool.website/8bp-rewards/home
+REGISTER_URL=https://8ballpool.website/8bp-rewards/register
+CONTACT_URL=https://8ballpool.website/8bp-rewards/contact
+LEADERBOARD_URL=https://8ballpool.website/8bp-rewards/leaderboard
+SOCIALS_URL=https://8ballpool.website/8bp-rewards/socials
+SYSTEM_STATUS_URL=https://8ballpool.website/8bp-rewards/system-status
+ADMIN_DASHBOARD_URL=https://8ballpool.website/8bp-rewards/admin-dashboard
 
 # Nodemailer SMTP Configuration
 SMTP_HOST=smtp.gmail.com

@@ -7,6 +7,10 @@ import TelegramNotificationService from '../services/TelegramNotificationService
 import { EmailNotificationService } from '../services/EmailNotificationService';
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import session from 'express-session';
+import { TIMEOUTS } from '../constants';
+import { isAllowedForEmail, isVPSOwner } from '../utils/permissions';
+import { isValid6DigitPin, isValidHexCode } from '../utils/validation';
+import { AdminRequest } from '../types/auth';
 
 // Extend session type for MFA verification
 declare module 'express-session' {
@@ -49,8 +53,7 @@ const initDiscordClient = () => {
 
 // Check if user has VPS access
 const checkVPSAccess = (userId: string): boolean => {
-  const vpsOwners = process.env.VPS_OWNERS?.split(',').map(id => id.trim()) || [];
-  return vpsOwners.includes(userId);
+  return isVPSOwner(userId);
 };
 
 // Generate 6-digit PIN code
@@ -58,13 +61,7 @@ function generate6DigitPin(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Check if email is allowed for authentication
-function isAllowedForEmail(userEmail: string): boolean {
-  if (!userEmail) return false;
-  const allowedEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim().toLowerCase()) || [];
-  if (allowedEmails.length === 0) return false; // No emails configured
-  return allowedEmails.includes(userEmail.toLowerCase());
-}
+// Permission functions moved to utils/permissions.ts
 
 // Verify multi-factor authentication
 const verifyMFA = async (discordCode: string, telegramCode: string, emailCode: string, userId: string, session: any): Promise<boolean> => {
@@ -109,8 +106,7 @@ const verifyMFA = async (discordCode: string, telegramCode: string, emailCode: s
     
     // Verify Email code if provided
     if (hasEmail && !hasDiscordTelegram) {
-      const isValidEmailFormat = /^\d{6}$/.test(emailCode.trim());
-      if (!isValidEmailFormat) {
+      if (!isValid6DigitPin(emailCode)) {
         logger.warn('Invalid email code format', {
           action: 'mfa_invalid_email_format',
           userId,
@@ -259,17 +255,119 @@ const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: s
   }
 };
 
+// Security: Dangerous command patterns that should never be allowed
+const DANGEROUS_PATTERNS = [
+  /[;&|`$(){}]/g,           // Command chaining/injection
+  />|</g,                    // Redirection
+  /rm\s+-rf|rm\s+-r|rm\s+-f/g, // Dangerous rm flags
+  /\/etc\/|\/root\/|\/boot\/|\/sys\//g, // Protected directories
+  /mkfs|fdisk|dd\s+if=/g,    // Disk operations
+  /shutdown|reboot|halt|poweroff/g, // System shutdown
+  /chmod\s+[0-7]{3,4}/g,     // chmod with dangerous permissions
+  /chown\s+root|chgrp\s+root/g, // Ownership changes to root
+  /passwd|useradd|userdel|groupadd|groupdel/g, // User management
+  /su\s+|sudo\s+/g,          // Privilege escalation
+];
+
+// Allowed commands with optional argument validation
+interface CommandConfig {
+  args?: RegExp;
+  maxArgs: number;
+  paths?: boolean;
+  allowProjectPaths?: boolean;
+  subcommands?: readonly string[];
+  readonly?: boolean;
+  allowScripts?: boolean;
+  special?: boolean;
+}
+
+const ALLOWED_COMMANDS: Record<string, CommandConfig> = {
+  'ls': { args: /^[-lahR]+$/, maxArgs: 2 },
+  'pwd': { args: /^$/, maxArgs: 0 },
+  'whoami': { args: /^$/, maxArgs: 0 },
+  'date': { args: /^[+\-%dmyYHM]+$/, maxArgs: 2 },
+  'uptime': { args: /^$/, maxArgs: 0 },
+  'df': { args: /^[-h]+$/, maxArgs: 2 },
+  'free': { args: /^[-h]+$/, maxArgs: 2 },
+  'ps': { args: /^[-auxef]+$/, maxArgs: 3 },
+  'tail': { args: /^[-nf]+$/, maxArgs: 3, paths: true },
+  'head': { args: /^[-nf]+$/, maxArgs: 3, paths: true },
+  'grep': { args: /^[-ivr]+$/, maxArgs: 5, paths: true },
+  'cat': { paths: true, maxArgs: 5, allowProjectPaths: true },
+  'git': { subcommands: ['status', 'log', 'diff', 'branch', 'remote'], maxArgs: 5 },
+  'npm': { subcommands: ['list', 'outdated', 'audit', 'run'], maxArgs: 5 },
+  'node': { allowScripts: true, maxArgs: 2 },
+  'pm2': { subcommands: ['list', 'status', 'logs', 'info', 'describe'], maxArgs: 4 },
+  'systemctl': { subcommands: ['status', 'list-units', 'is-active'], readonly: true, maxArgs: 3 },
+  'clear-failed-claims': { special: true, maxArgs: 0 },
+};
+
+// Validate command arguments
+function validateCommand(command: string, baseCommand: string): { valid: boolean; error?: string } {
+  const commandParts = command.trim().split(/\s+/).filter(p => p);
+  
+  // Check for dangerous patterns
+  for (const pattern of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) {
+      return { valid: false, error: 'Command contains dangerous patterns' };
+    }
+  }
+  
+  // Check command exists in whitelist
+  const commandConfig = ALLOWED_COMMANDS[baseCommand];
+  if (!commandConfig) {
+    return { valid: false, error: `Command '${baseCommand}' is not allowed` };
+  }
+  
+  // Check argument count
+  if (commandParts.length > commandConfig.maxArgs + 1) {
+    return { valid: false, error: `Too many arguments for '${baseCommand}'` };
+  }
+  
+  // Validate paths if required
+  if (commandConfig.paths || commandConfig.allowProjectPaths) {
+    const args = commandParts.slice(1);
+    for (const arg of args) {
+      // Skip flags
+      if (arg.startsWith('-')) continue;
+      
+      // For allowProjectPaths, ensure paths are within project directory
+      if (commandConfig.allowProjectPaths) {
+        if (arg.includes('..') || arg.startsWith('/')) {
+          return { valid: false, error: 'Paths must be relative to project directory' };
+        }
+      } else {
+        // For readonly paths, ensure no writes
+        if (arg.includes('>') || arg.includes('>>')) {
+          return { valid: false, error: 'Write operations not allowed' };
+        }
+      }
+    }
+  }
+  
+  // Validate subcommands for commands that require them
+  if (commandConfig.subcommands) {
+    const subcommand = commandParts[1];
+    if (!subcommand || !commandConfig.subcommands.includes(subcommand)) {
+      return { valid: false, error: `Invalid subcommand. Allowed: ${commandConfig.subcommands.join(', ')}` };
+    }
+  }
+  
+  return { valid: true };
+}
+
 // Execute terminal command
 const executeCommand = async (command: string, userId: string): Promise<{ success: boolean; output: string; error?: string }> => {
   try {
-    // Security: Only allow safe commands
-    const allowedCommands = [
-      'ls', 'pwd', 'whoami', 'date', 'uptime', 'df', 'free', 'ps', 'top', 'htop',
-      'systemctl', 'docker', 'git', 'npm', 'node', 'pm2', 'nginx', 'apache2',
-      'tail', 'head', 'grep', 'find', 'cat', 'less', 'more', 'clear-failed-claims'
-    ];
+    const commandParts = command.trim().split(/\s+/).filter(p => p);
+    if (commandParts.length === 0) {
+      return {
+        success: false,
+        output: '',
+        error: 'Empty command'
+      };
+    }
     
-    const commandParts = command.trim().split(' ');
     const baseCommand = commandParts[0];
     
     // Handle special database commands
@@ -277,18 +375,21 @@ const executeCommand = async (command: string, userId: string): Promise<{ succes
       return await clearFailedClaimsCommand();
     }
     
-    if (!allowedCommands.includes(baseCommand)) {
+    // Validate command
+    const validation = validateCommand(command, baseCommand);
+    if (!validation.valid) {
       return {
         success: false,
         output: '',
-        error: `Command '${baseCommand}' is not allowed. Allowed commands: ${allowedCommands.join(', ')}`
+        error: validation.error || 'Command validation failed'
       };
     }
     
-    // Execute command with timeout
+    // Execute command with timeout from constants
     const { stdout, stderr } = await execAsync(command, { 
-      timeout: 30000, // 30 second timeout
-      cwd: '/home/blake/8bp-rewards' // Set working directory
+      timeout: TIMEOUTS.TERMINAL_COMMAND,
+      cwd: '/home/blake/8bp-rewards', // Set working directory
+      maxBuffer: 1024 * 1024 * 10 // 10MB max output
     });
     
     logger.info('Terminal command executed', {
@@ -321,9 +422,12 @@ const executeCommand = async (command: string, userId: string): Promise<{ succes
 };
 
 // Request MFA codes
+// Import AdminRequest at the top
+// Already imported
+
 router.post('/request-codes', async (req, res) => {
   try {
-    const user = req.user as any;
+    const user = (req as AdminRequest).user;
     const userId = user?.id;
     const { channel } = req.body;
     const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(email => email.trim()) || [];
@@ -535,7 +639,8 @@ router.post('/request-codes', async (req, res) => {
 // Check VPS access
 router.get('/check-access', async (req, res) => {
   try {
-    const userId = (req.user as any)?.id;
+    const adminReq = req as AdminRequest;
+    const userId = adminReq.user?.id;
     
     if (!userId) {
       return res.status(401).json({
@@ -575,7 +680,8 @@ router.get('/check-access', async (req, res) => {
 router.post('/verify-mfa', async (req, res) => {
   try {
     const { discordCode, telegramCode, emailCode } = req.body;
-    const userId = (req.user as any)?.id;
+    const adminReq = req as AdminRequest;
+    const userId = adminReq.user?.id;
     
     if (!userId) {
       return res.status(401).json({
@@ -653,7 +759,8 @@ router.post('/verify-mfa', async (req, res) => {
 router.post('/execute', async (req, res) => {
   try {
     const { command } = req.body;
-    const userId = (req.user as any)?.id;
+    const adminReq = req as AdminRequest;
+    const userId = adminReq.user?.id;
     
     if (!userId) {
       return res.status(401).json({
@@ -723,7 +830,7 @@ router.post('/clear-mfa', async (req, res) => {
     
     logger.info('MFA verification cleared', {
       action: 'mfa_cleared',
-      userId: (req.user as any)?.id
+      userId: (req as AdminRequest).user?.id
     });
     
     return res.json({

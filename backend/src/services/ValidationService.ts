@@ -1,64 +1,17 @@
 import axios, { AxiosResponse } from 'axios';
 import { DatabaseService } from './DatabaseService';
 import { logger } from './LoggerService';
+import { isValidIdFormat } from '../utils/validation';
+import { ValidationResult, ValidationContext, ModuleStats, HealthStatus } from '../types/validation';
+import { InvalidUser, ValidationLog } from '../types/common';
 
-interface ValidationResult {
-  isValid: boolean;
-  reason: string;
-  error?: string;
-  correlationId: string;
-  sourceModule: string;
-  timestamp: string;
-  endpoint?: string;
-  responseData?: any;
-  attempts?: number;
-  stackTrace?: string;
-}
-
-interface ValidationContext {
-  operation?: string;
-  timestamp?: string;
-  adminTriggered?: boolean;
-  testType?: string;
-  [key: string]: any;
-}
-
-interface InvalidUserData {
-  eightBallPoolId: string;
-  deregistrationReason: string;
-  sourceModule: string;
-  errorMessage?: string;
-  correlationId: string;
-  deregisteredAt: Date;
-  context: ValidationResult;
-}
-
-interface ValidationLogData {
-  uniqueId: string;
-  sourceModule: string;
-  validationResult: ValidationResult;
-  context: ValidationContext;
-  timestamp: Date;
-  correlationId: string;
-}
+// Type aliases for backward compatibility
+type InvalidUserData = InvalidUser;
+type ValidationLogData = ValidationLog;
 
 interface CachedValidation {
   result: ValidationResult;
   timestamp: number;
-}
-
-interface ModuleStats {
-  validation_attempt: number;
-  validation_success: number;
-  validation_failure: number;
-  validation_error: number;
-}
-
-interface HealthStatus {
-  cacheSize: number;
-  errorCounts: number;
-  moduleStats: Record<string, ModuleStats>;
-  timestamp: string;
 }
 
 class ValidationService {
@@ -109,7 +62,7 @@ class ValidationService {
       }
 
       // Validate the user ID format first
-      if (!this.isValidIdFormat(uniqueId)) {
+      if (!isValidIdFormat(uniqueId)) {
         const result: ValidationResult = {
           isValid: false,
           reason: 'invalid_format',
@@ -182,17 +135,7 @@ class ValidationService {
     }
   }
 
-  /**
-   * Check if user ID format is valid
-   */
-  private isValidIdFormat(uniqueId: string): boolean {
-    if (!uniqueId || typeof uniqueId !== 'string') return false;
-    
-    // Remove any non-numeric characters and check length
-    const cleanId = uniqueId.replace(/\D/g, '');
-    // Allow 1-15 digits (8 Ball Pool IDs can be very short like "9" or long like "4945905760")
-    return cleanId.length >= 1 && cleanId.length <= 15;
-  }
+  // ID format validation moved to utils/validation.ts
 
   /**
    * Check database status for user

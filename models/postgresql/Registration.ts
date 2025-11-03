@@ -281,6 +281,26 @@ export class PostgresClaimRecord {
       values.push(query.websiteUserId);
     }
 
+    // Handle date range queries (MongoDB-style $gte, $lte)
+    if (query.claimedAt) {
+      if (query.claimedAt.$gte) {
+        sql += ` AND claimed_at >= $${++paramCount}`;
+        values.push(query.claimedAt.$gte);
+      }
+      if (query.claimedAt.$lte) {
+        sql += ` AND claimed_at <= $${++paramCount}`;
+        values.push(query.claimedAt.$lte);
+      }
+      if (query.claimedAt.$gt) {
+        sql += ` AND claimed_at > $${++paramCount}`;
+        values.push(query.claimedAt.$gt);
+      }
+      if (query.claimedAt.$lt) {
+        sql += ` AND claimed_at < $${++paramCount}`;
+        values.push(query.claimedAt.$lt);
+      }
+    }
+
     sql += ' ORDER BY claimed_at DESC';
 
     const result = await pool.query(sql, values);

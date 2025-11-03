@@ -148,13 +148,15 @@ router.get('/discord/callback',
       
       // Check if user is allowed admin
       const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
-      if (!allowedAdmins.includes(profile.id)) {
+      const isAdmin = allowedAdmins.includes(profile.id);
+      
+      if (!isAdmin) {
         logger.warn('Unauthorized Discord OAuth attempt', {
           action: 'oauth_unauthorized',
           discordId: profile.id,
           username: profile.username
         });
-        return res.redirect('/8bp-rewards/?error=oauth_unauthorized');
+        return res.redirect('/8bp-rewards/home?error=oauth_unauthorized');
       }
       
       // Set user in session manually
@@ -165,21 +167,23 @@ router.get('/discord/callback',
             action: 'oauth_session_error',
             error: err.message
           });
-          return res.redirect('/8bp-rewards/?error=oauth_session_failed');
+          return res.redirect('/8bp-rewards/home?error=oauth_session_failed');
         }
         
         logger.info('Discord OAuth successful (manual)', {
           action: 'oauth_callback_success_manual',
           userId: profile.id,
-          username: profile.username
+          username: profile.username,
+          isAdmin
         });
         
-        const redirectUrl = process.env.ADMIN_DASHBOARD_URL || '/8bp-rewards/admin-dashboard';
-        const finalUrl = redirectUrl.startsWith('http') 
-          ? redirectUrl 
-          : (redirectUrl.startsWith('/') ? redirectUrl : `/8bp-rewards${redirectUrl}`);
+        // If user is admin, redirect to admin dashboard
+        // If not admin, redirect to home (shouldn't happen due to check above)
+        const redirectUrl = isAdmin 
+          ? '/8bp-rewards/admin-dashboard'
+          : '/8bp-rewards/home';
         
-        return res.redirect(finalUrl);
+        return res.redirect(redirectUrl);
       });
       
     } catch (error: any) {

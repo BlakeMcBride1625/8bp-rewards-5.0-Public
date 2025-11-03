@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import ValidationService from '../services/ValidationService';
 import { DatabaseService } from '../services/DatabaseService';
+import { logger } from '../services/LoggerService';
 
 const router = express.Router();
 
@@ -61,12 +62,15 @@ router.get('/deregistered-users', async (req: Request, res: Response<ApiResponse
       users: invalidUsers,
       count: invalidUsers.length
     });
-  } catch (error: any) {
-    console.error('❌ Failed to fetch deregistered users:', error);
+  } catch (error) {
+    logger.error('Failed to fetch deregistered users', {
+      action: 'fetch_deregistered_users_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to fetch deregistered users',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -94,12 +98,15 @@ router.get('/validation-logs', async (req: Request, res: Response<ApiResponse>) 
       count: logs.length,
       filters
     });
-  } catch (error: any) {
-    console.error('❌ Failed to fetch validation logs:', error);
+  } catch (error) {
+    logger.error('Failed to fetch validation logs', {
+      action: 'fetch_validation_logs_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to fetch validation logs',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -121,12 +128,63 @@ router.get('/system-health', async (req: Request, res: Response<ApiResponse>) =>
         timestamp: new Date().toISOString()
       }
     });
-  } catch (error: any) {
-    console.error('❌ Failed to fetch system health:', error);
+  } catch (error) {
+    logger.error('Failed to fetch system health', {
+      action: 'fetch_system_health_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to fetch system health',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * Get system integration data (alias for module-status)
+ */
+router.get('/system-integration', async (req: Request, res: Response<ApiResponse>) => {
+  try {
+    const moduleStats = validationService.getModuleStats();
+    
+    // Define expected modules
+    const expectedModules = [
+      'playwright-claimer-discord',
+      'playwright-claimer',
+      'registration-api',
+      'scheduler-service',
+      'admin-dashboard'
+    ];
+    
+    const moduleStatus: ModuleStatus[] = expectedModules.map(module => ({
+      name: module,
+      status: moduleStats[module] ? 'integrated' : 'not_integrated',
+      stats: moduleStats[module] || {
+        validation_attempt: 0,
+        validation_success: 0,
+        validation_failure: 0,
+        validation_error: 0
+      }
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        modules: moduleStatus,
+        totalModules: expectedModules.length,
+        integratedModules: moduleStatus.filter(m => m.status === 'integrated').length
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to fetch system integration data', {
+      action: 'fetch_system_integration_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch system integration data',
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -166,12 +224,15 @@ router.get('/module-status', async (req: Request, res: Response<ApiResponse>) =>
         integratedModules: moduleStatus.filter(m => m.status === 'integrated').length
       }
     });
-  } catch (error: any) {
-    console.error('❌ Failed to fetch module status:', error);
+  } catch (error) {
+    logger.error('Failed to fetch module status', {
+      action: 'fetch_module_status_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to fetch module status',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -205,12 +266,15 @@ router.post('/revalidate-user', async (req: Request<{}, ApiResponse, RevalidateU
     });
     
     return; // Explicit return to satisfy TypeScript
-  } catch (error: any) {
-    console.error('❌ Failed to revalidate user:', error);
+  } catch (error) {
+    logger.error('Failed to revalidate user', {
+      action: 'revalidate_user_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to revalidate user',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
     return; // Explicit return to satisfy TypeScript
   }
@@ -255,12 +319,15 @@ router.post('/revalidate-all-invalid', async (req: Request, res: Response<ApiRes
       processed: results.length,
       total: invalidUsers.length
     });
-  } catch (error: any) {
-    console.error('❌ Failed to revalidate all invalid users:', error);
+  } catch (error) {
+    logger.error('Failed to revalidate all invalid users', {
+      action: 'revalidate_all_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to revalidate all invalid users',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -283,12 +350,15 @@ router.post('/cleanup-logs', async (req: Request<{}, ApiResponse, CleanupLogsReq
         message: `Cleaned up ${deletedCount} old validation logs`
       }
     });
-  } catch (error: any) {
-    console.error('❌ Failed to cleanup logs:', error);
+  } catch (error) {
+    logger.error('Failed to cleanup logs', {
+      action: 'cleanup_logs_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to cleanup logs',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -304,12 +374,15 @@ router.get('/validation-health', async (req: Request, res: Response<ApiResponse>
       success: true,
       data: health
     });
-  } catch (error: any) {
-    console.error('❌ Failed to fetch validation health:', error);
+  } catch (error) {
+    logger.error('Failed to fetch validation health', {
+      action: 'fetch_validation_health_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to fetch validation health',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -326,12 +399,15 @@ router.post('/clear-cache', async (req: Request, res: Response<ApiResponse>) => 
       success: true,
       message: 'Validation cache and error counts cleared'
     });
-  } catch (error: any) {
-    console.error('❌ Failed to clear cache:', error);
+  } catch (error) {
+    logger.error('Failed to clear cache', {
+      action: 'clear_cache_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to clear cache',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });

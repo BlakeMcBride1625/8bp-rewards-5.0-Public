@@ -1,1 +1,0 @@
-shell/fix-screenshot-permissions.sh

@@ -6,7 +6,7 @@
 set -e
 
 TUNNEL_NAME="8bp-rewards-tunnel"
-HOSTNAME="8bp.epildevconnect.uk"
+HOSTNAME="8ballpool.website"
 
 echo "🔄 Updating Cloudflare Tunnel Configuration"
 echo "==========================================="

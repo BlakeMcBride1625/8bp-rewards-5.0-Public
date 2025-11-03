@@ -6,11 +6,12 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import passport from 'passport';
-import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import path from 'path';
+import http from 'http';
 import heartbeatRoutes from './routes/heartbeat';
 import { initModuleHeartbeat } from './utils/heartbeat-client';
+import WebSocketService from './services/WebSocketService';
 
 // Load environment variables
 dotenv.config();
@@ -37,9 +38,12 @@ import validationRoutes from './routes/validation';
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
+import { timeoutMiddleware } from './middleware/timeout';
+import { TIMEOUTS } from './constants';
 
 class Server {
   private app: express.Application;
+  private httpServer: http.Server | null = null;
   private port: number;
   private databaseService: DatabaseService;
   private schedulerService: SchedulerService | null = null;
@@ -65,21 +69,21 @@ class Server {
     this.app.use(helmet({
       contentSecurityPolicy: {
         directives: {
-          defaultSrc: ["'self'", "https://8bp.epildevconnect.uk"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://8bp.epildevconnect.uk"],
-          fontSrc: ["'self'", "https://fonts.gstatic.com", "https://8bp.epildevconnect.uk"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://8bp.epildevconnect.uk"],
-          imgSrc: ["'self'", "data:", "https:", "https://8bp.epildevconnect.uk"],
-          connectSrc: ["'self'", "https://8bp.epildevconnect.uk", "https://*.8bp.epildevconnect.uk", "wss://8bp.epildevconnect.uk", "https://api.ipify.org"]
+          defaultSrc: ["'self'", "https://8ballpool.website"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://8ballpool.website"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com", "https://8ballpool.website"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://8ballpool.website"],
+          imgSrc: ["'self'", "data:", "https:", "https://8ballpool.website"],
+          connectSrc: ["'self'", "https://8ballpool.website", "https://*.8ballpool.website", "wss://8ballpool.website", "https://api.ipify.org"]
         }
       }
     }));
 
     // CORS configuration
+    const frontendPort = process.env.FRONTEND_PORT || '2500';
     const allowedOrigins = [
-      'http://localhost:2500',
-      'http://localhost:3000',
-      'https://8bp.epildevconnect.uk',
+      `http://localhost:${frontendPort}`,
+      'https://8ballpool.website',
       process.env.PUBLIC_URL
     ].filter(Boolean);
 
@@ -101,6 +105,9 @@ class Server {
 
     // Compression
     this.app.use(compression());
+
+    // Request timeout middleware (30 seconds default)
+    this.app.use(timeoutMiddleware(TIMEOUTS.REQUEST_TIMEOUT));
 
     // Request logging
     this.app.use(morgan('combined', {
@@ -196,7 +203,8 @@ class Server {
     this.app.use('/8bp-rewards/api/heartbeat', heartbeatRoutes);
 
     // Serve static files from React build (consolidated Docker setup)
-    if (process.env.NODE_ENV === 'production') {
+    // Always serve frontend in production mode or if build exists
+    if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === undefined) {
       // Try multiple possible frontend build locations (dev vs Docker)
       const possibleFrontendPaths = [
         path.join(process.cwd(), 'frontend/build'),
@@ -228,10 +236,21 @@ class Server {
           lastModified: true
         }));
         
-        // Also serve assets directly for paths like /assets/logos/8logo.png
+        // Also serve assets directly for paths like /8bp-rewards/assets/logos/8logo.png
+        // This handles assets from the public folder that are served under /8bp-rewards
         const assetsPath = path.join(frontendBuildPath, 'assets');
         if (require('fs').existsSync(assetsPath)) {
-          this.app.use('/assets', express.static(assetsPath, {
+          this.app.use('/8bp-rewards/assets', express.static(assetsPath, {
+            maxAge: '1y',
+            etag: true,
+            lastModified: true
+          }));
+        }
+        
+        // Also serve assets from public folder root (for compatibility)
+        const publicAssetsPath = path.join(process.cwd(), 'frontend', 'public', 'assets');
+        if (require('fs').existsSync(publicAssetsPath)) {
+          this.app.use('/8bp-rewards/assets', express.static(publicAssetsPath, {
             maxAge: '1y',
             etag: true,
             lastModified: true
@@ -244,13 +263,23 @@ class Server {
         });
         
         // Handle React routing - serve index.html for all non-API routes under /8bp-rewards
+        // This needs to be a GET handler, not use(), and must come before error handlers
         this.app.get('/8bp-rewards/*', (req, res, next) => {
           // Don't handle API routes - let them pass through
           if (req.path.startsWith('/8bp-rewards/api/') || req.path.startsWith('/api/')) {
             return next();
           }
+          // Don't handle static file requests (already handled by static middleware)
+          if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|eot)$/)) {
+            return next();
+          }
           // Serve index.html for React Router
-          res.sendFile(path.join(frontendBuildPath!, 'index.html'));
+          const indexPath = path.join(frontendBuildPath!, 'index.html');
+          if (require('fs').existsSync(indexPath)) {
+            res.sendFile(indexPath);
+          } else {
+            next();
+          }
         });
       } else {
         logger.warn('Frontend build not found - serving API only. Tried paths:', possibleFrontendPaths);
@@ -259,6 +288,24 @@ class Server {
   }
 
   private setupErrorHandling(): void {
+    // React Router fallback - serve index.html for any /8bp-rewards route that's not API
+    const fs = require('fs');
+    const frontendBuildPath = path.join(process.cwd(), 'frontend/build');
+    if (fs.existsSync(frontendBuildPath) && fs.existsSync(path.join(frontendBuildPath, 'index.html'))) {
+      this.app.get('/8bp-rewards/*', (req, res, next) => {
+        // Don't handle API routes
+        if (req.path.startsWith('/8bp-rewards/api/') || req.path.startsWith('/api/')) {
+          return next();
+        }
+        // Don't handle static files
+        if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|eot)$/)) {
+          return next();
+        }
+        // Serve index.html for React Router
+        res.sendFile(path.join(frontendBuildPath, 'index.html'));
+      });
+    }
+    
     // 404 handler for API routes only
     this.app.use('/api/*', (req, res) => {
       res.status(404).json({
@@ -268,7 +315,7 @@ class Server {
       });
     });
     
-    // Final 404 handler
+    // Final 404 handler (must be last)
     this.app.use('*', (req, res) => {
       res.status(404).json({
         error: 'Route not found',
@@ -291,11 +338,19 @@ class Server {
         throw new Error('Failed to connect to database');
       }
 
-      // Start server - bind to all interfaces (0.0.0.0) to accept connections from Docker
-      this.app.listen(this.port, '0.0.0.0', () => {
+      // Create HTTP server from Express app
+      this.httpServer = http.createServer(this.app);
+      
+      // Initialize WebSocket service with HTTP server
+      WebSocketService.initialize(this.httpServer);
+      
+      // Start HTTP server - bind to all interfaces (0.0.0.0) to accept connections
+      this.httpServer.listen(this.port, '0.0.0.0', () => {
         logger.info(`🚀 Backend server running on port ${this.port}`);
         logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-        logger.info(`🔗 Public URL: ${process.env.PUBLIC_URL || 'http://localhost:2500'}`);
+        const frontendPort = process.env.FRONTEND_PORT || '2500';
+        logger.info(`🔗 Public URL: ${process.env.PUBLIC_URL || `http://localhost:${frontendPort}`}`);
+        logger.info(`🔌 WebSocket server initialized`);
       });
 
       // Initialize scheduler service
@@ -317,6 +372,13 @@ class Server {
     logger.info('🛑 Shutting down server...');
     
     try {
+      // Close HTTP server (which will close WebSocket connections)
+      if (this.httpServer) {
+        this.httpServer.close(() => {
+          logger.info('HTTP server closed');
+        });
+      }
+      
       await this.databaseService.disconnect();
       logger.info('✅ Server shutdown complete');
       process.exit(0);

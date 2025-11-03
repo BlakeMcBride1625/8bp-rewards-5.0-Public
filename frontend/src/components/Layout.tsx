@@ -44,6 +44,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     src="/8bp-rewards/assets/logos/8logo.png" 
                     alt="8BP Rewards Logo" 
                     className="w-8 h-8 rounded-lg object-cover shadow-lg"
+                    onError={(e) => {
+                      // Fallback if logo doesn't load
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
                   />
                   <span className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">Rewards</span>
                 </Link>
@@ -104,6 +108,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     src="/8bp-rewards/assets/logos/8logo.png" 
                     alt="8BP Rewards Logo" 
                     className="w-8 h-8 rounded-lg object-cover shadow-lg"
+                    onError={(e) => {
+                      // Fallback if logo doesn't load
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
                   />
                   <span className="text-xl font-semibold text-text-primary dark:text-text-dark-primary">Rewards</span>
                 </Link>

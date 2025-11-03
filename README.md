@@ -9,7 +9,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18+-61dafb.svg)](https://reactjs.org/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-6.0+-green.svg)](https://www.mongodb.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-blue.svg)](https://www.postgresql.org/)
 [![Discord](https://img.shields.io/badge/Discord-Bot-7289da.svg)](https://discord.com/)
 
 </div>
@@ -41,7 +41,7 @@ graph TB
     C[Discord Bot] --> B
     D[Scheduler] --> E[Playwright Claimer]
     E --> F[8 Ball Pool Website]
-    E --> G[MongoDB Database]
+    E --> G[PostgreSQL Database]
     B --> G
     H[Admin Panel] --> B
     I[Screenshot Storage] --> E
@@ -53,7 +53,7 @@ graph TB
 |-----------|------------|---------|
 | **Frontend** | React + TypeScript | User dashboard and admin interface |
 | **Backend API** | Node.js + Express | REST API and data management |
-| **Database** | MongoDB | User data and claim records |
+| **Database** | PostgreSQL | User data and claim records |
 | **Automation** | Playwright | Browser automation for claiming |
 | **Discord Bot** | Discord.js | User notifications and management |
 | **Scheduler** | node-cron | Automated daily claiming |
@@ -88,16 +88,15 @@ graph TB
 
 ## 📚 **Documentation**
 
-Comprehensive documentation is available in the [`docs/`](./docs/) directory:
+Complete documentation available in the [`docs/`](./docs/) directory:
 
-- **[File Structure](./docs/FILE_STRUCTURE.md)** - Complete file structure with descriptions and path explanations
-- **[Technical Deep Dive](./docs/README.md)** - Complete system architecture and implementation details
-- **[Host Setup](./docs/HOST_SETUP.md)** - Host-based deployment guide
-- **[Cloudflare Tunnel](./docs/CLOUDFLARE.md)** - Secure public access setup
-- **[Environment Setup](./docs/ENV_SETUP_GUIDE.md)** - Configuration guide
-- **[Deployment Checklist](./docs/DEPLOYMENT_CHECKLIST.md)** - Production deployment steps
-- **[Discord Setup](./docs/DISCORD_SETUP.md)** - Bot configuration
-- And more in the [`docs/`](./docs/) folder
+1. **[README.md](./docs/README.md)** - Complete system architecture and technical deep dive
+2. **[SETUP.md](./docs/SETUP.md)** - Setup and deployment guide (Docker & Host)
+3. **[CONFIGURATION.md](./docs/CONFIGURATION.md)** - Complete configuration reference
+4. **[INTEGRATION.md](./docs/INTEGRATION.md)** - Discord, Telegram, Cloudflare, and VPS auth setup
+5. **[TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md)** - Troubleshooting and advanced topics
+
+Additional documentation and legacy guides are archived in [`docs/archive/`](./docs/archive/).
 
 ## 📊 **Dashboard Features**
 
@@ -129,8 +128,8 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 - **Node.js** - Runtime environment
 - **Express.js** - Web framework
 - **TypeScript** - Type-safe server code
-- **MongoDB** - Document database
-- **Mongoose** - MongoDB object modeling
+- **PostgreSQL** - Primary relational database (replaces MongoDB)
+- **pg** - PostgreSQL client library
 
 ### **Automation**
 - **Playwright** - Browser automation
@@ -148,7 +147,7 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 
 ### **Prerequisites**
 - Node.js 18+
-- MongoDB 6.0+
+- PostgreSQL 14+
 - Discord Bot Token
 - Telegram Bot Token (optional)
 
@@ -174,11 +173,11 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 
 4. **Database setup**
    ```bash
-   # Start MongoDB service
-   sudo systemctl start mongod
+   # Start PostgreSQL service
+   sudo systemctl start postgresql
    
    # Run database setup
-   node scripts/setup-database.js
+   psql -U postgres -f scripts/init-postgres.sql
    ```
 
 5. **Build and start**
@@ -191,7 +190,11 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 
 ```env
 # Database
-MONGO_URI=mongodb://localhost:27017/8bp-rewards
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=8bp_rewards
+POSTGRES_USER=admin
+POSTGRES_PASSWORD=your_password
 
 # Discord
 DISCORD_TOKEN=your_discord_bot_token
@@ -218,22 +221,33 @@ VPS_OWNERS=owner1,owner2,owner3
 - 📖 **[Complete Documentation](docs/README.md)** - Detailed setup and configuration guide
 - 📋 **[Documentation Index](docs/index.md)** - Quick reference for all docs
 - 🔧 **[Shell Scripts](docs/shell.md)** - Utility scripts and automation tools
-- 🗄️ **[MongoDB Setup](docs/MONGODB_SETUP.md)** - Database configuration guide
+- 🗄️ **[PostgreSQL Setup](docs/POSTGRESQL_SETUP.md)** - Database configuration guide
 - 🤖 **[Discord Setup](docs/DISCORD_SETUP.md)** - Bot configuration and commands
 
 ---
 
 ## 🔧 **System Services**
 
-The system runs as multiple services:
+The system runs as Docker containers (recommended) or as host services:
 
-| Service | Description | Status |
-|---------|-------------|--------|
-| **Backend API** | Express server handling requests | `systemctl status 8bp-rewards-backend` |
-| **Discord Bot** | Bot for user management and notifications | `systemctl status 8bp-rewards-discord` |
-| **Scheduler** | Automated claiming service | `systemctl status 8bp-rewards-scheduler` |
+### **Docker Deployment (Recommended)**
+```bash
+# Start all services
+docker-compose up -d
 
-### **Service Management**
+# Check status
+docker-compose ps
+
+# View logs
+docker-compose logs -f backend
+docker-compose logs -f discord-api
+docker-compose logs -f claimer
+
+# Stop all services
+docker-compose down
+```
+
+### **Host Services (Legacy)**
 ```bash
 # Start all services
 sudo systemctl start 8bp-rewards-backend
@@ -246,6 +260,8 @@ sudo systemctl status 8bp-rewards-*
 # View logs
 sudo journalctl -u 8bp-rewards-backend -f
 ```
+
+See [Docker Setup Guide](./docs/DOCKER_SETUP_GUIDE.md) for complete Docker deployment instructions.
 
 ---
 
@@ -334,7 +350,7 @@ The Admin Dashboard now supports multiple manual claim options:
 
 1. **Claims Not Working**
    - Check browser concurrency settings
-   - Verify MongoDB connection
+   - Verify PostgreSQL connection (Docker: `docker-compose ps`, Host: `systemctl status postgresql`)
    - Review Playwright browser setup
 
 2. **Discord Bot Offline**
@@ -343,9 +359,10 @@ The Admin Dashboard now supports multiple manual claim options:
    - Review service status
 
 3. **Database Connection Issues**
-   - Confirm MongoDB is running
-   - Check connection string
-   - Verify network access
+   - Confirm PostgreSQL is running (check Docker: `docker ps` or host: `systemctl status postgresql`)
+   - Check connection string in `.env` file
+   - Verify network access and credentials
+   - For Docker: Ensure `POSTGRES_HOST=postgres` in docker-compose.yml
 
 ### **Logs & Debugging**
 ```bash
@@ -390,8 +407,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **8 Ball Pool** - For providing the rewards system
 - **Playwright** - For excellent browser automation
 - **Discord** - For bot platform and API
-- **MongoDB** - For reliable data storage
+- **PostgreSQL** - For reliable data storage
 - **React** - For the modern frontend framework
+- **Docker** - For containerized deployment
 
 ---
 

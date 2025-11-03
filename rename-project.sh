@@ -1,1 +1,0 @@
-shell/rename-project.sh

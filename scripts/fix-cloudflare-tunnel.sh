@@ -53,10 +53,10 @@ credentials-file: ${CREDENTIALS_FILE}
 ingress:
   # All traffic (frontend + backend API) routes to backend port 2600
   # Backend serves frontend static files under /8bp-rewards route
-  - hostname: 8bp.epildevconnect.uk
+  - hostname: 8ballpool.website
     service: http://localhost:2600
     originRequest:
-      httpHostHeader: 8bp.epildevconnect.uk
+      httpHostHeader: 8ballpool.website
       noHappyEyeballs: true
 
   # Catch-all rule (must be last)

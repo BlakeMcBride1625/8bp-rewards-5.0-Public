@@ -23,6 +23,31 @@ router.post('/', checkDeviceBlocking, logDeviceInfo, validateRegistration, async
     const existingUser = await dbService.findRegistration({ eightBallPoolId });
     
     if (existingUser) {
+      // If user exists but username is just the ID (from migration), update it
+      const needsUsernameUpdate = existingUser.username === eightBallPoolId && username && username !== eightBallPoolId;
+      
+      if (needsUsernameUpdate) {
+        logger.info('Updating username for existing user', {
+          action: 'username_update',
+          eightBallPoolId,
+          oldUsername: existingUser.username,
+          newUsername: username
+        });
+        
+        // Update the username
+        await dbService.updateRegistration(eightBallPoolId, { username });
+        
+        res.status(200).json({
+          message: 'Username updated successfully',
+          user: {
+            eightBallPoolId: existingUser.eightBallPoolId,
+            username: username,
+            createdAt: existingUser.createdAt
+          }
+        });
+        return;
+      }
+      
       logger.warn('Registration attempt with existing 8BP ID', {
         action: 'registration_duplicate',
         eightBallPoolId,
@@ -31,7 +56,8 @@ router.post('/', checkDeviceBlocking, logDeviceInfo, validateRegistration, async
       
       res.status(409).json({
         error: 'User with this 8 Ball Pool ID is already registered',
-        eightBallPoolId
+        eightBallPoolId,
+        existingUsername: existingUser.username
       });
       return;
     }

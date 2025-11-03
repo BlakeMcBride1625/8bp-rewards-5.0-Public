@@ -4,8 +4,29 @@
  */
 
 // In production build, use production API URL
-// In development, use localhost
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:2600/api';
+// In development, use localhost with configured backend port
+const backendPort = process.env.REACT_APP_BACKEND_PORT || '2600';
+export const API_BASE_URL = process.env.REACT_APP_API_URL || `http://localhost:${backendPort}/api`;
+
+// WebSocket URL - use same origin as the current page
+export const getWebSocketURL = (): string => {
+  // Use the current window location to determine protocol and host
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    return `${protocol}//${host}`;
+  }
+  
+  // Fallback for SSR: use API_BASE_URL
+  const apiUrl = API_BASE_URL.replace('/api', '');
+  if (apiUrl.startsWith('https://')) {
+    return apiUrl.replace('https://', 'wss://');
+  } else {
+    return apiUrl.replace('http://', 'ws://');
+  }
+};
+
+export const WEBSOCKET_URL = getWebSocketURL();
 
 export const API_ENDPOINTS = {
   // Base URL for direct access
@@ -35,6 +56,7 @@ export const API_ENDPOINTS = {
   ADMIN_RESET_LEADERBOARD_ACCESS_STATUS: `${API_BASE_URL}/admin/reset-leaderboard/access-status`,
   ADMIN_ACTIVE_SERVICES: `${API_BASE_URL}/admin/active-services`,
   ADMIN_HEARTBEAT_SUMMARY: `${API_BASE_URL}/admin/heartbeat/summary`,
+  ADMIN_USER_COUNT: `${API_BASE_URL}/admin/user-count`,
   
   // VPS Monitor Authentication
   ADMIN_VPS_REQUEST_ACCESS: `${API_BASE_URL}/admin/vps/request-access`,
@@ -53,6 +75,11 @@ export const API_ENDPOINTS = {
   
   // Contact
   CONTACT: `${API_BASE_URL}/contact`,
+  
+  // Validation
+  VALIDATION_REVALIDATE_USER: `${API_BASE_URL}/validation/revalidate-user`,
+  VALIDATION_REVALIDATE_ALL: `${API_BASE_URL}/validation/revalidate-all-invalid`,
+  VALIDATION_DEREGISTERED_USERS: `${API_BASE_URL}/validation/deregistered-users`,
 };
 
 // Helper function to build admin user block endpoint

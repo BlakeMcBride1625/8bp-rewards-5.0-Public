@@ -7,7 +7,7 @@ set -e
 
 TUNNEL_NAME="8bp-rewards-tunnel"
 TUNNEL_ID="3ebdc4f9-8bcb-4913-8336-19c295bdaff0"
-HOSTNAME="8bp.epildevconnect.uk"
+HOSTNAME="8ballpool.website"
 
 echo "🌐 Updating DNS Route for Cloudflare Tunnel"
 echo "============================================"
@@ -47,9 +47,9 @@ else
     echo "   Method 1: Via Cloudflare Dashboard (Easiest)"
     echo "   ─────────────────────────────────────────────"
     echo "   1. Go to: https://dash.cloudflare.com/"
-    echo "   2. Select your domain: epildevconnect.uk"
+    echo "   2. Select your domain: 8ballpool.website"
     echo "   3. Go to: DNS > Records"
-    echo "   4. Find the CNAME record for '8bp'"
+    echo "   4. Find the CNAME record for '@' or root domain"
     echo "   5. Click 'Edit' on that record"
     echo "   6. Change the target/content to the new tunnel ID:"
     echo "      $TUNNEL_ID.cfargotunnel.com"

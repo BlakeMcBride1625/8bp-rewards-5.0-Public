@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { API_ENDPOINTS } from '../config/api';
+import { useClaimProgress } from '../hooks/useWebSocket';
 import { 
   Play, 
   Pause, 
@@ -85,6 +86,10 @@ const ClaimProgressTracker: React.FC<ClaimProgressTrackerProps> = ({
   const [showLogs, setShowLogs] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
+  // Use WebSocket for real-time updates
+  const { progress: wsProgress, status: wsStatus, isConnected } = useClaimProgress(processId || null);
+
+  // Fetch initial progress via HTTP (fallback)
   const fetchProgress = useCallback(async () => {
     if (!processId) return;
     
@@ -108,6 +113,7 @@ const ClaimProgressTracker: React.FC<ClaimProgressTrackerProps> = ({
     }
   }, [processId]);
 
+  // Fetch initial progress on mount
   useEffect(() => {
     if (processId) {
       setIsLoading(true);
@@ -115,15 +121,28 @@ const ClaimProgressTracker: React.FC<ClaimProgressTrackerProps> = ({
     }
   }, [processId, fetchProgress]);
 
+  // Update progress from WebSocket when received
   useEffect(() => {
-    if (processId && autoRefresh) {
-      const interval = setInterval(() => {
-        fetchProgress();
-      }, 2000);
+    if (wsProgress) {
+      setProgress(wsProgress as ClaimProgress);
+      setError(null);
+      setIsLoading(false);
       
-      return () => clearInterval(interval);
+      // Stop auto-refresh if process is completed or failed
+      if (wsProgress.status === 'completed' || wsProgress.status === 'failed') {
+        setAutoRefresh(false);
+      }
     }
-  }, [processId, autoRefresh, fetchProgress]);
+  }, [wsProgress]);
+
+  // Show connection status in error if disconnected
+  useEffect(() => {
+    if (wsStatus === 'error' && !progress) {
+      setError('WebSocket connection failed. Trying to reconnect...');
+    } else if (wsStatus === 'connected') {
+      setError(null);
+    }
+  }, [wsStatus, progress]);
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString();
@@ -201,13 +220,22 @@ const ClaimProgressTracker: React.FC<ClaimProgressTrackerProps> = ({
               {showLogs ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               {showLogs ? 'Hide' : 'Show'} Logs
             </button>
-            <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`btn-secondary ${autoRefresh ? 'bg-green-100 dark:bg-green-900' : ''}`}
-            >
-              <RefreshCw className={`w-4 h-4 ${autoRefresh ? 'animate-spin' : ''}`} />
-              Auto Refresh
-            </button>
+            {wsStatus === 'connected' ? (
+              <span className="text-sm text-green-600 dark:text-green-400 flex items-center space-x-1">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>Live Updates</span>
+              </span>
+            ) : wsStatus === 'connecting' ? (
+              <span className="text-sm text-yellow-600 dark:text-yellow-400 flex items-center space-x-1">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Connecting...</span>
+              </span>
+            ) : (
+              <span className="text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
+                <XCircle className="w-4 h-4" />
+                <span>Disconnected</span>
+              </span>
+            )}
             {onClose && (
               <button
                 onClick={onClose}
