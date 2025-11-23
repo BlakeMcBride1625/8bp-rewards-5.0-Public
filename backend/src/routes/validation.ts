@@ -120,12 +120,38 @@ router.get('/system-health', async (req: Request, res: Response<ApiResponse>) =>
     const metrics = await dbService.getSystemHealthMetrics();
     const validationHealth = validationService.getHealthStatus();
     
+    // Include heartbeat registry data for active services tracking
+    const { HeartbeatRegistry } = require('../services/HeartbeatRegistry');
+    const heartbeatRegistry = HeartbeatRegistry.getInstance();
+    const heartbeatSummary = heartbeatRegistry.getSummary();
+    const activeRecords = heartbeatRegistry.getActiveRecords();
+    
+    // Format module stats for frontend compatibility
+    const moduleStatsObj: Record<string, any> = {};
+    Object.entries(validationHealth.moduleStats).forEach(([module, stats]: [string, any]) => {
+      moduleStatsObj[module] = {
+        validation_attempt: stats.validation_attempt || 0,
+        validation_success: stats.validation_success || 0,
+        validation_failure: stats.validation_failure || 0,
+        validation_error: stats.validation_error || 0
+      };
+    });
+    
     res.json({
       success: true,
       data: {
         database: metrics,
         validation: validationHealth,
-        timestamp: new Date().toISOString()
+        heartbeat: {
+          totalActiveFiles: heartbeatSummary.totalActiveFiles,
+          activeProcesses: Object.keys(heartbeatSummary.byProcess).length,
+          activeRecords: activeRecords.length
+        },
+        cacheSize: validationHealth.cacheSize, // For backward compatibility
+        errorCounts: validationHealth.errorCounts, // For backward compatibility
+        moduleStats: moduleStatsObj, // For frontend compatibility
+        timestamp: new Date().toISOString(),
+        status: 'online' // System is online if we can reach here
       }
     });
   } catch (error) {
@@ -143,37 +169,95 @@ router.get('/system-health', async (req: Request, res: Response<ApiResponse>) =>
 
 /**
  * Get system integration data (alias for module-status)
+ * Enhanced to include heartbeat registry data for live service status
  */
 router.get('/system-integration', async (req: Request, res: Response<ApiResponse>) => {
   try {
     const moduleStats = validationService.getModuleStats();
     
-    // Define expected modules
+    // Include heartbeat registry data for live service tracking
+    const { HeartbeatRegistry } = require('../services/HeartbeatRegistry');
+    const heartbeatRegistry = HeartbeatRegistry.getInstance();
+    const heartbeatSummary = heartbeatRegistry.getSummary();
+    const activeRecords = heartbeatRegistry.getActiveRecords();
+    
+    // Map active services from heartbeat to module names
+    const activeServices = new Set<string>();
+    activeRecords.forEach((rec: any) => {
+      if (rec.service) {
+        activeServices.add(rec.service);
+      }
+      // Also check moduleId for service identification
+      if (rec.moduleId) {
+        const moduleIdLower = rec.moduleId.toLowerCase();
+        if (moduleIdLower.includes('claimer')) {
+          activeServices.add('claimer');
+        } else if (moduleIdLower.includes('discord')) {
+          activeServices.add('discord');
+        } else if (moduleIdLower.includes('scheduler')) {
+          activeServices.add('scheduler');
+        }
+      }
+    });
+    
+    // Define expected modules with their service mappings
     const expectedModules = [
-      'playwright-claimer-discord',
-      'playwright-claimer',
-      'registration-api',
-      'scheduler-service',
-      'admin-dashboard'
+      { name: 'playwright-claimer-discord', serviceType: 'claimer', category: 'Claimers' },
+      { name: 'playwright-claimer', serviceType: 'claimer', category: 'Claimers' },
+      { name: 'first-time-claimer', serviceType: 'claimer', category: 'Claimers' },
+      { name: 'registration-api', serviceType: 'backend', category: 'Services' },
+      { name: 'scheduler-service', serviceType: 'scheduler', category: 'Services' },
+      { name: 'validation-service', serviceType: 'backend', category: 'Services' },
+      { name: 'monitoring-service', serviceType: 'backend', category: 'Services' },
+      { name: 'admin-dashboard', serviceType: 'backend', category: 'Services' }
     ];
     
-    const moduleStatus: ModuleStatus[] = expectedModules.map(module => ({
-      name: module,
-      status: moduleStats[module] ? 'integrated' : 'not_integrated',
-      stats: moduleStats[module] || {
-        validation_attempt: 0,
-        validation_success: 0,
-        validation_failure: 0,
-        validation_error: 0
+    const moduleStatus: ModuleStatus[] = expectedModules.map(module => {
+      const isIntegrated = moduleStats[module.name] ? true : false;
+      const isLive = activeServices.has(module.serviceType) || isIntegrated;
+      
+      return {
+        name: module.name,
+        status: isLive ? 'integrated' : 'not_integrated',
+        stats: moduleStats[module.name] || {
+          validation_attempt: 0,
+          validation_success: 0,
+          validation_failure: 0,
+          validation_error: 0
+        },
+        serviceType: module.serviceType,
+        category: module.category,
+        isLive: isLive
+      };
+    });
+    
+    // Group modules by category
+    const modulesByCategory: { [key: string]: ModuleStatus[] } = {
+      'Claimers': [],
+      'Services': []
+    };
+    
+    moduleStatus.forEach(module => {
+      const category = (module as any).category || 'Services';
+      if (!modulesByCategory[category]) {
+        modulesByCategory[category] = [];
       }
-    }));
+      modulesByCategory[category].push(module);
+    });
     
     res.json({
       success: true,
       data: {
         modules: moduleStatus,
+        modulesByCategory: modulesByCategory,
         totalModules: expectedModules.length,
-        integratedModules: moduleStatus.filter(m => m.status === 'integrated').length
+        integratedModules: moduleStatus.filter(m => m.status === 'integrated').length,
+        liveModules: moduleStatus.filter(m => (m as any).isLive).length,
+        heartbeat: {
+          totalActiveFiles: heartbeatSummary.totalActiveFiles,
+          activeProcesses: Object.keys(heartbeatSummary.byProcess).length,
+          activeServices: Array.from(activeServices)
+        }
       }
     });
   } catch (error) {

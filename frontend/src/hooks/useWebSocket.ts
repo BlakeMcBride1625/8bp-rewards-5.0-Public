@@ -195,3 +195,55 @@ export function useVPSStats() {
   return { stats, status, isConnected };
 }
 
+/**
+ * Hook specifically for listening to screenshot updates
+ */
+export function useScreenshots(userId: string | null) {
+  const { socket, status, isConnected } = useWebSocket({ autoConnect: !!userId });
+  const [shouldRefresh, setShouldRefresh] = useState(false);
+  const [newScreenshot, setNewScreenshot] = useState<any>(null);
+
+  useEffect(() => {
+    if (!socket || !userId || !isConnected) {
+      return;
+    }
+
+    // Join the screenshots room for this user
+    socket.emit('join-screenshots');
+
+    // Listen for screenshot refresh events
+    const handleRefresh = () => {
+      setShouldRefresh(true);
+    };
+
+    // Listen for individual screenshot updates
+    const handleScreenshotUpdate = (data: any) => {
+      setNewScreenshot(data);
+      setShouldRefresh(true);
+    };
+
+    socket.on('screenshots-refresh', handleRefresh);
+    socket.on('screenshot-update', handleScreenshotUpdate);
+
+    return () => {
+      socket.off('screenshots-refresh', handleRefresh);
+      socket.off('screenshot-update', handleScreenshotUpdate);
+      socket.emit('leave-screenshots');
+    };
+  }, [socket, userId, isConnected]);
+
+  // Reset refresh flag after it's been consumed
+  const consumeRefresh = useCallback(() => {
+    setShouldRefresh(false);
+    setNewScreenshot(null);
+  }, []);
+
+  return { 
+    shouldRefresh, 
+    newScreenshot, 
+    consumeRefresh, 
+    status, 
+    isConnected 
+  };
+}
+

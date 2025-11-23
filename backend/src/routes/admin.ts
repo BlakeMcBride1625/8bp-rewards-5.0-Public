@@ -8,6 +8,7 @@ import TelegramNotificationService from '../services/TelegramNotificationService
 import { EmailNotificationService } from '../services/EmailNotificationService';
 import { exec } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import { DeviceDetectionService } from '../services/DeviceDetectionService';
 import { BlockingService } from '../services/BlockingService';
 import { checkDeviceBlocking, logDeviceInfo } from '../middleware/deviceBlocking';
@@ -73,8 +74,37 @@ router.get('/bot-status-public', async (req, res) => {
 // Apply admin authentication to all remaining routes
 router.use(authenticateAdmin);
 
+// Request throttling middleware for admin endpoints
+const requestCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 2000; // 2 seconds cache to prevent duplicate requests
+
+const throttleAdminRequest = (req: express.Request, res: express.Response, next: express.NextFunction): void => {
+  const cacheKey = `${req.method}:${req.path}:${(req.user as any)?.id}`;
+  const cached = requestCache.get(cacheKey);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    res.json(cached.data);
+    return;
+  }
+  
+  // Store original json method
+  const originalJson = res.json.bind(res);
+  res.json = function(data: any) {
+    requestCache.set(cacheKey, { data, timestamp: Date.now() });
+    // Clean old cache entries (older than 10 seconds)
+    for (const [key, value] of requestCache.entries()) {
+      if (Date.now() - value.timestamp > 10000) {
+        requestCache.delete(key);
+      }
+    }
+    return originalJson(data);
+  };
+  
+  next();
+};
+
 // Get admin dashboard overview
-router.get('/overview', async (req, res) => {
+router.get('/overview', throttleAdminRequest, async (req, res) => {
   try {
     const user = req.user as any;
     
@@ -96,44 +126,103 @@ router.get('/overview', async (req, res) => {
       logger.warn('Failed to get recent registrations count', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
 
-    // Get claim statistics (all-time)
-    const claimStats = await dbService.getClaimStats(); // Get all-time stats
+    // Get claim statistics - match leaderboard query format (last 7 days for consistency)
+    // This ensures dashboard matches leaderboard data
+    const sevenDaysAgoForClaims = new Date();
+    sevenDaysAgoForClaims.setDate(sevenDaysAgoForClaims.getDate() - 7);
     
-    // Get log statistics (last 7 days) from database
+    // Use the same query format as leaderboard for consistency
+    let claimStats: any[] = [];
+    try {
+      // Exclude failed claims where user has successful claim on same day (duplicate attempts, not real failures)
+      const claimStatsQuery = `
+        SELECT 
+          cr.status as _id,
+          COUNT(*) as count,
+          COALESCE(SUM(ARRAY_LENGTH(cr.items_claimed, 1)) FILTER (WHERE cr.status = 'success'), 0) as totalitems
+        FROM claim_records cr
+        WHERE cr.claimed_at >= $1
+        AND (
+          cr.status = 'success' 
+          OR (
+            cr.status = 'failed' 
+            AND NOT EXISTS (
+              SELECT 1 FROM claim_records cr2 
+              WHERE cr2.eight_ball_pool_id = cr.eight_ball_pool_id 
+              AND cr2.status = 'success' 
+              AND DATE(cr2.claimed_at) = DATE(cr.claimed_at)
+              AND cr2.claimed_at >= $1
+            )
+          )
+        )
+        GROUP BY cr.status
+      `;
+      const claimResult = await dbService.executeQuery(claimStatsQuery, [sevenDaysAgoForClaims]);
+      
+      claimStats = claimResult.rows.map((row: any) => ({
+        _id: row._id,
+        count: parseInt(row.count),
+        totalitems: parseInt(row.totalitems) || 0
+      }));
+      
+      // Ensure we always have entries for 'success' and 'failed' even if count is 0
+      if (!claimStats.find((c: any) => c._id === 'success')) {
+        claimStats.push({ _id: 'success', count: 0, totalitems: 0 });
+      }
+      if (!claimStats.find((c: any) => c._id === 'failed')) {
+        claimStats.push({ _id: 'failed', count: 0, totalitems: 0 });
+      }
+      
+      logger.info('Admin overview - claim stats calculated', {
+        action: 'admin_overview_claim_stats',
+        claimStats,
+        period: '7 days'
+      });
+    } catch (error) {
+      logger.warn('Failed to get claim stats, using fallback', { 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      });
+      // Fallback to all-time stats if timeframe query fails
+      claimStats = await dbService.getClaimStats();
+    }
+    
+    // Get log statistics (last 7 days) from database - CACHED to prevent excessive queries
     let logStats: any[] = [];
     try {
-      const { Pool } = require('pg');
-      const pool = new Pool({
-        host: process.env.POSTGRES_HOST || 'localhost',
-        port: parseInt(process.env.POSTGRES_PORT || '5432'),
-        database: process.env.POSTGRES_DB || '8bp_rewards',
-        user: process.env.POSTGRES_USER || 'admin',
-        password: process.env.POSTGRES_PASSWORD || '192837DB25',
-        ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false
-      });
+      const logStatsCacheKey = 'admin_overview_log_stats';
+      const cachedLogStats = requestCache.get(logStatsCacheKey);
+      let logStatsResult;
       
-      // Get log counts by level for last 7 days
-      const result = await pool.query(`
-        SELECT level, COUNT(*) as count 
-        FROM log_entries 
-        WHERE timestamp > NOW() - INTERVAL '7 days'
-        GROUP BY level
-      `);
+      if (cachedLogStats && Date.now() - cachedLogStats.timestamp < 30000) { // 30 second cache
+        logStatsResult = cachedLogStats.data;
+      } else {
+        // Use database service instead of creating new pool (prevents connection leaks)
+        const result = await dbService.executeQuery(`
+          SELECT level, COUNT(*) as count 
+          FROM log_entries 
+          WHERE timestamp > NOW() - INTERVAL '7 days'
+          GROUP BY level
+        `);
+        logStatsResult = result;
+        requestCache.set(logStatsCacheKey, { data: logStatsResult, timestamp: Date.now() });
+      }
       
       // Convert to array format
-      logStats = result.rows.map((row: any) => ({
+      logStats = logStatsResult.rows.map((row: any) => ({
         _id: row.level,
         count: parseInt(row.count),
         latest: new Date().toISOString()
       }));
-      
-      await pool.end();
     } catch (error) {
       logger.warn('Failed to read log statistics from database', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
 
-    // Get recent claims
-    const recentClaims = await dbService.findClaimRecords();
+    // Get recent claims (last 7 days, same as leaderboard for consistency)
+    const sevenDaysAgoForRecent = new Date();
+    sevenDaysAgoForRecent.setDate(sevenDaysAgoForRecent.getDate() - 7);
+    const recentClaims = await dbService.findClaimRecords({
+      claimedAt: { $gte: sevenDaysAgoForRecent }
+    });
     
     // Debug logging for claim status
     logger.info('Admin overview - recent claims debug', {
@@ -148,6 +237,49 @@ router.get('/overview', async (req, res) => {
       }))
     });
 
+    // Map recent claims with screenshot paths from metadata
+    const mappedRecentClaims = recentClaims.slice(0, 10).map((claim: any) => {
+      // Extract screenshot path from metadata if available
+      const metadata = typeof claim.metadata === 'object' 
+        ? claim.metadata 
+        : (claim.metadata ? JSON.parse(claim.metadata) : {});
+      
+      const screenshotPath = metadata.screenshotPath || metadata.confirmationImagePath || null;
+      
+      return {
+        eightBallPoolId: claim.eightBallPoolId,
+        status: claim.status,
+        itemsClaimed: claim.itemsClaimed || [],
+        claimedAt: claim.claimedAt,
+        screenshotPath: screenshotPath,
+        // Get username from registration if available
+        username: null // Will be populated if needed
+      };
+    });
+    
+    // Optionally enrich with usernames
+    try {
+      const userIds = mappedRecentClaims.map(c => c.eightBallPoolId);
+      if (userIds.length > 0) {
+        const usernameQuery = `
+          SELECT eight_ball_pool_id, username 
+          FROM registrations 
+          WHERE eight_ball_pool_id = ANY($1)
+        `;
+        const usernameResult = await dbService.executeQuery(usernameQuery, [userIds]);
+        const usernameMap = new Map();
+        usernameResult.rows.forEach((row: any) => {
+          usernameMap.set(row.eight_ball_pool_id, row.username);
+        });
+        
+        mappedRecentClaims.forEach(claim => {
+          claim.username = usernameMap.get(claim.eightBallPoolId) || null;
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to fetch usernames for recent claims', { error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+
     res.json({
       registrations: {
         total: totalRegistrationsCount,
@@ -156,12 +288,7 @@ router.get('/overview', async (req, res) => {
       },
       claims: claimStats,
       logs: logStats,
-      recentClaims: recentClaims.slice(0, 10).map((claim: any) => ({
-        eightBallPoolId: claim.eightBallPoolId,
-        status: claim.status,
-        itemsClaimed: claim.itemsClaimed,
-        claimedAt: claim.claimedAt
-      }))
+      recentClaims: mappedRecentClaims
     });
 
   } catch (error) {
@@ -248,7 +375,7 @@ router.get('/user-count', async (req, res) => {
 });
 
 // Get test users configuration
-router.get('/test-users', async (req, res) => {
+router.get('/test-users', throttleAdminRequest, async (req, res) => {
   try {
     // Default test users - can be configured via environment variables
     const defaultTestUsers = [
@@ -295,7 +422,7 @@ router.get('/test-users', async (req, res) => {
 });
 
 // Get all registrations with pagination
-router.get('/registrations', async (req, res) => {
+router.get('/registrations', throttleAdminRequest, async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -335,18 +462,44 @@ router.get('/registrations', async (req, res) => {
     const countResult = await dbService.executeQuery(countSql, countValues);
     const total = parseInt(countResult.rows[0].total);
 
-    // Map results to expected format
-    const registrations = result.rows.map((row: any) => ({
-      _id: row.id,
-      eightBallPoolId: row.eight_ball_pool_id,
-      username: row.username,
-      email: row.email,
-      discordId: row.discord_id,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      isActive: row.is_active,
-      metadata: row.metadata
-    }));
+    // Map results and include claim statistics
+    const registrations = await Promise.all(
+      result.rows.map(async (row: any) => {
+        // Get claim statistics for this user
+        const successResult = await dbService.executeQuery(
+          `SELECT COUNT(*) as count FROM claim_records 
+           WHERE eight_ball_pool_id = $1 AND status = 'success'`,
+          [row.eight_ball_pool_id]
+        );
+        const failedResult = await dbService.executeQuery(
+          `SELECT COUNT(*) as count FROM claim_records 
+           WHERE eight_ball_pool_id = $1 AND status = 'failed'`,
+          [row.eight_ball_pool_id]
+        );
+
+        const successfulClaims = parseInt(successResult.rows[0]?.count || '0');
+        const failedClaims = parseInt(failedResult.rows[0]?.count || '0');
+
+        return {
+          _id: row.id,
+          eightBallPoolId: row.eight_ball_pool_id,
+          username: row.username,
+          email: row.email,
+          discordId: row.discord_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          isActive: row.is_active,
+          metadata: row.metadata,
+          successfulClaims,
+          failedClaims,
+          registrationIp: row.registration_ip,
+          deviceId: row.device_id,
+          deviceType: row.device_type,
+          isBlocked: row.is_blocked,
+          blockedReason: row.blocked_reason
+        };
+      })
+    );
 
     res.json({
       registrations,
@@ -451,50 +604,154 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
       });
     });
 
-    // Trigger immediate first-time claim using the working claimer
-    logger.info('Triggering first-time claim for admin-added user', {
-      action: 'first_claim_trigger',
+    // Trigger registration validation first (same as normal registration)
+    // If validation passes, it will automatically trigger first-time claim (Stage 2)
+    logger.info('Triggering registration validation for admin-added user', {
+      action: 'registration_validation_trigger',
       eightBallPoolId,
       username
     });
     
-    // Use the working claimer script directly
+    // Trigger registration validation in background
     // Run in background (don't await - let it run async)
     (async () => {
       try {
-        logger.info('🚀 ASYNC CLAIM STARTED', { eightBallPoolId });
-        const EightBallPoolClaimer = require('../../../playwright-claimer-discord');
-        logger.info('✅ Claimer module loaded', { eightBallPoolId });
-        const claimer = new EightBallPoolClaimer();
-        logger.info('✅ Claimer instance created', { eightBallPoolId });
+        logger.info('🚀 ASYNC VALIDATION STARTED', { eightBallPoolId, username });
         
-        // Initialize Discord and Database before claiming
-        logger.info('Initializing Discord service for claim', { eightBallPoolId });
-        await claimer.initializeDiscord();
+        // Use spawn with better error handling
+        const { spawn } = require('child_process');
         
-        logger.info('Connecting to database for claim', { eightBallPoolId });
-        await claimer.connectToDatabase();
+        // Resolve script path - works in both dev and Docker
+        // In dev: backend/src/scripts/registration-validation.ts
+        // In Docker compiled: dist/backend/backend/src/scripts/registration-validation.ts
+        // Try multiple possible locations
+        const possiblePaths = [
+          path.join(process.cwd(), 'backend/src/scripts/registration-validation.ts'),
+          path.join(process.cwd(), 'dist/backend/backend/src/scripts/registration-validation.ts'),
+          path.join(__dirname, '../scripts/registration-validation.ts'),
+          path.join(__dirname, '../../backend/src/scripts/registration-validation.ts'),
+          path.resolve(__dirname, '../../backend/src/scripts/registration-validation.ts')
+        ];
         
-        logger.info('Starting claim process', { eightBallPoolId });
-        const result = await claimer.claimRewardsForUser(eightBallPoolId);
-        
-        if (result.success) {
-          logger.info('First-time claim completed', {
-            action: 'first_claim_success',
-            eightBallPoolId,
-            itemsClaimed: result.claimedItems
-          });
-        } else {
-          logger.error('First-time claim failed', {
-            action: 'first_claim_error',
-            eightBallPoolId,
-            error: result.error
-          });
+        let validationScript: string | null = null;
+        const fs = require('fs');
+        for (const scriptPath of possiblePaths) {
+          try {
+            if (fs.existsSync(scriptPath)) {
+              validationScript = scriptPath;
+              break;
+            }
+          } catch (e) {
+            // Continue to next path
+          }
         }
+        
+        if (!validationScript) {
+          logger.error('Registration validation script not found', {
+            action: 'validation_script_not_found',
+            eightBallPoolId,
+            username,
+            triedPaths: possiblePaths
+          });
+          return;
+        }
+        
+        logger.info('Running registration validation script', { 
+          eightBallPoolId, 
+          username, 
+          script: validationScript,
+          cwd: process.cwd()
+        });
+        
+        // Determine if tsx is available (dev) or use node with compiled JS
+        // Check if script is .ts (needs tsx) or .js (can use node)
+        // validationScript is guaranteed non-null after the check above
+        const isTypeScript = validationScript.endsWith('.ts');
+        const command = isTypeScript ? 'npx' : 'node';
+        const args = isTypeScript 
+          ? ['tsx', validationScript, eightBallPoolId, username]
+          : [validationScript, eightBallPoolId, username];
+        
+        const validationProcess = spawn(command, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          cwd: process.cwd(),
+          detached: false,
+          env: {
+            ...process.env,
+            NODE_ENV: process.env.NODE_ENV || 'production'
+          }
+        });
+        
+        // Set a timeout to kill the process if it hangs
+        const timeout = setTimeout(() => {
+          logger.warn('Validation process timeout - killing process', { eightBallPoolId, username });
+          validationProcess.kill('SIGKILL');
+        }, 300000); // 5 minutes timeout
+        
+        let stdout = '';
+        let stderr = '';
+        
+        validationProcess.stdout?.on('data', (data: Buffer) => {
+          stdout += data.toString();
+          // Log progress in real-time
+          const lines = data.toString().split('\n').filter(line => line.trim());
+          lines.forEach(line => {
+            if (line.includes('[VALIDATION]') || line.includes('[STAGE_2]') || line.includes('✅') || line.includes('❌')) {
+              logger.info('Validation progress', { 
+                eightBallPoolId, 
+                username, 
+                progress: line.trim() 
+              });
+            }
+          });
+        });
+        
+        validationProcess.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString();
+          logger.warn('Validation stderr', { 
+            eightBallPoolId, 
+            username, 
+            stderr: data.toString().trim() 
+          });
+        });
+        
+        validationProcess.on('close', (code: number | null) => {
+          clearTimeout(timeout);
+          if (code === 0) {
+            logger.info('Registration validation completed successfully', {
+              action: 'validation_completed',
+              eightBallPoolId,
+              username,
+              stdout: stdout.substring(0, 1000),
+              stderr: stderr.substring(0, 500)
+            });
+          } else {
+            logger.error('Registration validation failed', {
+              action: 'validation_error',
+              eightBallPoolId,
+              username,
+              exitCode: code,
+              stdout: stdout.substring(0, 1000),
+              stderr: stderr.substring(0, 500)
+            });
+          }
+        });
+        
+        validationProcess.on('error', (error: Error) => {
+          clearTimeout(timeout);
+          logger.error('Validation process error', {
+            action: 'validation_process_error',
+            eightBallPoolId,
+            username,
+            error: error.message
+          });
+        });
+        
       } catch (error) {
-        logger.error('First-time claim error', {
-          action: 'first_claim_error',
+        logger.error('Registration validation error', {
+          action: 'validation_error',
           eightBallPoolId,
+          username,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
       }
@@ -502,7 +759,12 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
 
     res.status(201).json({
       message: 'Registration added successfully',
-      registration
+      user: {
+        eightBallPoolId: registration.eightBallPoolId,
+        username: registration.username,
+        createdAt: registration.createdAt
+      },
+      validation: 'Triggered - validation will run in the background and trigger first-time claim if valid'
     });
 
   } catch (error) {
@@ -558,18 +820,120 @@ router.delete('/registrations/:eightBallPoolId', async (req, res): Promise<void>
   }
 });
 
+// Completely remove a user from all tables (fresh start)
+router.delete('/deregistered-users/:eightBallPoolId/remove', authenticateAdmin, async (req, res): Promise<void> => {
+  try {
+    const { eightBallPoolId } = req.params;
+
+    if (!eightBallPoolId) {
+      res.status(400).json({
+        error: 'Eight Ball Pool ID is required'
+      });
+      return;
+    }
+
+    logger.info('Starting complete user removal', {
+      action: 'admin_complete_user_removal',
+      eightBallPoolId,
+      adminId: (req as AdminRequest).user?.id
+    });
+
+    // Remove from all tables
+    const results = {
+      registrations: 0,
+      invalidUsers: 0,
+      claimRecords: 0,
+      validationLogs: 0
+    };
+
+    // 1. Remove from registrations
+    try {
+      await dbService.deleteRegistration(eightBallPoolId);
+      results.registrations = 1;
+    } catch (error) {
+      logger.debug('No registration found or already deleted', { eightBallPoolId });
+    }
+
+    // Ensure database is connected
+    await dbService.connect();
+
+    // 2. Remove from invalid_users (deregistered users)
+    try {
+      const result = await dbService.executeQuery(
+        'DELETE FROM invalid_users WHERE eight_ball_pool_id = $1',
+        [eightBallPoolId]
+      );
+      results.invalidUsers = result.rowCount || 0;
+    } catch (error) {
+      logger.debug('No invalid user record found or already deleted', { eightBallPoolId });
+    }
+
+    // 3. Remove from claim_records
+    try {
+      const result = await dbService.executeQuery(
+        'DELETE FROM claim_records WHERE eight_ball_pool_id = $1',
+        [eightBallPoolId]
+      );
+      results.claimRecords = result.rowCount || 0;
+    } catch (error) {
+      logger.debug('No claim records found or already deleted', { eightBallPoolId });
+    }
+
+    // 4. Remove from validation_logs
+    try {
+      const result = await dbService.executeQuery(
+        'DELETE FROM validation_logs WHERE unique_id = $1',
+        [eightBallPoolId]
+      );
+      results.validationLogs = result.rowCount || 0;
+    } catch (error) {
+      logger.debug('No validation logs found or already deleted', { eightBallPoolId });
+    }
+
+    logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'complete_user_removal', {
+      eightBallPoolId,
+      results
+    });
+
+    res.json({
+      success: true,
+      message: 'User completely removed from all tables',
+      eightBallPoolId,
+      removed: results
+    });
+
+  } catch (error) {
+    logger.error('Failed to completely remove user', {
+      action: 'admin_complete_user_removal_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      adminId: (req as AdminRequest).user?.id,
+      eightBallPoolId: req.params.eightBallPoolId
+    });
+
+    res.status(500).json({
+      error: 'Failed to completely remove user',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Remove failed claims (admin)
 router.delete('/claim-records/failed', async (req, res): Promise<void> => {
   try {
-    const deletedCount = await dbService.deleteClaimRecords({ status: 'failed' });
+    const cleanupResult = await dbService.cleanupFailedClaims();
 
     logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'clear_failed_claims', {
-      deletedCount
+      removedClaimRecords: cleanupResult.removedClaimRecords,
+      removedLogEntries: cleanupResult.removedLogEntries,
+      removedValidationLogs: cleanupResult.removedValidationLogs
     });
 
     res.json({
       message: 'Failed claims removed successfully',
-      deletedCount
+      deletedCount: cleanupResult.removedClaimRecords,
+      removedClaimRecords: cleanupResult.removedClaimRecords,
+      removedLogEntries: cleanupResult.removedLogEntries,
+      removedValidationLogs: cleanupResult.removedValidationLogs
     });
 
   } catch (error) {
@@ -586,7 +950,7 @@ router.delete('/claim-records/failed', async (req, res): Promise<void> => {
 });
 
 // Get logs with pagination and filters
-router.get('/logs', async (req, res) => {
+router.get('/logs', throttleAdminRequest, async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -599,22 +963,7 @@ router.get('/logs', async (req, res) => {
     if (service) filters.service = service;
     if (action) filters.action = action;
 
-    // Read from PostgreSQL database
-    const { Pool } = require('pg');
-    const pool = new Pool({
-      host: process.env.POSTGRES_HOST || 'localhost',
-      port: parseInt(process.env.POSTGRES_PORT || '5432'),
-      database: process.env.POSTGRES_DB || '8bp_rewards',
-      user: process.env.POSTGRES_USER || 'admin',
-      password: process.env.POSTGRES_PASSWORD || '192837DB25',
-      ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false,
-      // Connection pool settings to prevent disconnections
-      max: 20,
-      min: 5,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000
-    });
-    
+    // Read from PostgreSQL database using dbService (prevents connection leaks)
     let logs: any[] = [];
     
     try {
@@ -639,7 +988,7 @@ router.get('/logs', async (req, res) => {
       query += ` ORDER BY timestamp DESC LIMIT $${++paramCount} OFFSET $${++paramCount}`;
       queryParams.push(limit, (page - 1) * limit);
       
-      const result = await pool.query(query, queryParams);
+      const result = await dbService.executeQuery(query, queryParams);
       logs = result.rows.map((row: any) => ({
         id: row.id,
         timestamp: row.timestamp,
@@ -667,10 +1016,8 @@ router.get('/logs', async (req, res) => {
         countParams.push(action);
       }
       
-      const countResult = await pool.query(countQuery, countParams);
+      const countResult = await dbService.executeQuery(countQuery, countParams);
       const total = parseInt(countResult.rows[0].total);
-      
-      await pool.end();
       
       res.json({
         logs,
@@ -3229,6 +3576,248 @@ import activeServicesRouter from './admin-active-services';
 
 // Use the active services router
 router.use('/', activeServicesRouter);
+
+// Deregistration Request Management Routes
+
+// Get all pending deregistration requests
+router.get('/deregistration-requests', async (req, res) => {
+  try {
+    const result = await dbService.executeQuery(
+      `SELECT dr.*, r.username, r.created_at as account_created_at
+       FROM deregistration_requests dr
+       LEFT JOIN registrations r ON dr.eight_ball_pool_id = r.eight_ball_pool_id
+       WHERE dr.status = 'pending'
+       ORDER BY dr.requested_at DESC`
+    );
+
+    if (!result || !result.rows) {
+      logger.warn('No result rows returned from deregistration requests query');
+      return res.json({
+        success: true,
+        requests: []
+      });
+    }
+
+    // Get claim stats and screenshots for each request
+    const requestsWithDetails = await Promise.all(
+      result.rows.map(async (req: any) => {
+        try {
+          // Get claim stats
+          const successResult = await dbService.executeQuery(
+            `SELECT COUNT(*) as count FROM claim_records 
+             WHERE eight_ball_pool_id = $1 AND status = 'success'`,
+            [req.eight_ball_pool_id]
+          );
+          const failedResult = await dbService.executeQuery(
+            `SELECT COUNT(*) as count FROM claim_records 
+             WHERE eight_ball_pool_id = $1 AND status = 'failed'`,
+            [req.eight_ball_pool_id]
+          );
+
+          // Find confirmation screenshot
+          // Use absolute path - screenshots are in /app/screenshots/confirmation in container
+          const screenshotsDir = process.env.SCREENSHOTS_DIR || 
+            (process.env.NODE_ENV === 'production' 
+              ? '/app/screenshots/confirmation'
+              : path.join(__dirname, '../../../../screenshots/confirmation'));
+          let screenshotUrl: string | null = null;
+          if (fs.existsSync(screenshotsDir)) {
+            const files = fs.readdirSync(screenshotsDir);
+            const screenshot = files.find(file => 
+              file.includes(req.eight_ball_pool_id) && 
+              (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg'))
+            );
+            if (screenshot) {
+              screenshotUrl = `/8bp-rewards/api/admin/screenshots/view/confirmation/${screenshot}`;
+            }
+          }
+
+          return {
+            ...req,
+            successfulClaims: parseInt(successResult.rows[0]?.count || '0'),
+            failedClaims: parseInt(failedResult.rows[0]?.count || '0'),
+            screenshotUrl
+          };
+        } catch (itemError) {
+          logger.error('Error processing deregistration request item', {
+            action: 'process_deregistration_request_item_error',
+            error: itemError instanceof Error ? itemError.message : 'Unknown error',
+            requestId: req.id,
+            eightBallPoolId: req.eight_ball_pool_id
+          });
+          // Return basic info even if stats fail
+          return {
+            ...req,
+            successfulClaims: 0,
+            failedClaims: 0,
+            screenshotUrl: null
+          };
+        }
+      })
+    );
+
+    return res.json({
+      success: true,
+      requests: requestsWithDetails
+    });
+  } catch (error) {
+    logger.error('Error fetching deregistration requests', {
+      action: 'get_deregistration_requests_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch deregistration requests',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// Approve a deregistration request
+router.post('/deregistration-requests/:id/approve', async (req, res) => {
+  try {
+    const user = req.user as any;
+    const requestId = req.params.id;
+    const { reviewNotes } = req.body;
+
+    // Get the request
+    const requestResult = await dbService.executeQuery(
+      `SELECT * FROM deregistration_requests WHERE id = $1 AND status = 'pending'`,
+      [requestId]
+    );
+
+    if (requestResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Request not found or already processed'
+      });
+    }
+
+    const request = requestResult.rows[0];
+
+    // Delete the registration
+    await dbService.executeQuery(
+      `DELETE FROM registrations WHERE eight_ball_pool_id = $1`,
+      [request.eight_ball_pool_id]
+    );
+
+    // Update request status
+    await dbService.executeQuery(
+      `UPDATE deregistration_requests 
+       SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, 
+           reviewed_by = $1, review_notes = $2
+       WHERE id = $3`,
+      [user.id, reviewNotes || null, requestId]
+    );
+
+    logger.info('Deregistration request approved', {
+      action: 'deregistration_approved',
+      requestId,
+      eightBallPoolId: request.eight_ball_pool_id,
+      discordId: request.discord_id,
+      reviewedBy: user.id
+    });
+
+    // Send Discord embed notification
+    try {
+      const discordService = new DiscordNotificationService();
+      const discordTag = `${user.username}#${user.discriminator || '0000'}`;
+      await discordService.sendDeregistrationReviewEmbed(
+        'approved',
+        request.discord_id,
+        discordTag,
+        request.eight_ball_pool_id,
+        user.username,
+        reviewNotes || undefined
+      );
+    } catch (discordError) {
+      logger.warn('Failed to send Discord notification for deregistration approval', {
+        action: 'discord_notification_failed',
+        error: discordError instanceof Error ? discordError.message : 'Unknown error'
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Deregistration request approved and account removed'
+    });
+  } catch (error) {
+    logger.error('Error approving deregistration request', {
+      action: 'approve_deregistration_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      requestId: req.params.id
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to approve deregistration request'
+    });
+  }
+});
+
+// Deny a deregistration request
+router.post('/deregistration-requests/:id/deny', async (req, res) => {
+  try {
+    const user = req.user as any;
+    const requestId = req.params.id;
+    const { reviewNotes } = req.body;
+
+    // Update request status
+    await dbService.executeQuery(
+      `UPDATE deregistration_requests 
+       SET status = 'denied', reviewed_at = CURRENT_TIMESTAMP, 
+           reviewed_by = $1, review_notes = $2
+       WHERE id = $3`,
+      [user.id, reviewNotes || null, requestId]
+    );
+
+    logger.info('Deregistration request denied', {
+      action: 'deregistration_denied',
+      requestId,
+      reviewedBy: user.id
+    });
+
+    // Send Discord embed notification
+    try {
+      const requestResult = await dbService.executeQuery(
+        `SELECT * FROM deregistration_requests WHERE id = $1`,
+        [requestId]
+      );
+      const request = requestResult.rows[0];
+      
+      const discordService = new DiscordNotificationService();
+      const discordTag = `${user.username}#${user.discriminator || '0000'}`;
+      await discordService.sendDeregistrationReviewEmbed(
+        'denied',
+        request.discord_id,
+        discordTag,
+        request.eight_ball_pool_id,
+        user.username,
+        reviewNotes || undefined
+      );
+    } catch (discordError) {
+      logger.warn('Failed to send Discord notification for deregistration denial', {
+        action: 'discord_notification_failed',
+        error: discordError instanceof Error ? discordError.message : 'Unknown error'
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Deregistration request denied'
+    });
+  } catch (error) {
+    logger.error('Error denying deregistration request', {
+      action: 'deny_deregistration_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      requestId: req.params.id
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to deny deregistration request'
+    });
+  }
+});
 
 export default router;
 

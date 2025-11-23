@@ -12,15 +12,28 @@ POSTGRES_SSL=false
 # Database Selection (mongodb or postgresql)
 DATABASE_TYPE=postgresql
 
-# Discord Bot Configuration
+# Discord Bot Configuration (Main Rewards Bot)
 DISCORD_TOKEN=your_discord_bot_token_here
 DISCORD_CLIENT_ID=your_discord_oauth_client_id_here
 DISCORD_CLIENT_SECRET=your_discord_oauth_client_secret_here
-OAUTH_REDIRECT_URI=https://8ballpool.website/8bp-rewards/auth/discord/callback
+DISCORD_GUILD_ID=your_discord_server_id_here
+OAUTH_REDIRECT_URI=https://8ballpool.website/8bp-rewards/api/auth/discord/callback
 ALLOWED_ADMINS=850726663289700373,1111185974748270622
 SCHEDULER_CHANNEL_ID=your_scheduler_channel_id_here
 REWARDS_CHANNEL_ID=your_rewards_channel_id_here
 REGISTRATION_CHANNEL_ID=1422725910196518922
+
+# Verification Bot Configuration
+VERIFICATION_BOT_TOKEN=your_verification_bot_token_here
+VERIFICATION_DATABASE_URL=postgresql://user:password@localhost:5432/accountchecker?schema=public
+VERIFICATION_RANK_CHANNEL_ID=your_rank_channel_id_here
+VERIFICATION_STAFF_EVIDENCE_CHANNEL_ID=your_staff_evidence_channel_id_here
+VERIFICATION_GUILD_ID=your_guild_id_here
+VERIFICATION_ADMIN_IDS=comma,separated,admin,ids
+VERIFICATION_MODERATOR_IDS=comma,separated,mod,ids
+
+# OpenAI Configuration (for verification OCR)
+OPENAI_API_KEY=your_openai_api_key_here
 
 # Discord Bot Status (online, idle, dnd, invisible)
 DISCORD_BOT_STATUS=dnd
@@ -46,16 +59,20 @@ REACT_APP_FRONTEND_PORT=2500
 
 # Service URLs (for internal communication)
 DISCORD_BOT_SERVICE_URL=http://8ballpool.website:2700
+REWARDS_API_URL=http://backend:2600
 
 # Public URLs
-PUBLIC_URL=https://8ballpool.website/8bp-rewards
-HOME_URL=https://8ballpool.website/8bp-rewards/home
-REGISTER_URL=https://8ballpool.website/8bp-rewards/register
-CONTACT_URL=https://8ballpool.website/8bp-rewards/contact
-LEADERBOARD_URL=https://8ballpool.website/8bp-rewards/leaderboard
-SOCIALS_URL=https://8ballpool.website/8bp-rewards/socials
-SYSTEM_STATUS_URL=https://8ballpool.website/8bp-rewards/system-status
-ADMIN_DASHBOARD_URL=https://8ballpool.website/8bp-rewards/admin-dashboard
+PUBLIC_URL=https://8bp.epildevconnect.uk
+HOME_URL=https://8bp.epildevconnect.uk/8bp-rewards/home
+REGISTER_URL=https://8bp.epildevconnect.uk/8bp-rewards/register
+CONTACT_URL=https://8bp.epildevconnect.uk/8bp-rewards/contact
+LEADERBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/leaderboard
+SOCIALS_URL=https://8bp.epildevconnect.uk/8bp-rewards/socials
+SYSTEM_STATUS_URL=https://8bp.epildevconnect.uk/8bp-rewards/system-status
+ADMIN_DASHBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/admin-dashboard
+USER_DASHBOARD_URL=https://8bp.epildevconnect.uk/8bp-rewards/user-dashboard
+DASHBOARD_SELECTION_URL=https://8bp.epildevconnect.uk/8bp-rewards/dashboard-selection
+FAQ_URL=https://8bp.epildevconnect.uk/8bp-rewards/faq
 
 # Nodemailer SMTP Configuration
 SMTP_HOST=smtp.gmail.com
@@ -79,6 +96,11 @@ REACT_APP_SOCIAL_YOUTUBE=https://www.youtube.com/@Epildev
 REACT_APP_SOCIAL_DISCORD=https://discord.gg/qG59XaRWnf
 REACT_APP_SOCIAL_INSTAGRAM=https://www.instagram.com/adb.epildev/
 REACT_APP_SOCIAL_X=https://x.com/epildev_ad?s=21
+REACT_APP_SOCIAL_TELEGRAM=https://t.me/adbepildev
+
+# Discord Invite URL (for user dashboard linking)
+DISCORD_INVITE_URL=https://discord.gg/7EgQJSXY6d
+REACT_APP_DISCORD_INVITE_URL=https://discord.gg/7EgQJSXY6d
 
 # Test Users Configuration (JSON array)
 # Default test users for manual claims - can be customized
@@ -90,3 +112,9 @@ SHOP_URL=https://8ballpool.com/en/shop
 HEADLESS=true
 TIMEOUT=20000
 DELAY_BETWEEN_USERS=10000
+
+# Claimer Module Configuration
+# Optional: Custom path to playwright-claimer-discord module
+# If not set, will use default paths: process.cwd()/playwright-claimer-discord
+# Can be absolute path or relative to process.cwd()
+CLAIMER_MODULE_PATH=

@@ -69,6 +69,51 @@ class DiscordApiServer {
       });
     });
 
+    // Send Discord confirmation endpoint
+    this.app.post('/send-confirmation', async (req, res) => {
+      try {
+        const { bpAccountId, username, imagePath, claimedItems } = req.body;
+        
+        if (!bpAccountId) {
+          return res.status(400).json({
+            success: false,
+            error: 'bpAccountId is required'
+          });
+        }
+
+        if (!this.discordService.isReady) {
+          return res.status(503).json({
+            success: false,
+            error: 'Discord service not ready'
+          });
+        }
+
+        const success = await this.discordService.sendConfirmation(
+          bpAccountId,
+          imagePath || null,
+          claimedItems || []
+        );
+
+        if (success) {
+          res.json({
+            success: true,
+            message: `Confirmation sent for ${username || bpAccountId}`
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to send confirmation'
+          });
+        }
+      } catch (error) {
+        console.error('Error in send-confirmation endpoint:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Get bot status
     this.app.get('/api/bot-status', async (req, res) => {
       try {

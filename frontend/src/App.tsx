@@ -8,11 +8,12 @@ import HomePage from './pages/HomePage';
 import RegisterPage from './pages/RegisterPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import ContactPage from './pages/ContactPage';
-import SystemStatusPage from './pages/SystemStatusPage';
 import LeaderboardPage from './pages/LeaderboardPage';
-import SocialsPage from './pages/SocialsPage';
 import TermsOfServicePage from './pages/TermsOfServicePage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import UserDashboardPage from './pages/UserDashboardPage';
+import DashboardSelectionPage from './pages/DashboardSelectionPage';
+import FAQPage from './pages/FAQPage';
 
 function App() {
   return (
@@ -25,13 +26,14 @@ function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/home" element={<HomePage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/dashboard-selection" element={<DashboardSelectionPage />} />
               <Route path="/admin-dashboard" element={<AdminDashboardPage />} />
               <Route path="/contact" element={<ContactPage />} />
-              <Route path="/system-status" element={<SystemStatusPage />} />
               <Route path="/leaderboard" element={<LeaderboardPage />} />
-              <Route path="/socials" element={<SocialsPage />} />
               <Route path="/terms" element={<TermsOfServicePage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/user-dashboard" element={<UserDashboardPage />} />
+              <Route path="/faq" element={<FAQPage />} />
             </Routes>
           </Layout>
           <Toaster

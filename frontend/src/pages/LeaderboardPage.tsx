@@ -3,11 +3,15 @@ import { motion } from 'framer-motion';
 import axios from 'axios';
 import { Trophy, Medal, TrendingUp, Clock, Filter, Search, AlertTriangle } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
+import Skeleton from '../components/Skeleton';
 
 interface LeaderboardEntry {
   rank: number;
-  eightBallPoolId: string;
+  user_id: string; // username from registration or verification
   username: string;
+  eightBallPoolId: string;
+  account_level?: number | null;
+  account_rank?: string | null;
   totalClaims: number;
   successfulClaims: number;
   failedClaims: number;
@@ -94,12 +98,47 @@ const LeaderboardPage: React.FC = () => {
     }
   };
 
+  const getRankBadgeColor = (rankName: string | null | undefined): string => {
+    if (!rankName) return 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
+    const rank = rankName.toLowerCase();
+    if (rank.includes('grandmaster') || rank.includes('master')) {
+      return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300';
+    } else if (rank.includes('expert') || rank.includes('professional')) {
+      return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
+    } else if (rank.includes('advanced') || rank.includes('intermediate')) {
+      return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300';
+    } else if (rank.includes('rookie') || rank.includes('beginner')) {
+      return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
+    }
+    return 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
+  };
+
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-          <p className="text-text-secondary">Loading leaderboard...</p>
+      <div className="min-h-screen pt-8 pb-16 sm:pb-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12 space-y-4">
+            <div className="inline-block">
+              <Skeleton className="w-20 h-20 rounded-2xl mx-auto" />
+            </div>
+            <Skeleton className="h-12 w-64 mx-auto" />
+            <Skeleton className="h-6 w-96 mx-auto" />
+          </div>
+
+          <Skeleton className="h-24 w-full rounded-2xl mb-8" />
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <Skeleton className="h-32 rounded-xl" />
+            <Skeleton className="h-32 rounded-xl" />
+            <Skeleton className="h-32 rounded-xl" />
+            <Skeleton className="h-32 rounded-xl" />
+          </div>
+
+          <div className="space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-20 rounded-xl" />
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -121,21 +160,24 @@ const LeaderboardPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen pt-8 pb-16 sm:pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="text-center mb-12"
+          className="text-center mb-16"
         >
-          <div className="w-16 h-16 bg-primary-100 dark:bg-gradient-to-br dark:from-blue-500 dark:to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg dark:shadow-blue-500/40">
-            <Trophy className="w-8 h-8 text-primary-600 dark:text-text-dark-highlight" />
+          <div className="relative inline-block mb-4">
+            <div className="absolute inset-0 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full blur-2xl opacity-30 animate-pulse" />
+            <div className="relative w-20 h-20 bg-gradient-to-br from-yellow-100 to-yellow-50 dark:from-yellow-500/20 dark:to-orange-600/20 rounded-2xl flex items-center justify-center shadow-xl rotate-3 hover:rotate-6 transition-transform duration-300">
+              <Trophy className="w-10 h-10 text-yellow-600 dark:text-yellow-400 drop-shadow-md" />
+            </div>
           </div>
-          <h1 className="text-3xl font-bold text-text-primary mb-4">
+          <h1 className="text-4xl md:text-5xl font-extrabold text-text-primary dark:text-white mb-4 tracking-tight">
             Leaderboard
           </h1>
-          <p className="text-lg text-text-secondary max-w-2xl mx-auto">
+          <p className="text-lg text-text-secondary dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
             See who's claiming the most rewards! Rankings are based on total items claimed.
           </p>
         </motion.div>
@@ -145,59 +187,148 @@ const LeaderboardPage: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="card mb-8 border-2 border-primary-100 dark:border-dark-accent-navy/20"
+          className="glass-panel rounded-2xl p-6 mb-10 border border-white/20 dark:border-white/5"
         >
           <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-primary-100 dark:bg-dark-accent-navy/20 rounded-full flex items-center justify-center">
-                <Filter className="w-5 h-5 text-primary-600 dark:text-dark-accent-navy" />
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-primary-50 dark:bg-dark-accent-blue/10 rounded-xl flex items-center justify-center">
+                <Filter className="w-6 h-6 text-primary-600 dark:text-dark-accent-blue" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">Filters</h3>
-                <p className="text-sm text-text-secondary dark:text-text-dark-secondary">Customize your leaderboard view</p>
+                <h3 className="text-lg font-bold text-text-primary dark:text-white">Filters</h3>
+                <p className="text-sm text-text-secondary dark:text-gray-400">Customise view</p>
               </div>
             </div>
             
-            <div className="flex flex-col sm:flex-row gap-6 w-full lg:w-auto">
+            <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
               <div className="flex-1 lg:flex-none lg:min-w-[200px]">
                 <label htmlFor="timeframe" className="label">
-                  <Clock className="w-4 h-4 inline mr-2" />
                   Time Period
                 </label>
-                <select
-                  id="timeframe"
-                  value={timeframe}
-                  onChange={(e) => setTimeframe(e.target.value)}
-                  className="input"
-                >
-                  {timeframes.map((tf) => (
-                    <option key={tf.value} value={tf.value}>
-                      {tf.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    id="timeframe"
+                    value={timeframe}
+                    onChange={(e) => setTimeframe(e.target.value)}
+                    className="input appearance-none pl-10"
+                  >
+                    {timeframes.map((tf) => (
+                      <option key={tf.value} value={tf.value}>
+                        {tf.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                </div>
               </div>
               
               <div className="flex-1 lg:flex-none lg:min-w-[150px]">
                 <label htmlFor="limit" className="label">
-                  <Trophy className="w-4 h-4 inline mr-2" />
                   Show Top
                 </label>
-                <select
-                  id="limit"
-                  value={limit}
-                  onChange={(e) => setLimit(Number(e.target.value))}
-                  className="input"
-                >
-                  <option value={10}>10 Players</option>
-                  <option value={25}>25 Players</option>
-                  <option value={50}>50 Players</option>
-                  <option value={100}>100 Players</option>
-                </select>
+                <div className="relative">
+                  <select
+                    id="limit"
+                    value={limit}
+                    onChange={(e) => setLimit(Number(e.target.value))}
+                    className="input appearance-none pl-10"
+                  >
+                    <option value={10}>10 Players</option>
+                    <option value={25}>25 Players</option>
+                    <option value={50}>50 Players</option>
+                    <option value={100}>100 Players</option>
+                  </select>
+                  <Trophy className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                </div>
               </div>
             </div>
           </div>
         </motion.div>
+
+        {/* Top 3 Podium - Desktop Only */}
+        {leaderboardData && leaderboardData.leaderboard.length >= 3 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.3 }}
+            className="hidden lg:flex justify-center items-end gap-4 mb-12 px-4 h-80"
+          >
+            {/* 2nd Place */}
+            <div className="relative w-1/3 max-w-xs group">
+              <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gray-400/30 blur-xl rounded-full" />
+                  <img 
+                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    alt="2nd Place" 
+                    className="relative w-16 h-16 rounded-full border-4 border-gray-300 shadow-lg z-10"
+                    onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                  />
+                  <div className="absolute -bottom-2 -right-2 bg-gray-500 text-white w-8 h-8 flex items-center justify-center rounded-full font-bold border-2 border-white shadow-md z-20">2</div>
+                </div>
+                <div className="mt-2 text-center">
+                  <p className="font-bold text-gray-800 dark:text-gray-200 truncate max-w-[150px]">{leaderboardData.leaderboard[1].username}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{leaderboardData.leaderboard[1].totalItemsClaimed} items</p>
+                </div>
+              </div>
+              <div className="h-48 bg-gradient-to-t from-gray-300 to-gray-100 dark:from-gray-800 dark:to-gray-700 rounded-t-2xl shadow-lg border-t border-white/20 flex flex-col justify-end items-center pb-4 relative overflow-hidden">
+                <div className="absolute inset-0 bg-white/10 transform skew-y-12 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <Medal className="w-16 h-16 text-gray-400 opacity-20 mb-2" />
+              </div>
+            </div>
+
+            {/* 1st Place */}
+            <div className="relative w-1/3 max-w-xs group z-10">
+              <div className="absolute -top-14 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-yellow-500/40 blur-xl rounded-full animate-pulse" />
+                  <img 
+                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    alt="1st Place" 
+                    className="relative w-20 h-20 rounded-full border-4 border-yellow-400 shadow-xl z-10"
+                    onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                  />
+                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2">
+                    <Trophy className="w-8 h-8 text-yellow-500 drop-shadow-md" />
+                  </div>
+                  <div className="absolute -bottom-2 -right-2 bg-yellow-500 text-white w-9 h-9 flex items-center justify-center rounded-full font-bold border-2 border-white shadow-md z-20 text-lg">1</div>
+                </div>
+                <div className="mt-2 text-center">
+                  <p className="font-bold text-gray-900 dark:text-white text-lg truncate max-w-[180px]">{leaderboardData.leaderboard[0].username}</p>
+                  <p className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">{leaderboardData.leaderboard[0].totalItemsClaimed} items</p>
+                </div>
+              </div>
+              <div className="h-60 bg-gradient-to-t from-yellow-400 to-yellow-200 dark:from-yellow-700 dark:to-yellow-600 rounded-t-2xl shadow-xl border-t border-white/30 flex flex-col justify-end items-center pb-4 relative overflow-hidden">
+                <div className="absolute inset-0 bg-white/20 transform -skew-y-12 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <Medal className="w-20 h-20 text-yellow-900 opacity-20 mb-2" />
+              </div>
+            </div>
+
+            {/* 3rd Place */}
+            <div className="relative w-1/3 max-w-xs group">
+              <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-orange-500/30 blur-xl rounded-full" />
+                  <img 
+                    src="/8bp-rewards/assets/logos/8logo.png" 
+                    alt="3rd Place" 
+                    className="relative w-16 h-16 rounded-full border-4 border-orange-400 shadow-lg z-10"
+                    onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                  />
+                  <div className="absolute -bottom-2 -right-2 bg-orange-500 text-white w-8 h-8 flex items-center justify-center rounded-full font-bold border-2 border-white shadow-md z-20">3</div>
+                </div>
+                <div className="mt-2 text-center">
+                  <p className="font-bold text-gray-800 dark:text-gray-200 truncate max-w-[150px]">{leaderboardData.leaderboard[2].username}</p>
+                  <p className="text-sm text-orange-600 dark:text-orange-400">{leaderboardData.leaderboard[2].totalItemsClaimed} items</p>
+                </div>
+              </div>
+              <div className="h-40 bg-gradient-to-t from-orange-300 to-orange-100 dark:from-orange-800 dark:to-orange-700 rounded-t-2xl shadow-lg border-t border-white/20 flex flex-col justify-end items-center pb-4 relative overflow-hidden">
+                <div className="absolute inset-0 bg-white/10 transform skew-y-6 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <Medal className="w-16 h-16 text-orange-900 opacity-20 mb-2" />
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Total Claims Stats */}
         {totalStats && (
@@ -205,173 +336,244 @@ const LeaderboardPage: React.FC = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8"
+            className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8"
           >
-            <div className="card text-center">
-              <div className="flex items-center justify-center mb-3">
-                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/20 rounded-full flex items-center justify-center">
-                  <Trophy className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
+            <div className="card p-6 flex items-center space-x-4 hover:scale-[1.02] transition-transform">
+              <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
+                <Trophy className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Players</h3>
-              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalStats.totalUsers}</p>
+              <div>
+                <p className="text-sm font-medium text-text-secondary dark:text-gray-400">Total Players</p>
+                <p className="text-2xl font-bold text-text-primary dark:text-white">{totalStats.totalUsers}</p>
+              </div>
             </div>
 
-            <div className="card text-center">
-              <div className="flex items-center justify-center mb-3">
-                <div className="w-12 h-12 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
-                  <TrendingUp className="w-6 h-6 text-green-600 dark:text-green-400" />
-                </div>
+            <div className="card p-6 flex items-center space-x-4 hover:scale-[1.02] transition-transform">
+              <div className="p-3 rounded-xl bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400">
+                <TrendingUp className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Claims</h3>
-              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalClaims, 0)}
-              </p>
+              <div>
+                <p className="text-sm font-medium text-text-secondary dark:text-gray-400">Total Claims</p>
+                <p className="text-2xl font-bold text-text-primary dark:text-white">
+                  {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalClaims, 0).toLocaleString()}
+                </p>
+              </div>
             </div>
 
-            <div className="card text-center">
-              <div className="flex items-center justify-center mb-3">
-                <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/20 rounded-full flex items-center justify-center">
-                  <Medal className="w-6 h-6 text-purple-600 dark:text-purple-400" />
-                </div>
+            <div className="card p-6 flex items-center space-x-4 hover:scale-[1.02] transition-transform">
+              <div className="p-3 rounded-xl bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                <Medal className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Items</h3>
-              <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalItemsClaimed, 0)}
-              </p>
+              <div>
+                <p className="text-sm font-medium text-text-secondary dark:text-gray-400">Total Items</p>
+                <p className="text-2xl font-bold text-text-primary dark:text-white">
+                  {totalStats.leaderboard.reduce((sum, entry) => sum + entry.totalItemsClaimed, 0).toLocaleString()}
+                </p>
+              </div>
             </div>
 
-            <div className="card text-center">
-              <div className="flex items-center justify-center mb-3">
-                <div className="w-12 h-12 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center">
-                  <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
-                </div>
+            <div className="card p-6 flex items-center space-x-4 hover:scale-[1.02] transition-transform">
+              <div className="p-3 rounded-xl bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400">
+                <AlertTriangle className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-text-primary mb-1">Total Failed Claims</h3>
-              <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                {totalStats.leaderboard.reduce((sum, entry) => sum + (entry.failedClaims || 0), 0)}
-              </p>
+              <div>
+                <p className="text-sm font-medium text-text-secondary dark:text-gray-400">Failed Claims</p>
+                <p className="text-2xl font-bold text-text-primary dark:text-white">
+                  {totalStats.leaderboard.reduce((sum, entry) => sum + (entry.failedClaims || 0), 0).toLocaleString()}
+                </p>
+              </div>
             </div>
           </motion.div>
         )}
 
-        {/* Leaderboard */}
+        {/* Leaderboard List */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.4 }}
-          className="card"
+          className="glass-panel rounded-2xl overflow-hidden border border-white/20 dark:border-white/5"
         >
           {leaderboardData && (
             <>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-text-primary">
-                  Top {leaderboardData.totalUsers} Players
-                </h2>
-                <div className="text-sm text-text-secondary">
-                  {leaderboardData.period} • {leaderboardData.timeframe}
+              <div className="p-6 border-b border-gray-200 dark:border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-text-primary dark:text-white">
+                    Rankings
+                  </h2>
+                  <p className="text-sm text-text-secondary dark:text-gray-400">
+                    {leaderboardData.period} • {leaderboardData.timeframe}
+                  </p>
                 </div>
-              </div>
 
-              {/* Search Bar */}
-              <div className="mb-6">
-                <div className="flex items-center space-x-2">
-                  <Search className="w-5 h-5 text-text-secondary dark:text-text-dark-secondary" />
+                {/* Search Bar */}
+                <div className="relative w-full md:w-72">
                   <input
                     type="text"
-                    placeholder="Search by username or 8BP ID..."
+                    placeholder="Search user or ID..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="input flex-1"
+                    className="input pl-10"
                   />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 </div>
-                {searchQuery && (
-                  <p className="text-sm text-text-secondary dark:text-text-dark-secondary mt-2">
-                    Showing filtered results
-                  </p>
-                )}
               </div>
 
               {leaderboardData.leaderboard.length === 0 ? (
-                <div className="text-center py-12">
-                  <Trophy className="w-12 h-12 text-text-muted mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-text-primary mb-2">
+                <div className="text-center py-16">
+                  <div className="w-20 h-20 bg-gray-50 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Trophy className="w-10 h-10 text-gray-300 dark:text-gray-600" />
+                  </div>
+                  <h3 className="text-lg font-medium text-text-primary dark:text-white mb-2">
                     No Data Available
                   </h3>
-                  <p className="text-text-secondary">
+                  <p className="text-text-secondary dark:text-gray-400">
                     No claims have been recorded for the selected time period.
                   </p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="divide-y divide-gray-100 dark:divide-white/5">
+                  <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 bg-gray-50/50 dark:bg-white/5 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <div className="col-span-1 text-center">Rank</div>
+                    <div className="col-span-3">Player</div>
+                    <div className="col-span-1 text-center">Level</div>
+                    <div className="col-span-1 text-center">Game Rank</div>
+                    <div className="col-span-2 text-center">Items</div>
+                    <div className="col-span-2 text-center">Success Rate</div>
+                    <div className="col-span-2 text-right">Last Claim</div>
+                  </div>
+
                   {leaderboardData.leaderboard
                     .filter(entry => 
-                      entry.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      entry.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      entry.user_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       entry.eightBallPoolId.includes(searchQuery)
                     )
                     .map((entry, index) => (
                     <motion.div
-                      key={entry.eightBallPoolId}
+                      key={entry.user_id || entry.eightBallPoolId}
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.5, delay: index * 0.1 }}
-                      className={`p-4 rounded-lg border transition-all hover:shadow-md ${getRankColor(entry.rank)}`}
+                      transition={{ duration: 0.3, delay: index * 0.05 }}
+                      className={`p-4 md:px-6 md:py-4 hover:bg-gray-50/80 dark:hover:bg-white/5 transition-colors ${
+                        entry.rank <= 3 ? 'bg-gradient-to-r from-transparent via-transparent to-transparent' : ''
+                      } ${
+                        entry.rank === 1 ? 'dark:bg-yellow-500/5' : 
+                        entry.rank === 2 ? 'dark:bg-gray-500/5' : 
+                        entry.rank === 3 ? 'dark:bg-orange-500/5' : ''
+                      }`}
                     >
-                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+                      {/* Mobile Card View */}
+                      <div className="md:hidden flex items-center justify-between">
                         <div className="flex items-center space-x-4">
-                          <div className="flex items-center justify-center w-8 h-8">
-                            {getRankIcon(entry.rank)}
+                          <div className="flex-shrink-0 w-8 text-center font-bold text-lg">
+                            {entry.rank <= 3 ? getRankIcon(entry.rank) : <span className="text-gray-500">#{entry.rank}</span>}
                           </div>
-                          
                           <div>
-                            <h3 className="font-semibold text-text-primary dark:text-text-dark-primary">
-                              {entry.username}
-                            </h3>
-                            <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
-                              ID: {entry.eightBallPoolId}
-                            </p>
+                            <h3 className="font-bold text-text-primary dark:text-white">{entry.username || entry.user_id}</h3>
+                            <p className="text-xs text-text-secondary dark:text-gray-400 font-mono">ID: {entry.eightBallPoolId}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {entry.account_level && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                                  Lv {entry.account_level}
+                                </span>
+                              )}
+                              {entry.account_rank && (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getRankBadgeColor(entry.account_rank)}`}>
+                                  {entry.account_rank}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        <div className="text-right">
+                          <p className="font-bold text-primary-600 dark:text-primary-400">{entry.totalItemsClaimed} Items</p>
+                          <p className={`text-xs font-medium ${
+                            entry.successRate >= 90 ? 'text-green-600 dark:text-green-400' : 
+                            entry.successRate >= 70 ? 'text-yellow-600 dark:text-yellow-400' : 
+                            'text-red-600 dark:text-red-400'
+                          }`}>
+                            {entry.successRate}% Success
+                          </p>
+                        </div>
+                      </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
-                          <div className="text-center">
-                            <div className="font-semibold text-text-primary dark:text-text-dark-primary">
-                              {entry.totalItemsClaimed}
+                      {/* Desktop Grid View */}
+                      <div className="hidden md:grid grid-cols-12 gap-4 items-center">
+                        <div className="col-span-1 flex justify-center">
+                          {entry.rank <= 3 ? (
+                            <div className="transform scale-110">{getRankIcon(entry.rank)}</div>
+                          ) : (
+                            <span className="font-bold text-gray-500 dark:text-gray-400">#{entry.rank}</span>
+                          )}
+                        </div>
+                        <div className="col-span-3">
+                          <div className="flex items-center space-x-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                              entry.rank === 1 ? 'bg-yellow-500' :
+                              entry.rank === 2 ? 'bg-gray-400' :
+                              entry.rank === 3 ? 'bg-orange-500' :
+                              'bg-primary-500'
+                            }`}>
+                              {(entry.username || entry.user_id || 'U').charAt(0).toUpperCase()}
                             </div>
-                            <div className="text-text-secondary dark:text-text-dark-secondary">Items</div>
-                          </div>
-                          
-                          <div className="text-center">
-                            <div className="font-semibold text-green-600 dark:text-green-400">
-                              {entry.successfulClaims}
+                            <div>
+                              <p className="font-bold text-text-primary dark:text-white text-sm">{entry.username || entry.user_id}</p>
+                              <p className="text-xs text-text-secondary dark:text-gray-400 font-mono">ID: {entry.eightBallPoolId}</p>
                             </div>
-                            <div className="text-text-secondary dark:text-text-dark-secondary">Success</div>
                           </div>
-                          
-                          <div className="text-center">
-                            <div className="font-semibold text-red-600 dark:text-red-400">
-                              {entry.failedClaims || 0}
+                        </div>
+                        <div className="col-span-1 text-center">
+                          {entry.account_level ? (
+                            <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                              Lv {entry.account_level}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 dark:text-gray-600">-</span>
+                          )}
+                        </div>
+                        <div className="col-span-1 text-center">
+                          {entry.account_rank ? (
+                            <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${getRankBadgeColor(entry.account_rank)}`}>
+                              {entry.account_rank}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 dark:text-gray-600">-</span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-center">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-800 dark:text-primary-300">
+                            {entry.totalItemsClaimed}
+                          </span>
+                        </div>
+                        <div className="col-span-2">
+                          <div className="flex items-center justify-center space-x-2">
+                            <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full rounded-full ${
+                                  entry.successRate >= 90 ? 'bg-green-500' : 
+                                  entry.successRate >= 70 ? 'bg-yellow-500' : 
+                                  'bg-red-500'
+                                }`} 
+                                style={{ width: `${entry.successRate}%` }}
+                              />
                             </div>
-                            <div className="text-text-secondary dark:text-text-dark-secondary">Failed</div>
-                          </div>
-                          
-                          <div className="text-center">
-                            <div className="font-semibold text-text-primary dark:text-text-dark-primary">
+                            <span className={`text-xs font-bold ${
+                              entry.successRate >= 90 ? 'text-green-600 dark:text-green-400' : 
+                              entry.successRate >= 70 ? 'text-yellow-600 dark:text-yellow-400' : 
+                              'text-red-600 dark:text-red-400'
+                            }`}>
                               {entry.successRate}%
-                            </div>
-                            <div className="text-text-secondary dark:text-text-dark-secondary">Rate</div>
+                            </span>
                           </div>
-                          
-                          <div className="text-center">
-                            <div className="font-semibold text-text-primary dark:text-text-dark-primary">
-                              {entry.lastClaimed ? new Date(entry.lastClaimed).toLocaleDateString('en-GB', { 
-                                day: '2-digit', 
-                                month: '2-digit', 
-                                year: '2-digit' 
-                              }) : 'Never'}
-                            </div>
-                            <div className="text-text-secondary dark:text-text-dark-secondary">Last Claim</div>
-                          </div>
+                        </div>
+                        <div className="col-span-2 text-right text-sm text-text-secondary dark:text-gray-400">
+                          {entry.lastClaimed ? new Date(entry.lastClaimed).toLocaleDateString('en-GB', { 
+                            day: '2-digit', 
+                            month: 'short', 
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          }) : 'Never'}
                         </div>
                       </div>
                     </motion.div>
@@ -381,58 +583,15 @@ const LeaderboardPage: React.FC = () => {
             </>
           )}
         </motion.div>
-
-        {/* Statistics */}
-        {leaderboardData && leaderboardData.leaderboard.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.6 }}
-            className="mt-8 grid md:grid-cols-3 gap-6"
-          >
-            <div className="card text-center">
-              <TrendingUp className="w-8 h-8 text-primary-600 mx-auto mb-2" />
-              <h3 className="text-lg font-semibold text-text-primary mb-1">
-                Total Players
-              </h3>
-              <p className="text-2xl font-bold text-primary-600">
-                {leaderboardData.totalUsers}
-              </p>
-            </div>
-            
-            <div className="card text-center">
-              <Trophy className="w-8 h-8 text-primary-600 mx-auto mb-2" />
-              <h3 className="text-lg font-semibold text-text-primary mb-1">
-                Top Performer
-              </h3>
-              <p className="text-lg font-bold text-text-primary">
-                {leaderboardData.leaderboard[0]?.username || 'N/A'}
-              </p>
-              <p className="text-sm text-text-secondary">
-                {leaderboardData.leaderboard[0]?.totalItemsClaimed || 0} items
-              </p>
-            </div>
-            
-            <div className="card text-center">
-              <Clock className="w-8 h-8 text-primary-600 mx-auto mb-2" />
-              <h3 className="text-lg font-semibold text-text-primary mb-1">
-                Time Period
-              </h3>
-              <p className="text-lg font-bold text-text-primary">
-                {leaderboardData.period}
-              </p>
-              <p className="text-sm text-text-secondary">
-                {leaderboardData.timeframe}
-              </p>
-            </div>
-          </motion.div>
-        )}
       </div>
     </div>
   );
 };
 
 export default LeaderboardPage;
+
+
+
 
 
 

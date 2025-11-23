@@ -3,8 +3,7 @@
  * Automatically uses the correct API URL based on environment
  */
 
-// In production build, use production API URL
-// In development, use localhost with configured backend port
+// API Configuration - use REACT_APP_API_URL if set, otherwise localhost
 const backendPort = process.env.REACT_APP_BACKEND_PORT || '2600';
 export const API_BASE_URL = process.env.REACT_APP_API_URL || `http://localhost:${backendPort}/api`;
 
@@ -80,6 +79,22 @@ export const API_ENDPOINTS = {
   VALIDATION_REVALIDATE_USER: `${API_BASE_URL}/validation/revalidate-user`,
   VALIDATION_REVALIDATE_ALL: `${API_BASE_URL}/validation/revalidate-all-invalid`,
   VALIDATION_DEREGISTERED_USERS: `${API_BASE_URL}/validation/deregistered-users`,
+  
+  // Admin Deregistered Users
+  ADMIN_DEREGISTERED_USER_REMOVE: (eightBallPoolId: string) => `${API_BASE_URL}/admin/deregistered-users/${eightBallPoolId}/remove`,
+  
+  // Admin Deregistration Requests
+  ADMIN_DEREGISTRATION_REQUESTS: `${API_BASE_URL}/admin/deregistration-requests`,
+  ADMIN_DEREGISTRATION_REQUEST_APPROVE: (id: string) => `${API_BASE_URL}/admin/deregistration-requests/${id}/approve`,
+  ADMIN_DEREGISTRATION_REQUEST_DENY: (id: string) => `${API_BASE_URL}/admin/deregistration-requests/${id}/deny`,
+  
+  // User Dashboard
+  USER_LINKED_ACCOUNTS: `${API_BASE_URL}/user-dashboard/linked-accounts`,
+  USER_SCREENSHOTS: `${API_BASE_URL}/user-dashboard/screenshots`,
+  USER_DEREGISTRATION_REQUEST: `${API_BASE_URL}/user-dashboard/deregistration-request`,
+  USER_DEREGISTRATION_REQUESTS: `${API_BASE_URL}/user-dashboard/deregistration-requests`,
+  USER_INFO: `${API_BASE_URL}/user-dashboard/info`,
+  USER_UPDATE_USERNAME: `${API_BASE_URL}/user-dashboard/update-username`,
 };
 
 // Helper function to build admin user block endpoint
@@ -91,6 +106,4 @@ export const getAdminUserBlockEndpoint = (eightBallPoolId: string): string => {
 export const getAdminRegistrationDeleteEndpoint = (eightBallPoolId: string): string => {
   return `${API_BASE_URL}/admin/registrations/${eightBallPoolId}`;
 };
-
-console.log('🌐 API Base URL:', API_BASE_URL);
 

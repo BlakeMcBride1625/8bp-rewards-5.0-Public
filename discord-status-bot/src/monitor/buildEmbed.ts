@@ -36,18 +36,26 @@ export class EmbedBuilder {
 			description += `${statusEmoji} [${serviceName}](${service.url}) **${statusText}**\n\n`;
 		}
 		
-		// Group 3: Main Services (Registration, Contact, Leaderboard, Socials)
+		// Group 3: Main Services (Registration, Contact, Leaderboard, User Dashboard, Discord Bot)
 		if (serviceGroups.mainServices.length > 0) {
-			for (const service of serviceGroups.mainServices) {
+			for (let i = 0; i < serviceGroups.mainServices.length; i++) {
+				const service = serviceGroups.mainServices[i];
+				if (!service) continue;
+				
 				const statusEmoji = this.getStatusEmoji(service.status);
 				const statusText = this.getFriendlyStatusText(service.status);
 				const serviceName = this.formatServiceName(service.name);
 				description += `${statusEmoji} [${serviceName}](${service.url}) **${statusText}**\n`;
+				
+				// Add extra space after User Dashboard (before Discord BOTs API)
+				if (service.name.toLowerCase() === 'user dashboard') {
+					description += "\n";
+				}
 			}
 			description += "\n";
 		}
 		
-		// Group 4: External Services (8Ball Pool Shop, Admin Dashboard)
+		// Group 4: External Services (8 Ball Pool Shop, Admin Dashboard)
 		if (serviceGroups.externalServices.length > 0) {
 			for (const service of serviceGroups.externalServices) {
 				const statusEmoji = this.getStatusEmoji(service.status);
@@ -204,11 +212,12 @@ export class EmbedBuilder {
 			"register": "Registration",
 			"contact": "Contact",
 			"leaderboard": "Leaderboard",
-			"socials": "Socials",
+			"user dashboard": "User Dashboard",
+			"discord bot": "Discord BOTs API",
 			"system status": "System Status",
 			"admin dashboard": "Admin Dashboard",
 			"oauth callback": "OAuth Callback",
-			"8ballpool shop": "8Ball Pool Shop",
+			"8ballpool shop": "8 Ball Pool Shop",
 			"webhook": "Webhook"
 		};
 		
@@ -248,7 +257,9 @@ export class EmbedBuilder {
 				groups.systemStatus = service;
 			} else if (serviceName === 'website') {
 				groups.website = service;
-			} else if (['register', 'contact', 'leaderboard', 'socials'].includes(serviceName)) {
+			} else if (['register', 'contact', 'leaderboard', 'user dashboard'].includes(serviceName)) {
+				groups.mainServices.push(service);
+			} else if (['discord bot'].includes(serviceName)) {
 				groups.mainServices.push(service);
 			} else if (['8ballpool shop'].includes(serviceName)) {
 				groups.externalServices.push(service);
@@ -257,7 +268,7 @@ export class EmbedBuilder {
 
 		// Sort main services in the specified order
 		groups.mainServices.sort((a, b) => {
-			const order = ['register', 'contact', 'leaderboard', 'socials'];
+			const order = ['register', 'contact', 'leaderboard', 'user dashboard', 'discord bot'];
 			const aIndex = order.indexOf(a.name.toLowerCase());
 			const bIndex = order.indexOf(b.name.toLowerCase());
 			return aIndex - bIndex;

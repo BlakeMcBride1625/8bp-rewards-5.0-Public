@@ -28,6 +28,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        REACT_APP_DISCORD_INVITE_URL: ${REACT_APP_DISCORD_INVITE_URL}
+        REACT_APP_SOCIAL_FACEBOOK: ${REACT_APP_SOCIAL_FACEBOOK}
+        REACT_APP_SOCIAL_TIKTOK: ${REACT_APP_SOCIAL_TIKTOK}
+        REACT_APP_SOCIAL_YOUTUBE: ${REACT_APP_SOCIAL_YOUTUBE}
+        REACT_APP_SOCIAL_DISCORD: ${REACT_APP_SOCIAL_DISCORD}
+        REACT_APP_SOCIAL_INSTAGRAM: ${REACT_APP_SOCIAL_INSTAGRAM}
+        REACT_APP_SOCIAL_X: ${REACT_APP_SOCIAL_X}
+        REACT_APP_SOCIAL_TELEGRAM: ${REACT_APP_SOCIAL_TELEGRAM}
     container_name: 8bp-backend
     environment:
       # Load all environment variables from .env
@@ -67,6 +76,8 @@ services:
       - SOCIALS_URL=${SOCIALS_URL}
       - SYSTEM_STATUS_URL=${SYSTEM_STATUS_URL}
       - ADMIN_DASHBOARD_URL=${ADMIN_DASHBOARD_URL}
+      - USER_DASHBOARD_URL=${USER_DASHBOARD_URL}
+      - DASHBOARD_SELECTION_URL=${DASHBOARD_SELECTION_URL}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT}
       - SMTP_USER=${SMTP_USER}
@@ -95,6 +106,7 @@ services:
       - DISCORD_SPECIAL_USERS=${DISCORD_SPECIAL_USERS}
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
+      - DISCORD_INVITE_URL=${DISCORD_INVITE_URL}
       - TEST_USERS=${TEST_USERS}
       - TARGET_USER_IDS=${TARGET_USER_IDS}
     ports:
@@ -123,6 +135,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        REACT_APP_DISCORD_INVITE_URL: ${REACT_APP_DISCORD_INVITE_URL}
+        REACT_APP_SOCIAL_FACEBOOK: ${REACT_APP_SOCIAL_FACEBOOK}
+        REACT_APP_SOCIAL_TIKTOK: ${REACT_APP_SOCIAL_TIKTOK}
+        REACT_APP_SOCIAL_YOUTUBE: ${REACT_APP_SOCIAL_YOUTUBE}
+        REACT_APP_SOCIAL_DISCORD: ${REACT_APP_SOCIAL_DISCORD}
+        REACT_APP_SOCIAL_INSTAGRAM: ${REACT_APP_SOCIAL_INSTAGRAM}
+        REACT_APP_SOCIAL_X: ${REACT_APP_SOCIAL_X}
+        REACT_APP_SOCIAL_TELEGRAM: ${REACT_APP_SOCIAL_TELEGRAM}
     container_name: 8bp-discord-api
     environment:
       # Load all environment variables from .env
@@ -131,6 +152,7 @@ services:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
       - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
       - ALLOWED_ADMINS=${ALLOWED_ADMINS}
       - SCHEDULER_CHANNEL_ID=${SCHEDULER_CHANNEL_ID}
       - REWARDS_CHANNEL_ID=${REWARDS_CHANNEL_ID}
@@ -178,6 +200,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        REACT_APP_DISCORD_INVITE_URL: ${REACT_APP_DISCORD_INVITE_URL}
+        REACT_APP_SOCIAL_FACEBOOK: ${REACT_APP_SOCIAL_FACEBOOK}
+        REACT_APP_SOCIAL_TIKTOK: ${REACT_APP_SOCIAL_TIKTOK}
+        REACT_APP_SOCIAL_YOUTUBE: ${REACT_APP_SOCIAL_YOUTUBE}
+        REACT_APP_SOCIAL_DISCORD: ${REACT_APP_SOCIAL_DISCORD}
+        REACT_APP_SOCIAL_INSTAGRAM: ${REACT_APP_SOCIAL_INSTAGRAM}
+        REACT_APP_SOCIAL_X: ${REACT_APP_SOCIAL_X}
+        REACT_APP_SOCIAL_TELEGRAM: ${REACT_APP_SOCIAL_TELEGRAM}
     container_name: 8bp-claimer
     environment:
       # Load all environment variables from .env
@@ -217,6 +248,100 @@ services:
     networks:
       - 8bp-network
     command: node playwright-claimer-discord.js --schedule
+
+  # Discord Status Bot - Service Monitoring
+  status-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_DISCORD_INVITE_URL: ${REACT_APP_DISCORD_INVITE_URL}
+        REACT_APP_SOCIAL_FACEBOOK: ${REACT_APP_SOCIAL_FACEBOOK}
+        REACT_APP_SOCIAL_TIKTOK: ${REACT_APP_SOCIAL_TIKTOK}
+        REACT_APP_SOCIAL_YOUTUBE: ${REACT_APP_SOCIAL_YOUTUBE}
+        REACT_APP_SOCIAL_DISCORD: ${REACT_APP_SOCIAL_DISCORD}
+        REACT_APP_SOCIAL_INSTAGRAM: ${REACT_APP_SOCIAL_INSTAGRAM}
+        REACT_APP_SOCIAL_X: ${REACT_APP_SOCIAL_X}
+        REACT_APP_SOCIAL_TELEGRAM: ${REACT_APP_SOCIAL_TELEGRAM}
+    container_name: 8bp-status-bot
+    environment:
+      # Status Bot Configuration
+      - NODE_ENV=${NODE_ENV:-production}
+      - BOT2_TOKEN=${BOT2_TOKEN}
+      - BOT2_CLIENT_ID=${BOT2_CLIENT_ID:-1419757011641565256}
+      - BOT2_GUILD_ID=${BOT2_GUILD_ID:-1397975670897905779}
+      - BOT2_STATUS_CHANNEL_ID=${BOT2_STATUS_CHANNEL_ID:-1430255977218969660}
+      - BOT2_WEBHOOK_URL=${BOT2_WEBHOOK_URL}
+      - BOT2_CHECK_INTERVAL=${BOT2_CHECK_INTERVAL:-1}
+      - BOT2_DAILY_REPORT_INTERVAL=${BOT2_DAILY_REPORT_INTERVAL:-24}
+      - BOT2_NOTIFY_RESTORE=${BOT2_NOTIFY_RESTORE:-true}
+      - BOT2_LOG_TO_FILE=${BOT2_LOG_TO_FILE:-false}
+      # Services to Monitor (automatically detected from BOT2_*_URL env vars)
+      - BOT2_WEBSITE_URL=${BOT2_WEBSITE_URL}
+      - BOT2_REGISTER_URL=${BOT2_REGISTER_URL}
+      - BOT2_CONTACT_URL=${BOT2_CONTACT_URL}
+      - BOT2_LEADERBOARD_URL=${BOT2_LEADERBOARD_URL}
+      - BOT2_USER_DASHBOARD_URL=${BOT2_USER_DASHBOARD_URL}
+      - BOT2_SYSTEM_STATUS_URL=${BOT2_SYSTEM_STATUS_URL}
+      - BOT2_ADMIN_DASHBOARD_URL=${BOT2_ADMIN_DASHBOARD_URL}
+      - BOT2_8BALLPOOL_SHOP_URL=${BOT2_8BALLPOOL_SHOP_URL}
+      # Backend services URLs (for internal monitoring)
+      - BOT2_BACKEND_URL=http://backend:2600
+      - BOT2_DISCORD_API_URL=http://discord-api:2700
+      - BOT2_DISCORD_BOT_URL=${BOT2_DISCORD_BOT_URL:-http://discord-api:2700/health}
+      - TZ=${TZ:-Europe/London}
+    volumes:
+      - ./logs:/app/logs
+      - ./discord-status-bot:/app/discord-status-bot
+    depends_on:
+      backend:
+        condition: service_healthy
+      discord-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - 8bp-network
+    command: ["node", "discord-status-bot/dist/main.js"]
+
+  # Verification Bot Service
+  verification-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.verification-bot
+    container_name: 8bp-verification-bot
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - VERIFICATION_BOT_TOKEN=${VERIFICATION_BOT_TOKEN}
+      - VERIFICATION_DATABASE_URL=${VERIFICATION_DATABASE_URL}
+      - RANK_CHANNEL_ID=${VERIFICATION_RANK_CHANNEL_ID}
+      - STAFF_EVIDENCE_CHANNEL_ID=${VERIFICATION_STAFF_EVIDENCE_CHANNEL_ID}
+      - GUILD_ID=${VERIFICATION_GUILD_ID}
+      - VERIFICATION_GUILD_ID=${VERIFICATION_GUILD_ID}
+      - ADMIN_IDS=${VERIFICATION_ADMIN_IDS}
+      - VERIFICATION_ADMIN_IDS=${VERIFICATION_ADMIN_IDS}
+      - MODERATOR_IDS=${VERIFICATION_MODERATOR_IDS}
+      - VERIFICATION_MODERATOR_IDS=${VERIFICATION_MODERATOR_IDS}
+      - COMMAND_PREFIX=${COMMAND_PREFIX:-!}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REWARDS_API_URL=http://backend:2600
+      - BACKEND_URL=http://backend:2600
+      - APP_URL=${PUBLIC_URL:-https://8ballpool.website}
+      - PUBLIC_URL=${PUBLIC_URL}
+      - LOG_PATH=${LOG_PATH:-./logs/assignments.log}
+      - EXAMPLE_IMAGE_URL=${EXAMPLE_IMAGE_URL:-}
+    volumes:
+      - ./logs:/app/logs
+      - ./assets:/app/assets
+      - ./services/verification-bot/src/config:/app/services/verification-bot/src/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - 8bp-network
+    restart: unless-stopped
+    command: ["node", "dist/bot.js"]
 
 volumes:
   postgres_data:

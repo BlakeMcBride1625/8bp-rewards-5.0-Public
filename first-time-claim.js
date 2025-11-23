@@ -3,13 +3,13 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const DiscordService = require('./services/discord-service');
 const DatabaseService = require('./services/database-service');
-const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
+const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton, isButtonAlreadyClaimed } = require('./claimer-utils');
 const BrowserPool = require('./browser-pool');
 
 // ImageGenerator is optional
 let ImageGenerator;
 try {
-  ImageGenerator = require('./archive/image-generator');
+  ImageGenerator = require('./services/image-generator');
 } catch (error) {
   console.log('ℹ️ ImageGenerator not available - screenshots will be used instead');
   ImageGenerator = null;
@@ -32,7 +32,7 @@ class EightBallPoolClaimer {
     this.timeout = parseInt(process.env.TIMEOUT || '20000', 10);
     this.headless = process.env.HEADLESS !== 'false';
     this.dbConnected = false;
-    this.browserPool = new BrowserPool(6); // Max 6 concurrent browsers
+    this.browserPool = new BrowserPool(10); // Max 10 concurrent browsers
     
     // Check and create screenshot directories with proper permissions
     this.initializeScreenshotDirectories();
@@ -50,18 +50,18 @@ class EightBallPoolClaimer {
       'screenshots/confirmation'
     ];
 
-    directories.forEach(dir => {
+    console.log(`📁 Checking ${directories.length} screenshot directories...`);
+    for (const dir of directories) {
       try {
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
           console.log(`📁 Created screenshot directory: ${dir}`);
         } else {
-          // Check if we can write to the directory
+          // Check if we can write to the directory (silently)
           try {
             const testFile = `${dir}/test-write.tmp`;
             fs.writeFileSync(testFile, 'test');
             fs.unlinkSync(testFile);
-            console.log(`✅ Screenshot directory ${dir} is writable`);
           } catch (error) {
             console.warn(`⚠️ Screenshot directory ${dir} may have permission issues: ${error.message}`);
           }
@@ -69,7 +69,8 @@ class EightBallPoolClaimer {
       } catch (error) {
         console.warn(`⚠️ Failed to initialize screenshot directory ${dir}: ${error.message}`);
       }
-    });
+    }
+    console.log(`✅ All screenshot directories checked`);
   }
 
   async connectToDatabase() {
@@ -106,7 +107,7 @@ class EightBallPoolClaimer {
     }
   }
 
-  async saveClaimRecord(userId, claimedItems, success, error = null) {
+  async saveClaimRecord(userId, claimedItems, success, error = null, screenshotPath = null) {
     if (!this.dbConnected) {
       console.log('⚠️ Database not connected - skipping claim record save');
       return { saved: false, reason: 'no_db' };
@@ -133,20 +134,33 @@ class EightBallPoolClaimer {
         return { saved: false, reason: 'duplicate', existingClaim: existingClaims[0] };
       }
 
-      // Create claim record using DatabaseService
+      // If user already has a successful claim today, don't save failed claims (they already claimed, not a real failure)
+      if (existingClaims.length > 0 && !success) {
+        console.log(`⏭️ Skipping failed claim save - user ${userId} already has successful claim today at ${existingClaims[0].claimedAt.toLocaleTimeString()} (not a real failure)`);
+        return { saved: false, reason: 'already_claimed_today', existingClaim: existingClaims[0] };
+      }
+
+      // Create claim record using DatabaseService with screenshot path in metadata
       const claimData = {
         eightBallPoolId: userId,
         websiteUserId: userId, // Use the same ID for both fields
         status: success ? 'success' : 'failed',
         itemsClaimed: claimedItems || [],
         error: error,
-        claimedAt: new Date()
+        claimedAt: new Date(),
+        schedulerRun: new Date(),
+        metadata: screenshotPath ? {
+          screenshotPath: screenshotPath,
+          confirmationImagePath: screenshotPath,
+          timestamp: new Date().toISOString()
+        } : undefined
       };
       
       console.log(`💾 Saving claim record for user ${userId}:`, {
         status: claimData.status,
         itemsCount: claimData.itemsClaimed.length,
-        success: success
+        success: success,
+        hasScreenshot: !!screenshotPath
       });
       
       await dbService.createClaimRecord(claimData);
@@ -160,26 +174,29 @@ class EightBallPoolClaimer {
   }
 
   async ensureScreenshotDirectories() {
-  try {
-    const fs = require('fs');
-    const path = require('path');
+    try {
+      const fs = require('fs');
+      const path = require('path');
 
-    const directories = [
-      'screenshots',
-      'screenshots/shop-page',
-      'screenshots/login',
-      'screenshots/id-entry',
-      'screenshots/go-click',
-      'screenshots/final-page'
-    ];
+      const directories = [
+        'screenshots',
+        'screenshots/shop-page',
+        'screenshots/login',
+        'screenshots/id-entry',
+        'screenshots/go-click',
+        'screenshots/final-page',
+        'screenshots/confirmation'
+      ];
 
-    for (const dir of directories) {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-        console.log(`📁 Created directory: ${dir}`);
+      console.log(`📁 Ensuring ${directories.length} screenshot directories exist...`);
+      for (const dir of directories) {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+          console.log(`📁 Created directory: ${dir}`);
+        }
       }
-    }
-  } catch (error) {
+      console.log(`✅ Screenshot directories ensured`);
+    } catch (error) {
       console.error('❌ Error creating screenshot directories:', error.message);
     }
   }
@@ -241,11 +258,17 @@ class EightBallPoolClaimer {
     console.log(`✅ Browser slot acquired for user ${userId}`);
     
     // Ensure screenshot directories exist
+    console.log(`📁 Ensuring screenshot directories exist...`);
     await this.ensureScreenshotDirectories();
+    console.log(`✅ Screenshot directories ensured`);
     
     // Ensure database connection
+    console.log(`🔌 Checking database connection...`);
     if (!this.dbConnected) {
       await this.connectToDatabase();
+      console.log(`✅ Database connection established`);
+    } else {
+      console.log(`✅ Database already connected`);
     }
     
     let browser = null;
@@ -254,8 +277,38 @@ class EightBallPoolClaimer {
     let screenshotPath = null;
 
     try {
-      // Launch browser
+      // Launch browser - exact same as playwright-claimer-discord.js
       console.log('🌐 Launching browser...');
+      
+      // Set executable path for Playwright Chromium
+      // Docker uses system chromium - try multiple paths
+      const chromiumPath = process.env.CHROMIUM_PATH || process.env.CHROME_BIN;
+      
+      // Verify chromium path exists, try alternatives if not set or not found
+      const fs = require('fs');
+      let actualChromiumPath = chromiumPath;
+      
+      // Try alternatives in order
+      const alternatives = [
+        chromiumPath, // Try env var first if set
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/ms-playwright/chromium-1193/chrome-linux/chrome'
+      ];
+      
+      for (const altPath of alternatives) {
+        if (altPath && fs.existsSync(altPath)) {
+          actualChromiumPath = altPath;
+          console.log(`✅ [STAGE_2] Using Chromium path: ${altPath}`);
+          break;
+        }
+      }
+      
+      if (!actualChromiumPath || !fs.existsSync(actualChromiumPath)) {
+        console.log(`⚠️ [STAGE_2] No valid Chromium path found, using default (may use Playwright bundled)`);
+        actualChromiumPath = undefined; // Let Playwright use its bundled browser
+      }
+      
       const launchOptions = {
         headless: this.headless,
         args: [
@@ -269,6 +322,11 @@ class EightBallPoolClaimer {
           '--disable-renderer-backgrounding'
         ]
       };
+      
+      // Only set executablePath if we found a valid chromium path
+      if (actualChromiumPath) {
+        launchOptions.executablePath = actualChromiumPath;
+      }
 
       // Add slowMo for non-headless mode (development)
       if (!this.headless) {
@@ -276,10 +334,14 @@ class EightBallPoolClaimer {
       }
 
       browser = await chromium.launch(launchOptions);
+      console.log('✅ [STAGE_2] Browser launched successfully');
+      
+      console.log('✅ [STAGE_2] Creating new page...');
       page = await browser.newPage();
-      console.log('📄 Created new page');
+      console.log('✅ [STAGE_2] New page created');
 
       // Set realistic headers
+      console.log('✅ [STAGE_2] Setting HTTP headers...');
       await page.setExtraHTTPHeaders({
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
@@ -294,85 +356,161 @@ class EightBallPoolClaimer {
         'sec-ch-ua-mobile': '?0',
         'sec-ch-ua-platform': '"macOS"'
       });
+      console.log('✅ [STAGE_2] HTTP headers set');
 
-      // Navigate to Daily Reward section FIRST
-      console.log(`🌐 Navigating to Daily Reward section: ${this.dailyRewardUrl}`);
-      await page.goto(this.dailyRewardUrl, { 
-        waitUntil: 'domcontentloaded',
-        timeout: this.timeout 
-      });
-      console.log('✅ Successfully loaded Daily Reward page');
+      // Navigate to Daily Reward section FIRST - with retry logic for reliability
+      console.log(`✅ [STAGE_2] Navigating to Daily Reward section: ${this.dailyRewardUrl}`);
+      let navigationSuccess = false;
+      const maxNavigationRetries = 3;
+      
+      for (let retry = 1; retry <= maxNavigationRetries; retry++) {
+        try {
+          await page.goto(this.dailyRewardUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: this.timeout 
+          });
+          navigationSuccess = true;
+          console.log(`✅ [STAGE_2] Successfully loaded Daily Reward page (attempt ${retry})`);
+          break;
+        } catch (navError) {
+          console.log(`⚠️ [STAGE_2] Navigation attempt ${retry} failed: ${navError.message}`);
+          if (retry < maxNavigationRetries) {
+            console.log(`🔄 [STAGE_2] Retrying navigation (${retry + 1}/${maxNavigationRetries})...`);
+            await page.waitForTimeout(2000); // Wait before retry
+          } else {
+            console.log(`❌ [STAGE_2] All navigation attempts failed, but continuing...`);
+            // Try to wait for any page state
+            try {
+              await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+            } catch (e) {
+              // Ignore
+            }
+          }
+        }
+      }
+      
+      // Wait a bit for page to fully render
+      await page.waitForTimeout(3000);
+      console.log('✅ [STAGE_2] Page render wait completed');
 
       // Take initial screenshot
+      console.log('✅ [STAGE_2] Taking initial shop page screenshot...');
       await this.takeScreenshot(page, `screenshots/shop-page/shop-page-${userId}.png`, 'Initial shop page');
+      console.log('✅ [STAGE_2] Initial screenshot taken');
 
       // Look for login modal
-    console.log('🔍 Looking for login modal...');
+      console.log('✅ [STAGE_2] Looking for login modal...');
       await this.handleLogin(page, userId);
+      console.log('✅ [STAGE_2] Login process completed');
 
       // Wait for login to complete
+      console.log('✅ [STAGE_2] Waiting for login to complete...');
       await page.waitForTimeout(1000);
+      console.log('✅ [STAGE_2] Login wait completed');
 
       // Take screenshot after login
+      console.log('✅ [STAGE_2] Taking after-login screenshot...');
       await this.takeScreenshot(page, `screenshots/login/after-login-${userId}.png`, 'After login');
+      console.log('✅ [STAGE_2] After-login screenshot taken');
 
       // Check for FREE buttons in Daily Reward section
-      console.log('🎁 Checking Daily Reward section for FREE items...');
+      console.log('✅ [STAGE_2] Checking Daily Reward section for FREE items...');
       let dailyItems = await this.claimFreeItems(page, userId);
-      claimedItems = claimedItems.concat(dailyItems);
-      console.log(`✅ Claimed ${dailyItems.length} items from Daily Reward section`);
+      
+      // Check if all items were already claimed
+      if (dailyItems && typeof dailyItems === 'object' && dailyItems.alreadyClaimed) {
+        console.log(`⏭️ [STAGE_2] All items already claimed in Daily Reward section`);
+        dailyItems = [];
+      } else {
+        const itemsArray = Array.isArray(dailyItems) ? dailyItems : (dailyItems?.claimedItems || []);
+        claimedItems = claimedItems.concat(itemsArray);
+        console.log(`✅ [STAGE_2] Daily Reward section: Found and processed ${itemsArray.length} items`);
+      }
 
       // Wait between sections
       await page.waitForTimeout(1000);
 
-      // Navigate to Free Daily Cue Piece section
-      console.log(`🌐 Navigating to Free Daily Cue Piece section: ${this.freeDailyCueUrl}`);
-      await page.goto(this.freeDailyCueUrl, { 
-        waitUntil: 'domcontentloaded',
-        timeout: this.timeout 
-      });
-      console.log('✅ Successfully loaded Free Daily Cue Piece page');
+      // Navigate to Free Daily Cue Piece section - with retry logic for reliability
+      console.log(`✅ [STAGE_2] Navigating to Free Daily Cue Piece section: ${this.freeDailyCueUrl}`);
+      let navigationSuccess2 = false;
+      const maxNavigationRetries2 = 3;
+      
+      for (let retry = 1; retry <= maxNavigationRetries2; retry++) {
+        try {
+          await page.goto(this.freeDailyCueUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: this.timeout 
+          });
+          navigationSuccess2 = true;
+          console.log(`✅ [STAGE_2] Successfully loaded Free Daily Cue Piece page (attempt ${retry})`);
+          break;
+        } catch (navError) {
+          console.log(`⚠️ [STAGE_2] Navigation attempt ${retry} failed: ${navError.message}`);
+          if (retry < maxNavigationRetries2) {
+            console.log(`🔄 [STAGE_2] Retrying navigation (${retry + 1}/${maxNavigationRetries2})...`);
+            await page.waitForTimeout(2000); // Wait before retry
+          } else {
+            console.log(`❌ [STAGE_2] All navigation attempts failed, but continuing...`);
+            // Try to wait for any page state
+            try {
+              await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+            } catch (e) {
+              // Ignore
+            }
+          }
+        }
+      }
+      
+      // Wait a bit for page to fully render
+      await page.waitForTimeout(2000);
+      console.log('✅ [STAGE_2] Page render wait completed');
 
       // Wait for page to settle
       await page.waitForTimeout(1000);
 
       // Check for FREE buttons in Free Daily Cue Piece section
-      console.log('🎁 Checking Free Daily Cue Piece section for FREE items...');
+      console.log('✅ [STAGE_2] Checking Free Daily Cue Piece section for FREE items...');
       let cueItems = await this.claimFreeItems(page, userId);
       
-      // Filter out duplicate items that were already claimed
-      const uniqueCueItems = cueItems.filter(item => !claimedItems.includes(item));
-      claimedItems = claimedItems.concat(uniqueCueItems);
-      console.log(`✅ Claimed ${uniqueCueItems.length} unique items from Free Daily Cue Piece section`);
+      // Check if all items were already claimed
+      if (cueItems && typeof cueItems === 'object' && cueItems.alreadyClaimed) {
+        console.log(`⏭️ [STAGE_2] All items already claimed in Free Daily Cue Piece section`);
+        cueItems = [];
+      } else {
+        const itemsArray = Array.isArray(cueItems) ? cueItems : (cueItems?.claimedItems || []);
+        // Filter out duplicate items that were already claimed
+        const uniqueCueItems = itemsArray.filter(item => !claimedItems.includes(item));
+        claimedItems = claimedItems.concat(uniqueCueItems);
+        console.log(`✅ [STAGE_2] Free Daily Cue Piece section: Found and processed ${uniqueCueItems.length} unique items`);
+      }
 
       // Take final screenshot
+      console.log('✅ [STAGE_2] Taking final page screenshot...');
       screenshotPath = `screenshots/final-page/final-page-${userId}.png`;
       await this.takeScreenshot(page, screenshotPath, 'Final page');
+      console.log(`✅ [STAGE_2] Final screenshot saved: ${screenshotPath}`);
 
       // Logout
-      console.log('🚪 Logging out...');
+      console.log('✅ [STAGE_2] Logging out...');
       await this.logout(page);
+      console.log('✅ [STAGE_2] Logout completed');
 
-      console.log(`✅ Claim process completed for user: ${userId}`);
+      console.log(`✅ [STAGE_2] Claim process completed for user: ${userId}`);
+      console.log(`✅ [STAGE_2] Total items processed: ${claimedItems.length}`);
       
-      // LAYER 3: Pre-save validation - check if any items were actually claimed
+      // Check if all items were already claimed
       if (claimedItems.length === 0) {
-        console.log(`⚠️ No items detected in claimedItems array for user ${userId} - this may indicate a counting issue`);
-        console.log(`🔍 However, we'll still save the claim record as 'success' since the process completed without errors`);
-        console.log(`🔍 This could mean: 1) Items already claimed today, 2) No free items available, 3) Website structure changed`);
-        
-        // Cleanup old screenshots
-        await this.cleanupOldScreenshots();
-        
-        // Still save a record with empty items but success status
-        const saveResult = await this.saveClaimRecord(userId, [], true);
-        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: false };
+        console.log(`⏭️ No items claimed for user ${userId} - items may already be claimed`);
+        console.log(`⏭️ Not saving failed record (items already claimed, not a failure)`);
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
       }
       
-      console.log(`🎉 SUCCESS: User ${userId} claimed ${claimedItems.length} items: ${claimedItems.join(', ')}`);
+      console.log(`✅ [STAGE_2] SUCCESS: User ${userId} claimed ${claimedItems.length} items: ${claimedItems.join(', ')}`);
 
-      // Save claim record to database (with Layer 1 duplicate check)
-      const saveResult = await this.saveClaimRecord(userId, claimedItems, true);
+      // Save claim record to database (with Layer 1 duplicate check) - include screenshot path
+      console.log('✅ [STAGE_2] Saving claim record to database...');
+      const saveResult = await this.saveClaimRecord(userId, claimedItems, true, null, screenshotPath);
+      console.log(`✅ [STAGE_2] Claim record saved: ${saveResult.saved ? 'SUCCESS' : 'FAILED'}`);
 
       // Handle duplicate detection from Layer 1
       if (saveResult && !saveResult.saved && saveResult.reason === 'duplicate') {
@@ -396,7 +534,25 @@ class EightBallPoolClaimer {
       return { success: true, claimedItems, screenshotPath };
 
     } catch (error) {
-      console.error(`❌ Error during claim process for ${userId}:`, error.message);
+      console.error(`❌ [STAGE_2] Error during claim process for ${userId}:`, error.message);
+      console.error(`❌ [STAGE_2] Error stack:`, error.stack);
+      
+      // Check if it's a browser launch error
+      if (error.message.includes('browser') || error.message.includes('chromium') || error.message.includes('executable')) {
+        console.error(`❌ Browser launch error detected for ${userId}`);
+        console.error(`❌ This is likely a configuration issue with Chromium/Playwright`);
+      }
+      
+      // Check if error is due to already claimed items (not a real failure)
+      const errorMessage = error.message || '';
+      const isAlreadyClaimedError = errorMessage.toLowerCase().includes('already claimed') ||
+                                    errorMessage.toLowerCase().includes('already collected') ||
+                                    errorMessage.toLowerCase().includes('items already claimed');
+      
+      if (isAlreadyClaimedError) {
+        console.log(`⏭️ Error indicates items already claimed - not saving failed record`);
+        return { success: true, claimedItems: [], screenshotPath: null, alreadyClaimed: true };
+      }
       
       // Check if it's a screenshot-related error
       if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
@@ -404,8 +560,20 @@ class EightBallPoolClaimer {
         console.warn(`⚠️ Consider checking screenshot directory permissions`);
       }
       
-      // Save failed claim record to database
-      await this.saveClaimRecord(userId, [], false, error.message);
+      // Save failed claim record to database only for actual errors (network, page errors, etc.)
+      try {
+        const saveResult = await this.saveClaimRecord(userId, [], false, error.message, null);
+        
+        // If save was skipped due to user already having success today, treat as success
+        if (saveResult && !saveResult.saved && saveResult.reason === 'already_claimed_today') {
+          console.log(`⏭️ User ${userId} already has successful claim today - not a real failure`);
+          return { success: true, claimedItems: [], screenshotPath: null, alreadyClaimed: true };
+        }
+        
+        console.log(`✅ Failed claim record saved to database`);
+      } catch (saveError) {
+        console.error(`❌ Failed to save claim record: ${saveError.message}`);
+      }
       
       return { success: false, error: error.message };
     } finally {
@@ -771,13 +939,45 @@ class EightBallPoolClaimer {
 
     console.log(`Found ${uniqueButtons.length} unique FREE buttons`);
 
+    // Check if all buttons are already claimed before attempting to claim
+    let allButtonsClaimed = true;
+    let claimableButtonsCount = 0;
+    
+    if (uniqueButtons.length > 0) {
+      for (const buttonInfo of uniqueButtons) {
+        try {
+          const buttonText = buttonInfo.text || '';
+          const isDisabled = await buttonInfo.element.isDisabled().catch(() => false);
+          const isAlreadyClaimed = isButtonAlreadyClaimed(buttonText);
+          
+          if (!isDisabled && !isAlreadyClaimed) {
+            allButtonsClaimed = false;
+            claimableButtonsCount++;
+          }
+        } catch (error) {
+          // If we can't check, assume it's claimable
+          allButtonsClaimed = false;
+          claimableButtonsCount++;
+        }
+      }
+      
+      // If all buttons are already claimed, return early with success flag
+      if (allButtonsClaimed && uniqueButtons.length > 0) {
+        console.log('✅ All items are already claimed - no new items to claim');
+        console.log('⏭️ Skipping claim attempt (items already claimed, not a failure)');
+        return { claimedItems: [], alreadyClaimed: true };
+      }
+      
+      console.log(`🎯 Found ${claimableButtonsCount} claimable buttons out of ${uniqueButtons.length} total`);
+    }
+
     if (uniqueButtons.length === 0) {
       console.log('❌ No FREE buttons found - may already be claimed or not available');
       
       // Count total buttons for debugging
       const allButtons = await page.locator('button').all();
       console.log(`Found ${allButtons.length} total buttons on page`);
-      return claimedItems;
+      return { claimedItems: [], alreadyClaimed: true };
     }
 
     // Click each FREE button (after checking if it's claimable)
@@ -1081,11 +1281,16 @@ async function main() {
     console.log(`📋 This is Stage 2: Claim Execution (user pre-validated by registration-validation.ts)`);
     
     try {
+      console.log(`📋 First-time claim script starting for user ${username} (${eightBallPoolId})`);
+      
       // Initialize Discord service for notifications
+      console.log(`🔌 Initializing Discord service...`);
       await claimer.initializeDiscord();
+      console.log(`✅ Discord service initialized`);
       
       // Store username for Discord notifications
       claimer.currentUsername = username;
+      console.log(`🎯 Calling claimRewardsForUser for ${eightBallPoolId}...`);
       const result = await claimer.claimRewardsForUser(eightBallPoolId);
       if (result.success) {
         console.log(`✅ First-time claim completed successfully for ${username} (${eightBallPoolId})`);
@@ -1112,6 +1317,30 @@ async function main() {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
+
+// Initialize heartbeat for service tracking
+let heartbeatInitialized = false;
+try {
+  const heartbeatUrl = process.env.HEARTBEAT_URL || `${process.env.PUBLIC_URL || 'http://localhost:2600'}/8bp-rewards/api/heartbeat/beat`;
+  const axios = require('axios');
+  const intervalMs = Math.max(5000, parseInt(process.env.HEARTBEAT_INTERVAL_MS || '5000', 10));
+  
+  const sendHeartbeat = () => {
+    axios.post(heartbeatUrl, {
+      moduleId: __filename,
+      filePath: __filename,
+      processId: process.pid,
+      service: 'claimer'
+    }, { timeout: 2000 }).catch(() => {});
+  };
+  
+  sendHeartbeat();
+  setInterval(sendHeartbeat, intervalMs);
+  heartbeatInitialized = true;
+  console.log('✅ Heartbeat initialized for first-time-claimer service');
+} catch (error) {
+  console.log('⚠️ Could not initialize heartbeat:', error.message);
+}
 
 // Run the main function
 if (require.main === module) {

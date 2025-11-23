@@ -206,8 +206,8 @@ const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: s
       };
     }
     
-    // Delete all failed claims using DatabaseService
-    const deleteResult = await dbService.deleteClaimRecords({ status: 'failed' });
+    // Delete all failed claims using DatabaseService cleanup utility
+    const cleanupResult = await dbService.cleanupFailedClaims();
     
     // Get updated statistics
     const updatedClaims = await dbService.findClaimRecords();
@@ -218,7 +218,9 @@ const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: s
     const output = [
       '🗑️  Failed Claims Cleanup Complete',
       '================================',
-      `✅ Removed ${deleteResult} failed claim records`,
+      `✅ Removed ${cleanupResult.removedClaimRecords} failed claim records`,
+      `🧹 Removed ${cleanupResult.removedLogEntries} related log entries`,
+      `🧾 Removed ${cleanupResult.removedValidationLogs} validation log entries`,
       '',
       '📊 Updated Database Statistics:',
       `   Total claims: ${totalClaims}`,
@@ -230,7 +232,9 @@ const clearFailedClaimsCommand = async (): Promise<{ success: boolean; output: s
     
     logger.info('Failed claims cleared via terminal', {
       action: 'failed_claims_cleared_terminal',
-      deletedCount: deleteResult,
+      deletedCount: cleanupResult.removedClaimRecords,
+      removedLogEntries: cleanupResult.removedLogEntries,
+      removedValidationLogs: cleanupResult.removedValidationLogs,
       totalClaims,
       successfulClaims,
       remainingFailed
@@ -297,7 +301,6 @@ const ALLOWED_COMMANDS: Record<string, CommandConfig> = {
   'git': { subcommands: ['status', 'log', 'diff', 'branch', 'remote'], maxArgs: 5 },
   'npm': { subcommands: ['list', 'outdated', 'audit', 'run'], maxArgs: 5 },
   'node': { allowScripts: true, maxArgs: 2 },
-  'pm2': { subcommands: ['list', 'status', 'logs', 'info', 'describe'], maxArgs: 4 },
   'systemctl': { subcommands: ['status', 'list-units', 'is-active'], readonly: true, maxArgs: 3 },
   'clear-failed-claims': { special: true, maxArgs: 0 },
 };

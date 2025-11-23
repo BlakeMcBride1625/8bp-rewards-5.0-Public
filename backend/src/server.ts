@@ -34,6 +34,8 @@ import adminTerminalRoutes from './routes/admin-terminal';
 import tiktokProfilesRoutes from './routes/tiktok-profiles';
 import postgresqlDbRoutes from './routes/postgresql-db';
 import validationRoutes from './routes/validation';
+import userDashboardRoutes from './routes/user-dashboard';
+import verificationRoutes from './routes/verification';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -186,6 +188,7 @@ class Server {
     this.app.use('/api/postgresql-db', postgresqlDbRoutes);
     this.app.use('/api/validation', validationRoutes);
     this.app.use('/api/heartbeat', heartbeatRoutes);
+    this.app.use('/api/user-dashboard', userDashboardRoutes);
     
     // Also register API routes under /8bp-rewards prefix for frontend
     this.app.use('/8bp-rewards/api/auth', authRoutes);
@@ -201,6 +204,8 @@ class Server {
     this.app.use('/8bp-rewards/api/postgresql-db', postgresqlDbRoutes);
     this.app.use('/8bp-rewards/api/validation', validationRoutes);
     this.app.use('/8bp-rewards/api/heartbeat', heartbeatRoutes);
+    this.app.use('/8bp-rewards/api/user-dashboard', userDashboardRoutes);
+    this.app.use('/api/internal/verification', verificationRoutes);
 
     // Serve static files from React build (consolidated Docker setup)
     // Always serve frontend in production mode or if build exists
@@ -231,9 +236,17 @@ class Server {
       if (frontendBuildPath) {
         // Serve static assets from frontend build (including assets folder)
         this.app.use('/8bp-rewards', express.static(frontendBuildPath, {
-          maxAge: '1y', // Cache static assets
+          maxAge: '0', // Disable caching to prevent stale content
           etag: true,
-          lastModified: true
+          lastModified: true,
+          setHeaders: (res, path) => {
+            // Disable caching for HTML files
+            if (path.endsWith('.html')) {
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+              res.setHeader('Pragma', 'no-cache');
+              res.setHeader('Expires', '0');
+            }
+          }
         }));
         
         // Also serve assets directly for paths like /8bp-rewards/assets/logos/8logo.png
@@ -273,9 +286,12 @@ class Server {
           if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|eot)$/)) {
             return next();
           }
-          // Serve index.html for React Router
+          // Serve index.html for React Router with no-cache headers
           const indexPath = path.join(frontendBuildPath!, 'index.html');
           if (require('fs').existsSync(indexPath)) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
             res.sendFile(indexPath);
           } else {
             next();
@@ -301,7 +317,10 @@ class Server {
         if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|eot)$/)) {
           return next();
         }
-        // Serve index.html for React Router
+        // Serve index.html for React Router with no-cache headers
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         res.sendFile(path.join(frontendBuildPath, 'index.html'));
       });
     }

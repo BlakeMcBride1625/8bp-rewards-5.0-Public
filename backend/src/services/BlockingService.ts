@@ -36,7 +36,7 @@ export class BlockingService {
         port: parseInt(process.env.POSTGRES_PORT || '5432'),
         database: process.env.POSTGRES_DB || '8bp_rewards',
         user: process.env.POSTGRES_USER || 'admin',
-        password: process.env.POSTGRES_PASSWORD || '192837DB25',
+        password: process.env.POSTGRES_PASSWORD || '',
         ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false,
         max: 20,
         min: 5,

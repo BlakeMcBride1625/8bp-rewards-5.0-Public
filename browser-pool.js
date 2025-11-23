@@ -4,7 +4,7 @@
  */
 
 class BrowserPool {
-  constructor(maxConcurrent = 6) {
+  constructor(maxConcurrent = 10) {
     this.maxConcurrent = maxConcurrent;
     this.activeBrowsers = 0;
     this.queue = [];

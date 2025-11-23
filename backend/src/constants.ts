@@ -52,14 +52,15 @@ export const CLAIM_STATUS = {
 } as const;
 
 // Invalid user indicators (for validation)
+// More specific indicators to avoid false positives
 export const INVALID_USER_INDICATORS = [
   'Invalid Unique ID',
   'Invalid ID',
   'user not found',
   'user not valid',
   'banned',
-  'not found',
-  'error'
+  'id not found',
+  'unique id not found'
 ] as const;
 
 // Valid user indicators (for validation)
@@ -94,6 +95,8 @@ export const SCREENSHOT_PATHS = {
   ID_ENTRY: 'screenshots/id-entry',
   GO_CLICK: 'screenshots/go-click'
 } as const;
+
+
 
 
 

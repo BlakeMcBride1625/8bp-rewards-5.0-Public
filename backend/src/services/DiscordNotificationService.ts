@@ -265,6 +265,215 @@ class DiscordNotificationService {
       });
     }
   }
+
+  /**
+   * Send an embed message to a Discord channel
+   */
+  async sendEmbed(channelId: string, embed: any): Promise<any> {
+    if (!this.botToken) {
+      logger.warn('Discord embed skipped - missing DISCORD_TOKEN');
+      return null;
+    }
+
+    try {
+      const response = await axios.post(
+        `https://discord.com/api/v10/channels/${channelId}/messages`,
+        {
+          embeds: [embed]
+        },
+        {
+          headers: {
+            'Authorization': `Bot ${this.botToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      logger.info('Discord embed sent', {
+        action: 'discord_embed_sent',
+        channelId
+      });
+
+      return response.data;
+    } catch (error) {
+      logger.error('Failed to send Discord embed', {
+        action: 'discord_embed_error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        channelId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Send an embed message via DM to a user
+   */
+  async sendEmbedDM(userId: string, embed: any): Promise<any> {
+    if (!this.botToken) {
+      logger.warn('Discord embed DM skipped - missing DISCORD_TOKEN');
+      return null;
+    }
+
+    try {
+      // Create or get DM channel
+      const channelId = await this.createDMChannel(userId);
+      if (!channelId) {
+        throw new Error('Failed to create DM channel');
+      }
+
+      // Send embed message
+      const response = await axios.post(
+        `https://discord.com/api/v10/channels/${channelId}/messages`,
+        {
+          embeds: [embed]
+        },
+        {
+          headers: {
+            'Authorization': `Bot ${this.botToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      logger.info('Discord embed DM sent', {
+        action: 'discord_embed_dm_sent',
+        userId,
+        channelId
+      });
+
+      return response.data;
+    } catch (error) {
+      logger.error('Failed to send Discord embed DM', {
+        action: 'discord_embed_dm_error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        userId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Send a deregistration request embed via DM to the user
+   */
+  async sendDeregistrationRequestEmbed(
+    discordId: string,
+    discordTag: string,
+    eightBallPoolId: string,
+    username: string,
+    ipAddress: string,
+    screenshotUrl?: string
+  ): Promise<void> {
+    if (!this.botToken) {
+      logger.warn('Discord embed DM skipped - missing DISCORD_TOKEN');
+      return;
+    }
+
+    try {
+      const embed: any = {
+        title: '📝 Deregistration Request',
+        description: `Your request to unlink your 8 Ball Pool account has been received and is pending admin review.`,
+        color: 0xffa500, // Orange color
+        fields: [
+          {
+            name: '🎱 8BP Account ID',
+            value: eightBallPoolId,
+            inline: true
+          },
+          {
+            name: '📛 Username',
+            value: username,
+            inline: true
+          },
+          {
+            name: '📅 Requested At',
+            value: new Date().toLocaleString(),
+            inline: true
+          }
+        ],
+        footer: {
+          text: '8 Ball Pool Rewards System'
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      // Add screenshot if available
+      if (screenshotUrl) {
+        embed.image = { url: screenshotUrl };
+      }
+
+      // Send via DM instead of public channel
+      await this.sendEmbedDM(discordId, embed);
+    } catch (error) {
+      logger.error('Failed to send deregistration request embed', {
+        action: 'deregistration_request_embed_error',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Send a deregistration approval/denial embed via DM to the user
+   */
+  async sendDeregistrationReviewEmbed(
+    action: 'approved' | 'denied',
+    discordId: string,
+    discordTag: string,
+    eightBallPoolId: string,
+    reviewedBy: string,
+    reviewNotes?: string
+  ): Promise<void> {
+    if (!this.botToken) {
+      logger.warn('Discord embed DM skipped - missing DISCORD_TOKEN');
+      return;
+    }
+
+    try {
+      const embed = {
+        title: action === 'approved' ? '✅ Deregistration Approved' : '❌ Deregistration Denied',
+        description: action === 'approved' 
+          ? `Your deregistration request has been approved. Your 8 Ball Pool account has been unlinked from your Discord account.`
+          : `Your deregistration request has been denied.`,
+        color: action === 'approved' ? 0x00ff00 : 0xff0000,
+        fields: [
+          {
+            name: '🎱 8BP Account ID',
+            value: eightBallPoolId,
+            inline: true
+          },
+          {
+            name: '👨‍💼 Reviewed By',
+            value: reviewedBy,
+            inline: true
+          },
+          {
+            name: '📅 Reviewed At',
+            value: new Date().toLocaleString(),
+            inline: true
+          }
+        ],
+        footer: {
+          text: '8 Ball Pool Rewards System'
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      if (reviewNotes) {
+        embed.fields.push({
+          name: '📝 Notes',
+          value: reviewNotes,
+          inline: false
+        });
+      }
+
+      // Send via DM instead of public channel
+      await this.sendEmbedDM(discordId, embed);
+    } catch (error) {
+      logger.error('Failed to send deregistration review embed', {
+        action: 'deregistration_review_embed_error',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
 }
 
 export default DiscordNotificationService;

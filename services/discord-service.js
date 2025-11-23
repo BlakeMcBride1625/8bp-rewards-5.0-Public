@@ -68,12 +68,23 @@ class DiscordService {
       const command = this.commands.get(interaction.commandName);
       if (!command) return;
 
-      // Check if user is in allowed admins list
+      // Commands that are available to all users (not just admins)
+      // Public commands: Anyone can use these
+      const publicCommands = [
+        'register',      // Anyone can register their account
+        'link-account',  // Anyone can link their Discord to existing account
+        'my-accounts',   // Users can view their own linked accounts
+        'help'           // Everyone should see help
+      ];
+      const isPublicCommand = publicCommands.includes(interaction.commandName);
+
+      // Check if user is in allowed admins list (for admin-only commands)
       const userId = interaction.user.id;
       const isAdmin = this.allowedAdmins.includes(userId);
       
-      if (!isAdmin) {
-        const errorMessage = '❌ Access denied! Only administrators can use bot commands.';
+      // Only enforce admin check for non-public commands
+      if (!isPublicCommand && !isAdmin) {
+        const errorMessage = '❌ Access denied! Only administrators can use this command.';
         
         if (interaction.inGuild()) {
           return interaction.reply({
@@ -154,16 +165,17 @@ class DiscordService {
       data: new SlashCommandBuilder()
         .setName('register')
         .setDescription('Register your 8 Ball Pool account for automated rewards')
+        .setDefaultMemberPermissions(null) // Public command - no permissions required
         .addIntegerOption(option =>
-          option.setName('eightballpoolid')
-            .setDescription('Your 8 Ball Pool User ID')
+          option.setName('id')
+            .setDescription('Enter the 8 Ball Pool Unique ID here')
             .setRequired(true))
         .addStringOption(option =>
           option.setName('username')
             .setDescription('Your username')
             .setRequired(true)),
       async execute(interaction, service) {
-        const eightBallPoolId = interaction.options.getInteger('eightballpoolid').toString();
+        const eightBallPoolId = interaction.options.getInteger('id').toString();
         const username = interaction.options.getString('username');
 
         try {
@@ -212,6 +224,32 @@ class DiscordService {
 
           await interaction.reply({ embeds: [embed], ephemeral: interaction.inGuild() });
 
+          // Send notification to registration channel
+          try {
+            const channelId = '1422725910196518922'; // Registration channel ID
+            if (service.client) {
+              const channel = service.client.channels.cache.get(channelId);
+              if (channel && channel.isTextBased()) {
+                const notificationEmbed = new EmbedBuilder()
+                  .setTitle('✅ Account Registered via Discord')
+                  .setDescription(`A new account has been registered`)
+                  .addFields(
+                    { name: '🎱 8BP Account ID', value: eightBallPoolId, inline: true },
+                    { name: '👤 Username', value: username, inline: true },
+                    { name: '👤 Discord User', value: interaction.user.tag, inline: true },
+                    { name: '📋 Total Registrations', value: `${totalUsers}`, inline: true },
+                    { name: '🆕 Status', value: result.isNew ? 'New Registration' : 'Account Updated', inline: true }
+                  )
+                  .setColor(0x00FF00)
+                  .setTimestamp();
+                
+                await channel.send({ embeds: [notificationEmbed] });
+              }
+            }
+          } catch (notifError) {
+            console.log('⚠️ Failed to send registration notification:', notifError.message);
+          }
+
         } catch (error) {
           console.error('❌ Error in /register command:', error);
           await interaction.reply({
@@ -226,7 +264,8 @@ class DiscordService {
     const listAccountsCommand = {
       data: new SlashCommandBuilder()
         .setName('list-accounts')
-        .setDescription('List all registered accounts'),
+        .setDescription('List all registered accounts (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         try {
           await interaction.deferReply({ ephemeral: interaction.inGuild() });
@@ -293,7 +332,8 @@ class DiscordService {
     const checkAccountsCommand = {
       data: new SlashCommandBuilder()
         .setName('check-accounts')
-        .setDescription('Check the status of all registered accounts'),
+        .setDescription('Check the status of all registered accounts (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         try {
           await interaction.deferReply({ ephemeral: interaction.inGuild() });
@@ -337,17 +377,207 @@ class DiscordService {
       }
     };
 
+    // Link account command - Links Discord user to existing 8BP account
+    const linkAccountCommand = {
+      data: new SlashCommandBuilder()
+        .setName('link-account')
+        .setDescription('Link your Discord account to an existing 8 Ball Pool account')
+        .setDefaultMemberPermissions(null) // Public command - no permissions required
+        .addIntegerOption(option =>
+          option.setName('id')
+            .setDescription('Enter the 8 Ball Pool Unique ID here')
+            .setRequired(true)),
+      async execute(interaction, service) {
+        const eightBallPoolId = interaction.options.getInteger('id').toString();
+        const discordId = interaction.user.id;
+
+        try {
+          await interaction.deferReply({ ephemeral: interaction.inGuild() });
+
+          // Check if 8BP account exists in database
+          const client = await service.dbService.pool.connect();
+          let existingRegistration = null;
+          
+          try {
+            const existingResult = await client.query(
+              'SELECT * FROM registrations WHERE eight_ball_pool_id = $1',
+              [eightBallPoolId]
+            );
+            
+            if (existingResult.rows.length > 0) {
+              existingRegistration = existingResult.rows[0];
+            }
+          } finally {
+            client.release();
+          }
+
+          // If account doesn't exist, return error with registration options
+          if (!existingRegistration) {
+            return interaction.followUp({
+              content: `❌ **Account not found**\n\nThe 8 Ball Pool account ID **${eightBallPoolId}** is not registered in our system.\n\n**Please register your account first:**\n• Use \`/register\` command in Discord\n• Or register via website: https://8ballpool.website/8bp-rewards/register\n\nOnce registered, you can use \`/link-account\` to link your Discord account.`,
+              ephemeral: interaction.inGuild()
+            });
+          }
+
+          // Check if account is already linked to a different Discord account
+          if (existingRegistration.discord_id && existingRegistration.discord_id !== discordId) {
+            return interaction.followUp({
+              content: `❌ **Account already linked**\n\nThis 8 Ball Pool account is already linked to a different Discord account.\n\nIf this is your account, please contact an administrator.`,
+              ephemeral: interaction.inGuild()
+            });
+          }
+
+          // Check if already linked to this Discord account
+          if (existingRegistration.discord_id === discordId) {
+            return interaction.followUp({
+              content: `✅ **Already linked**\n\nYour Discord account is already linked to this 8 Ball Pool account!`,
+              ephemeral: interaction.inGuild()
+            });
+          }
+
+          // Link Discord ID to existing registration
+          const updateClient = await service.dbService.pool.connect();
+          try {
+            await updateClient.query(
+              'UPDATE registrations SET discord_id = $1, updated_at = CURRENT_TIMESTAMP WHERE eight_ball_pool_id = $2',
+              [discordId, eightBallPoolId]
+            );
+          } finally {
+            updateClient.release();
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle('✅ Account Linked')
+            .setDescription(`Successfully linked your Discord account to your 8 Ball Pool account!`)
+            .addFields(
+              { name: '🎱 8BP Account ID', value: eightBallPoolId, inline: true },
+              { name: '👤 Username', value: existingRegistration.username || 'Unknown', inline: true }
+            )
+            .setColor(0x00FF00)
+            .setTimestamp();
+
+          // If in a guild, send ephemeral reply and also send DM
+          // If in DMs, only send the followUp (already in DMs)
+          if (interaction.inGuild()) {
+            await interaction.followUp({ embeds: [embed], ephemeral: true });
+            
+            // Send notification to user's DMs
+            try {
+              const dmChannel = await interaction.user.createDM();
+              if (dmChannel) {
+                await dmChannel.send({ embeds: [embed] });
+              }
+            } catch (dmError) {
+              console.log('⚠️ Failed to send DM notification (user may have DMs disabled):', dmError.message);
+            }
+          } else {
+            // Already in DMs, just send the followUp
+            await interaction.followUp({ embeds: [embed] });
+          }
+
+        } catch (error) {
+          console.error('❌ Error in /link-account command:', error);
+          const errorMessage = interaction.replied || interaction.deferred 
+            ? { content: '❌ An error occurred while linking your account. Please try again.', ephemeral: interaction.inGuild() }
+            : { content: '❌ An error occurred while linking your account. Please try again.', ephemeral: interaction.inGuild() };
+          
+          if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorMessage);
+          } else {
+            await interaction.reply(errorMessage);
+          }
+        }
+      }
+    };
+
+    // My accounts command - Shows all 8BP accounts linked to user's Discord ID
+    const myAccountsCommand = {
+      data: new SlashCommandBuilder()
+        .setName('my-accounts')
+        .setDescription('View all 8 Ball Pool accounts linked to your Discord account')
+        .setDefaultMemberPermissions(null), // Public command - no permissions required
+      async execute(interaction, service) {
+        const discordId = interaction.user.id;
+
+        try {
+          await interaction.deferReply({ ephemeral: interaction.inGuild() });
+
+          // Get all accounts linked to this Discord ID
+          const client = await service.dbService.pool.connect();
+          let linkedAccounts = [];
+          
+          try {
+            const result = await client.query(
+              'SELECT * FROM registrations WHERE discord_id = $1 ORDER BY created_at DESC',
+              [discordId]
+            );
+            
+            linkedAccounts = result.rows;
+          } finally {
+            client.release();
+          }
+
+          if (linkedAccounts.length === 0) {
+            return interaction.followUp({
+              content: `❌ **No accounts linked**\n\nYou don't have any 8 Ball Pool accounts linked to your Discord account yet.\n\nUse \`/link-account\` to link an existing account, or \`/register\` to register a new one.`,
+              ephemeral: interaction.inGuild()
+            });
+          }
+
+          // Create embed with all linked accounts
+          const embed = new EmbedBuilder()
+            .setTitle('📋 Your Linked Accounts')
+            .setDescription(`You have **${linkedAccounts.length}** account(s) linked to your Discord account`)
+            .setColor(0x0099FF)
+            .setTimestamp();
+
+          // Add each account as a field
+          linkedAccounts.forEach((account, index) => {
+            const linkedDate = account.created_at 
+              ? new Date(account.created_at).toLocaleDateString()
+              : 'Unknown';
+            
+            embed.addFields({
+              name: `${index + 1}. ${account.username || 'Unknown'}`,
+              value: `🎱 **8BP ID:** ${account.eight_ball_pool_id}\n📅 **Linked:** ${linkedDate}\n✅ **Status:** ${account.is_active ? 'Active' : 'Inactive'}`,
+              inline: false
+            });
+          });
+
+          // Add footer if there are many accounts
+          if (linkedAccounts.length > 10) {
+            embed.setFooter({ text: `Showing ${linkedAccounts.length} linked accounts` });
+          }
+
+          await interaction.followUp({ embeds: [embed] });
+
+        } catch (error) {
+          console.error('❌ Error in /my-accounts command:', error);
+          const errorMessage = interaction.replied || interaction.deferred 
+            ? { content: '❌ An error occurred while fetching your accounts. Please try again.', ephemeral: interaction.inGuild() }
+            : { content: '❌ An error occurred while fetching your accounts. Please try again.', ephemeral: interaction.inGuild() };
+          
+          if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorMessage);
+          } else {
+            await interaction.reply(errorMessage);
+          }
+        }
+      }
+    };
+
     // Deregister command
     const deregisterCommand = {
       data: new SlashCommandBuilder()
         .setName('deregister')
-        .setDescription('Remove your account from the rewards system')
+        .setDescription('Remove your account from the rewards system (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // Admin only
         .addIntegerOption(option =>
-          option.setName('eightballpoolid')
-            .setDescription('8 Ball Pool User ID to remove')
+          option.setName('id')
+            .setDescription('Enter the 8 Ball Pool Unique ID here')
             .setRequired(true)),
       async execute(interaction, service) {
-        const eightBallPoolId = interaction.options.getInteger('eightballpoolid').toString();
+        const eightBallPoolId = interaction.options.getInteger('id').toString();
 
         try {
           // Remove the registration by 8BP ID
@@ -386,23 +616,28 @@ class DiscordService {
     const helpCommand = {
       data: new SlashCommandBuilder()
         .setName('help')
-        .setDescription('Show help information and available commands'),
+        .setDescription('Show help information and available commands')
+        .setDefaultMemberPermissions(null), // Public command - no permissions required
       async execute(interaction, service) {
         const embed = new EmbedBuilder()
           .setTitle('🤖 8BP Rewards Bot - Help')
-          .setDescription('Available commands for administrators:')
+          .setDescription('Available commands:')
           .addFields(
+            { name: '📝 Public Commands (Everyone)', value: 'These commands are available to all users:', inline: false },
             { name: '/register', value: 'Register your 8 Ball Pool account for automated rewards', inline: false },
-            { name: '/list-accounts', value: 'List all registered accounts', inline: false },
-            { name: '/check-accounts', value: 'Check the status of all registered accounts', inline: false },
-            { name: '/deregister', value: 'Remove your account from the rewards system', inline: false },
-            { name: '/clear', value: 'Delete bot messages from current channel or user\'s DMs', inline: false },
+            { name: '/link-account', value: 'Link your Discord account to an existing 8 Ball Pool account', inline: false },
+            { name: '/my-accounts', value: 'View all 8 Ball Pool accounts linked to your Discord account', inline: false },
             { name: '/help', value: 'Show this help message', inline: false },
-            { name: '/md', value: 'Show markdown documentation', inline: false },
-            { name: '/server-status', value: 'Check Discord bot server status', inline: false },
-            { name: '/website-status', value: 'Check website and backend services status', inline: false },
-            { name: '/ping-discord', value: 'Test Discord bot connectivity', inline: false },
-            { name: '/ping-website', value: 'Test website connectivity', inline: false }
+            { name: '🔧 Admin Commands', value: 'These commands require administrator privileges:', inline: false },
+            { name: '/deregister', value: 'Remove an account from the rewards system (Admin only)', inline: false },
+            { name: '/list-accounts', value: 'List all registered accounts (Admin only)', inline: false },
+            { name: '/check-accounts', value: 'Check the status of all registered accounts (Admin only)', inline: false },
+            { name: '/clear', value: 'Delete bot messages from current channel or user\'s DMs (Admin only)', inline: false },
+            { name: '/md', value: 'Show markdown documentation (Admin only)', inline: false },
+            { name: '/server-status', value: 'Check Discord bot server status (Admin only)', inline: false },
+            { name: '/website-status', value: 'Check website and backend services status (Admin only)', inline: false },
+            { name: '/ping-discord', value: 'Test Discord bot connectivity (Admin only)', inline: false },
+            { name: '/ping-website', value: 'Test website connectivity (Admin only)', inline: false }
           )
           .setColor(0x0099FF)
           .setTimestamp();
@@ -415,7 +650,8 @@ class DiscordService {
     const mdCommand = {
       data: new SlashCommandBuilder()
         .setName('md')
-        .setDescription('Show markdown documentation'),
+        .setDescription('Show markdown documentation (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         const embed = new EmbedBuilder()
           .setTitle('📚 8BP Rewards System Documentation')
@@ -431,7 +667,8 @@ class DiscordService {
     const serverStatusCommand = {
       data: new SlashCommandBuilder()
         .setName('server-status')
-        .setDescription('Check the status of the Discord bot server'),
+        .setDescription('Check the status of the Discord bot server (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         try {
           const uptime = process.uptime();
@@ -466,7 +703,8 @@ class DiscordService {
     const websiteStatusCommand = {
       data: new SlashCommandBuilder()
         .setName('website-status')
-        .setDescription('Check the status of the website and backend services'),
+        .setDescription('Check the status of the website and backend services (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         try {
           await interaction.deferReply({ ephemeral: interaction.inGuild() });
@@ -523,7 +761,8 @@ class DiscordService {
     const pingDiscordCommand = {
       data: new SlashCommandBuilder()
         .setName('ping-discord')
-        .setDescription('Test Discord bot connectivity'),
+        .setDescription('Test Discord bot connectivity (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         const sent = await interaction.reply({ 
           content: '🏓 Pinging...', 
@@ -551,7 +790,8 @@ class DiscordService {
     const pingWebsiteCommand = {
       data: new SlashCommandBuilder()
         .setName('ping-website')
-        .setDescription('Test website connectivity'),
+        .setDescription('Test website connectivity (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
       async execute(interaction, service) {
         try {
           await interaction.deferReply({ ephemeral: interaction.inGuild() });
@@ -596,7 +836,8 @@ class DiscordService {
     const clearCommand = {
       data: new SlashCommandBuilder()
         .setName('clear')
-        .setDescription('Delete bot messages from current channel or specified user\'s DMs')
+        .setDescription('Delete bot messages from current channel or specified user\'s DMs (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // Admin only
         .addIntegerOption(option =>
           option.setName('amount')
             .setDescription('Number of messages to delete (1-100)')
@@ -761,12 +1002,144 @@ class DiscordService {
       }
     };
 
+    // DM rm -rf command - Delete all bot DM messages (Admin only)
+    const dmRmRfCommand = {
+      data: new SlashCommandBuilder()
+        .setName('dm-rm-rf')
+        .setDescription('Delete all bot messages from all DMs (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator), // Admin only
+      async execute(interaction, service) {
+        const userId = interaction.user.id;
+        const isAdmin = service.allowedAdmins.includes(userId);
+        
+        if (!isAdmin) {
+          return interaction.reply({
+            content: '❌ Only administrators can use this command.',
+            ephemeral: interaction.inGuild()
+          });
+        }
+        
+        try {
+          await interaction.deferReply({ ephemeral: interaction.inGuild() });
+          
+          console.log(`🗑️ /dm-rm-rf command executed by ${interaction.user.tag}`);
+          
+          // Get all DM channels the bot has access to
+          const dmChannels = service.client.channels.cache.filter(channel => channel.isDMBased());
+          
+          if (dmChannels.size === 0) {
+            return interaction.followUp({
+              content: '✅ No DM channels found. All DMs are already clean.',
+              ephemeral: interaction.inGuild()
+            });
+          }
+          
+          let totalDeleted = 0;
+          let totalChannels = 0;
+          let errors = 0;
+          
+          // Process each DM channel
+          for (const [channelId, channel] of dmChannels) {
+            try {
+              if (!channel.isDMBased() || !channel.messages) continue;
+              
+              totalChannels++;
+              
+              // Fetch all messages from this DM channel
+              let hasMore = true;
+              let lastMessageId = null;
+              
+              while (hasMore) {
+                const fetchOptions = { limit: 100 };
+                if (lastMessageId) {
+                  fetchOptions.before = lastMessageId;
+                }
+                
+                const messages = await channel.messages.fetch(fetchOptions);
+                
+                if (messages.size === 0) {
+                  hasMore = false;
+                  break;
+                }
+                
+                // Filter to only bot messages
+                const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+                
+                // Delete bot messages
+                for (const [msgId, message] of botMessages) {
+                  try {
+                    await message.delete();
+                    totalDeleted++;
+                    // Small delay to avoid rate limits
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                  } catch (deleteError) {
+                    console.error(`Failed to delete message ${msgId}:`, deleteError);
+                    errors++;
+                  }
+                }
+                
+                // Update lastMessageId for next iteration
+                if (messages.size > 0) {
+                  lastMessageId = messages.last()?.id;
+                } else {
+                  hasMore = false;
+                }
+                
+                // If we got less than 100 messages, we've reached the end
+                if (messages.size < 100) {
+                  hasMore = false;
+                }
+              }
+            } catch (channelError) {
+              console.error(`Error processing DM channel ${channelId}:`, channelError);
+              errors++;
+            }
+          }
+          
+          const embed = new EmbedBuilder()
+            .setTitle('✅ DM Cleanup Complete')
+            .setDescription(`Deleted all bot messages from all DM channels`)
+            .addFields(
+              { name: 'DM Channels Processed', value: `${totalChannels}`, inline: true },
+              { name: 'Messages Deleted', value: `${totalDeleted}`, inline: true },
+              { name: 'Errors', value: `${errors}`, inline: true }
+            )
+            .setColor(0x00FF00)
+            .setTimestamp();
+          
+          await interaction.followUp({ embeds: [embed], ephemeral: interaction.inGuild() });
+          
+        } catch (error) {
+          console.error('❌ Error in /dm-rm-rf command:', error);
+          
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.followUp({
+                content: '❌ An error occurred while deleting DM messages.',
+                ephemeral: interaction.inGuild()
+              });
+            } else {
+              await interaction.reply({
+                content: '❌ An error occurred while deleting DM messages.',
+                ephemeral: interaction.inGuild()
+              });
+            }
+          } catch (replyError) {
+            console.error('❌ Failed to send error message:', replyError);
+          }
+        }
+      }
+    };
+
     // Add all commands to collection
     this.commands.set('register', registerCommand);
+    this.commands.set('link-account', linkAccountCommand);
+    this.commands.set('my-accounts', myAccountsCommand);
     this.commands.set('list-accounts', listAccountsCommand);
     this.commands.set('check-accounts', checkAccountsCommand);
     this.commands.set('deregister', deregisterCommand);
     this.commands.set('clear', clearCommand);
+    this.commands.set('dm-rm-rf', dmRmRfCommand);
     this.commands.set('help', helpCommand);
     this.commands.set('md', mdCommand);
     this.commands.set('server-status', serverStatusCommand);
@@ -779,10 +1152,87 @@ class DiscordService {
     try {
       const commands = Array.from(this.commands.values()).map(cmd => cmd.data.toJSON());
       
-      // Register commands globally
-      await this.client.application.commands.set(commands);
+      // Log the register command to verify the description
+      const registerCmd = commands.find(cmd => cmd.name === 'register');
+      if (registerCmd) {
+        const idOption = registerCmd.options?.find(opt => opt.name === 'id');
+        if (idOption) {
+          console.log(`📝 Register command - ID field description: "${idOption.description}"`);
+        }
+      }
       
+      // Also register to specific guild if DISCORD_GUILD_ID is set (appears immediately)
+      const guildId = process.env.DISCORD_GUILD_ID;
+      if (guildId) {
+        try {
+          // Wait a bit for guilds to be available
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // Try to get guild from cache first
+          let guild = this.client.guilds.cache.get(guildId);
+          
+          if (!guild) {
+            console.log(`🔍 Guild ${guildId} not in cache, fetching...`);
+            // Try fetching the guild
+            try {
+              guild = await this.client.guilds.fetch(guildId);
+            } catch (fetchError) {
+              console.log(`⚠️ Could not fetch guild ${guildId}: ${fetchError.message}`);
+              guild = null;
+            }
+          }
+          
+          if (guild) {
+            // Delete all existing commands first to force refresh
+            console.log(`🗑️ Deleting existing guild commands to force refresh...`);
+            const existingCommands = await guild.commands.fetch();
+            for (const [id, command] of existingCommands) {
+              try {
+                await command.delete();
+                console.log(`   Deleted: ${command.name}`);
+              } catch (err) {
+                console.log(`   Failed to delete ${command.name}: ${err.message}`);
+              }
+            }
+            
+            // Wait a moment before re-registering
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Register new commands
+            await guild.commands.set(commands);
+            console.log(`✅ Registered ${commands.length} slash commands to guild: ${guild.name} (${guildId})`);
+          } else {
+            console.log(`⚠️ Guild ${guildId} not found or bot is not a member`);
+            const availableGuilds = Array.from(this.client.guilds.cache.values());
+            if (availableGuilds.length > 0) {
+              console.log(`📋 Bot is a member of these guilds:`);
+              availableGuilds.forEach(g => {
+                console.log(`   - ${g.name} (${g.id})`);
+              });
+            } else {
+              console.log(`📋 Bot is not a member of any guilds`);
+            }
+            console.log(`💡 Tip: Make sure the bot is invited to the guild with ID ${guildId}`);
+          }
+        } catch (guildError) {
+          console.log(`⚠️ Failed to register commands to guild: ${guildError.message}`);
+          const availableGuilds = Array.from(this.client.guilds.cache.values());
+          if (availableGuilds.length > 0) {
+            console.log(`📋 Bot is a member of these guilds:`);
+            availableGuilds.forEach(g => {
+              console.log(`   - ${g.name} (${g.id})`);
+            });
+          }
+        }
+      }
+      
+      // Register commands globally (takes up to 1 hour to appear)
+      await this.client.application.commands.set(commands);
       console.log(`✅ Registered ${commands.length} slash commands globally`);
+      
+      if (!guildId) {
+        console.log(`⚠️ DISCORD_GUILD_ID not set, commands will only be registered globally (may take up to 1 hour to appear)`);
+      }
     } catch (error) {
       console.error('❌ Failed to register slash commands:', error);
     }
@@ -936,6 +1386,60 @@ class DiscordService {
     }
   }
 
+  async cleanupUserDMScreenshots(userObj, bpAccountId) {
+    if (!this.client || !this.client.user) {
+      return 0;
+    }
+
+    try {
+      const dmChannel = await userObj.createDM();
+      if (!dmChannel || !dmChannel.messages) {
+        return 0;
+      }
+
+      const messages = await dmChannel.messages.fetch({ limit: 50 });
+      let deletedCount = 0;
+
+      for (const message of messages.values()) {
+        if (message.author.id !== this.client.user.id) {
+          continue;
+        }
+
+        const hasMatchingAttachment = Array.from(message.attachments.values()).some(attachment => {
+          return attachment.name && attachment.name.includes(`8bp-claim-${bpAccountId}`);
+        });
+
+        const hasMatchingEmbed = (message.embeds || []).some(embed => {
+          const titleMatch = embed.title && embed.title.includes('8 BALL POOL REWARD');
+          const fieldMatch = Array.isArray(embed.fields)
+            ? embed.fields.some(field => field.value && field.value.includes(bpAccountId))
+            : false;
+          return titleMatch || fieldMatch;
+        });
+
+        if (hasMatchingAttachment || hasMatchingEmbed) {
+          try {
+            await message.delete();
+            deletedCount++;
+            // Tiny delay to avoid hitting rate limits
+            await new Promise(resolve => setTimeout(resolve, 200));
+          } catch (deleteError) {
+            console.log(`⚠️ Failed to delete old DM message for ${bpAccountId}: ${deleteError.message}`);
+          }
+        }
+      }
+
+      if (deletedCount > 0) {
+        console.log(`🧹 Tidied ${deletedCount} old DM screenshot message(s) for account ${bpAccountId}`);
+      }
+
+      return deletedCount;
+    } catch (error) {
+      console.log(`⚠️ Could not tidy DM screenshots for ${bpAccountId}: ${error.message}`);
+      return 0;
+    }
+  }
+
   // Send confirmation message with screenshot to Discord
   async sendConfirmation(bpAccountId, imagePath, claimedItems = []) {
     if (!this.isReady) {
@@ -951,41 +1455,29 @@ class DiscordService {
         await new Promise(resolve => setTimeout(resolve, this.minMessageInterval - (now - this.lastMessageTime)));
       }
 
-      // LAYER 1: Database duplicate check - check if user already claimed today
+      // LAYER 1: In-memory duplicate prevention - only check if we've already sent a Discord message
+      // We don't check database records here because:
+      // 1. The claim record may have just been saved (causing false positives)
+      // 2. Database records track claims, not Discord messages sent
+      // 3. We want to allow multiple claims per day and send Discord for each
+      // Use a shorter window (2 minutes) to prevent duplicate messages from the same claim attempt
+      const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
       const today = new Date();
-      today.setHours(0, 0, 0, 0); // Start of today
-      
-      console.log(`🔍 Checking for existing claims - user: ${bpAccountId}, today: ${today.toISOString()}`);
-      
-      try {
-        // Check if database service has findClaimRecords method
-        if (this.dbService && typeof this.dbService.findClaimRecords === 'function') {
-          const existingClaims = await this.dbService.findClaimRecords({
-            eightBallPoolId: bpAccountId,
-            status: 'success',
-            claimedAt: { $gte: today }
-          });
-
-          console.log(`🔍 Found ${existingClaims.length} existing claims for user ${bpAccountId} today`);
-
-          // If already claimed successfully today, skip sending Discord message
-          if (existingClaims.length > 0) {
-            console.log(`⏭️ Duplicate Discord message prevented (DB check) - user ${bpAccountId} already claimed today at ${existingClaims[0].claimedAt.toLocaleTimeString()}`);
-            return false;
-          }
-        } else {
-          console.log(`⚠️ Database service doesn't have findClaimRecords method, skipping DB duplicate check`);
-        }
-      } catch (dbError) {
-        console.log(`⚠️ Database duplicate check failed: ${dbError.message}, continuing with in-memory check only`);
-      }
-
-      // LAYER 2: In-memory duplicate prevention (backup)
+      today.setHours(0, 0, 0, 0);
       const messageKey = `${bpAccountId}-${today.toISOString().split('T')[0]}`;
       
+      // Only check in-memory cache if we've sent a message recently (within 2 minutes)
+      // This prevents duplicate messages from the same claim attempt, but allows new claims later
       if (this.sentMessages.has(messageKey)) {
-        console.log(`⏭️ Duplicate message prevented (memory check) for user ${bpAccountId} on ${today.toISOString().split('T')[0]}`);
-        return false;
+        const lastSentTime = this.sentMessages.get(messageKey);
+        if (lastSentTime > twoMinutesAgo) {
+          const secondsAgo = Math.floor((Date.now() - lastSentTime) / 1000);
+          console.log(`⏭️ Duplicate message prevented (memory check) for user ${bpAccountId} - message sent ${secondsAgo}s ago`);
+          return false;
+        } else {
+          // Clear old entry if it's been more than 2 minutes (allow new claims)
+          this.sentMessages.delete(messageKey);
+        }
       }
 
       // Find user in database by 8BP account ID
@@ -1057,6 +1549,10 @@ class DiscordService {
             if (imageAttachment) {
               dmOptions.files = [imageAttachment];
             }
+
+            if (imageAttachment) {
+              await this.cleanupUserDMScreenshots(userObj, bpAccountId);
+            }
             
             await userObj.send(dmOptions);
             console.log(`📩 DM sent to admin: ${username}`);
@@ -1102,6 +1598,118 @@ class DiscordService {
     const count = this.sentMessages.size;
     this.sentMessages.clear();
     console.log(`🧹 Cleared ${count} Discord message records`);
+  }
+
+  /**
+   * Delete old bot messages from the rewards channel
+   * This is called 2 minutes before scheduled claims to tidy up the channel
+   */
+  async clearOldRewardsChannelMessages() {
+    try {
+      // Use REWARDS_CHANNEL_ID from environment variables
+      const channelId = process.env.REWARDS_CHANNEL_ID;
+      if (!channelId) {
+        console.log('⚠️ REWARDS_CHANNEL_ID not configured in .env, skipping message cleanup');
+        return;
+      }
+
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel || !channel.isTextBased()) {
+        console.log(`⚠️ Channel ${channelId} not found or not a text channel`);
+        return;
+      }
+
+      console.log(`🧹 Starting cleanup of old bot messages in rewards channel...`);
+      
+      // Get the bot's user ID
+      const botUserId = this.client.user.id;
+      let deletedCount = 0;
+      let lastMessageId = null;
+      const batchSize = 100; // Discord API limit per request
+      const maxMessagesToCheck = 1000; // Limit to prevent excessive API calls
+      let messagesChecked = 0;
+
+      // Fetch and delete messages in batches
+      while (messagesChecked < maxMessagesToCheck) {
+        const options = { limit: batchSize };
+        if (lastMessageId) {
+          options.before = lastMessageId;
+        }
+
+        const messages = await channel.messages.fetch(options);
+        
+        if (messages.size === 0) {
+          break; // No more messages
+        }
+
+        // Filter to only bot messages
+        const botMessages = messages.filter(msg => msg.author.id === botUserId);
+        
+        // Delete bot messages in batches (Discord allows bulk delete of messages up to 14 days old)
+        const messagesToDelete = Array.from(botMessages.values());
+        
+        if (messagesToDelete.length > 0) {
+          // Discord bulk delete requires messages to be less than 14 days old
+          // For older messages, delete individually
+          const now = Date.now();
+          const fourteenDaysAgo = now - (14 * 24 * 60 * 60 * 1000);
+          
+          const recentMessages = messagesToDelete.filter(msg => msg.createdTimestamp > fourteenDaysAgo);
+          const oldMessages = messagesToDelete.filter(msg => msg.createdTimestamp <= fourteenDaysAgo);
+
+          // Bulk delete recent messages (if 2 or more)
+          if (recentMessages.length >= 2) {
+            try {
+              await channel.bulkDelete(recentMessages.map(msg => msg.id));
+              deletedCount += recentMessages.length;
+              console.log(`✅ Bulk deleted ${recentMessages.length} recent bot messages`);
+            } catch (bulkError) {
+              console.log(`⚠️ Bulk delete failed, trying individual deletes: ${bulkError.message}`);
+              // Fall back to individual deletes
+              for (const msg of recentMessages) {
+                try {
+                  await msg.delete();
+                  deletedCount++;
+                } catch (deleteError) {
+                  console.log(`⚠️ Failed to delete message ${msg.id}: ${deleteError.message}`);
+                }
+              }
+            }
+          } else if (recentMessages.length === 1) {
+            // Single message, delete individually
+            try {
+              await recentMessages[0].delete();
+              deletedCount++;
+            } catch (deleteError) {
+              console.log(`⚠️ Failed to delete message ${recentMessages[0].id}: ${deleteError.message}`);
+            }
+          }
+
+          // Delete old messages individually
+          for (const msg of oldMessages) {
+            try {
+              await msg.delete();
+              deletedCount++;
+            } catch (deleteError) {
+              console.log(`⚠️ Failed to delete old message ${msg.id}: ${deleteError.message}`);
+            }
+          }
+        }
+
+        // Update for next iteration
+        lastMessageId = messages.last()?.id;
+        messagesChecked += messages.size;
+
+        // Small delay to avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      console.log(`✅ Cleaned up ${deletedCount} old bot messages from rewards channel`);
+      return deletedCount;
+    } catch (error) {
+      console.error('❌ Error clearing old rewards channel messages:', error.message);
+      return 0;
+    }
   }
 
   // Get duplicate protection status for debugging

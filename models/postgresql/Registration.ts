@@ -27,6 +27,9 @@ export interface RegistrationData {
   username: string;
   email?: string;
   discordId?: string;
+  account_level?: number;
+  account_rank?: string;
+  verified_at?: Date;
   registrationIp?: string;
   deviceId?: string;
   deviceType?: string;
@@ -44,6 +47,9 @@ export class PostgresRegistration {
   public username: string;
   public email?: string;
   public discordId?: string;
+  public account_level?: number;
+  public account_rank?: string;
+  public verified_at?: Date;
   public registrationIp?: string;
   public deviceId?: string;
   public deviceType?: string;
@@ -60,6 +66,9 @@ export class PostgresRegistration {
     this.username = data.username;
     this.email = data.email;
     this.discordId = data.discordId;
+    this.account_level = data.account_level;
+    this.account_rank = data.account_rank;
+    this.verified_at = data.verified_at;
     this.registrationIp = data.registrationIp;
     this.deviceId = data.deviceId;
     this.deviceType = data.deviceType;
@@ -106,6 +115,9 @@ export class PostgresRegistration {
       username: row.username,
       email: row.email,
       discordId: row.discord_id,
+      account_level: row.account_level,
+      account_rank: row.account_rank,
+      verified_at: row.verified_at,
       registrationIp: row.registration_ip,
       deviceId: row.device_id,
       deviceType: row.device_type,
@@ -136,6 +148,9 @@ export class PostgresRegistration {
       username: row.username,
       email: row.email,
       discordId: row.discord_id,
+      account_level: row.account_level,
+      account_rank: row.account_rank,
+      verified_at: row.verified_at,
       registrationIp: row.registration_ip,
       deviceId: row.device_id,
       deviceType: row.device_type,
@@ -152,19 +167,22 @@ export class PostgresRegistration {
     const pool = getPool();
     
     if (this.id) {
-      // Update existing
+      // Update existing - this preserves all existing values from the object
+      // Since the object was loaded from DB with all fields, only updated fields change
       const sql = `
         UPDATE registrations 
-        SET username = $2, email = $3, discord_id = $4, registration_ip = $5, 
-            device_id = $6, device_type = $7, user_agent = $8, last_login_at = $9,
-            updated_at = CURRENT_TIMESTAMP, is_active = $10, metadata = $11
+        SET username = $2, email = $3, discord_id = $4, account_level = $5, account_rank = $6, 
+            verified_at = $7, registration_ip = $8, device_id = $9, device_type = $10, 
+            user_agent = $11, last_login_at = $12, updated_at = CURRENT_TIMESTAMP, 
+            is_active = $13, metadata = $14
         WHERE id = $1
         RETURNING *
       `;
       const values = [
-        this.id, this.username, this.email, this.discordId, this.registrationIp,
-        this.deviceId, this.deviceType, this.userAgent, this.lastLoginAt,
-        this.isActive, JSON.stringify(this.metadata)
+        this.id, this.username, this.email, this.discordId, this.account_level, 
+        this.account_rank, this.verified_at, this.registrationIp, this.deviceId, 
+        this.deviceType, this.userAgent, this.lastLoginAt, this.isActive, 
+        this.metadata ? JSON.stringify(this.metadata) : null
       ];
       
       const result = await pool.query(sql, values);
@@ -175,15 +193,17 @@ export class PostgresRegistration {
     } else {
       // Create new
       const sql = `
-        INSERT INTO registrations (id, eight_ball_pool_id, username, email, discord_id, registration_ip, 
-                                 device_id, device_type, user_agent, last_login_at, created_at, updated_at, is_active, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $11, $12)
+        INSERT INTO registrations (id, eight_ball_pool_id, username, email, discord_id, account_level, 
+                                 account_rank, verified_at, registration_ip, device_id, device_type, 
+                                 user_agent, last_login_at, created_at, updated_at, is_active, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $14, $15)
         RETURNING *
       `;
       const values = [
-        uuidv4(), this.eightBallPoolId, this.username, this.email, 
-        this.discordId, this.registrationIp, this.deviceId, this.deviceType, 
-        this.userAgent, this.lastLoginAt, this.isActive, JSON.stringify(this.metadata)
+        uuidv4(), this.eightBallPoolId, this.username, this.email, this.discordId,
+        this.account_level, this.account_rank, this.verified_at, this.registrationIp,
+        this.deviceId, this.deviceType, this.userAgent, this.lastLoginAt, 
+        this.isActive, JSON.stringify(this.metadata)
       ];
       
       const result = await pool.query(sql, values);
@@ -215,6 +235,9 @@ export class PostgresRegistration {
       username: this.username,
       email: this.email,
       discordId: this.discordId,
+      account_level: this.account_level,
+      account_rank: this.account_rank,
+      verified_at: this.verified_at,
       registrationIp: this.registrationIp,
       deviceId: this.deviceId,
       deviceType: this.deviceType,
@@ -265,6 +288,11 @@ export class PostgresClaimRecord {
     let sql = 'SELECT * FROM claim_records WHERE 1=1';
     const values: any[] = [];
     let paramCount = 0;
+
+    if (query.id) {
+      sql += ` AND id = $${++paramCount}`;
+      values.push(query.id);
+    }
 
     if (query.eightBallPoolId) {
       sql += ` AND eight_ball_pool_id = $${++paramCount}`;

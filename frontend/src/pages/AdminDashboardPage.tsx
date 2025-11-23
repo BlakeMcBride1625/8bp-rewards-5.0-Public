@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS, getAdminUserBlockEndpoint, getAdminRegistrationDeleteEndpoint } from '../config/api';
 import { useVPSStats } from '../hooks/useWebSocket';
@@ -35,7 +35,6 @@ import {
   RotateCcw,
   Camera,
   Terminal,
-  HelpCircle,
   Send,
   Bot,
   Circle,
@@ -70,6 +69,8 @@ interface AdminOverview {
     status: string;
     itemsClaimed: string[];
     claimedAt: string;
+    screenshotPath?: string | null;
+    username?: string | null;
   }>;
 }
 
@@ -187,7 +188,6 @@ const AdminDashboardPage: React.FC = () => {
   const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
   const [vpsStats, setVpsStats] = useState<VPSStats | null>(null);
   const [isLoadingVpsStats, setIsLoadingVpsStats] = useState(false);
-  const [autoRefreshVps, setAutoRefreshVps] = useState(true);
 
   // Use WebSocket for real-time VPS stats updates
   const { stats: wsVpsStats, status: wsStatus, isConnected: wsConnected } = useVPSStats();
@@ -268,6 +268,11 @@ const AdminDashboardPage: React.FC = () => {
     search: ''
   });
 
+  // Deregistration Requests state
+  const [deregistrationRequests, setDeregistrationRequests] = useState<any[]>([]);
+  const [isLoadingDeregistrationRequests, setIsLoadingDeregistrationRequests] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState<{ [key: string]: string }>({});
+
   // System Integration Map state
   const [systemIntegrationData, setSystemIntegrationData] = useState<any>(null);
   const [isLoadingSystemIntegration, setIsLoadingSystemIntegration] = useState(false);
@@ -346,44 +351,6 @@ const AdminDashboardPage: React.FC = () => {
     setBotStatusFetchTimeout(timeout);
   }, [botStatusFetchTimeout]);
 
-  useEffect(() => {
-    console.log('🔄 useEffect triggered:', { isAuthenticated, isAdmin, activeTab });
-    if (isAuthenticated && isAdmin) {
-      fetchAdminData();
-      fetchUserIp();
-      fetchTestUsers(); // Fetch test users on component mount
-      
-      // Only fetch bot status when on tools tab
-      if (activeTab === 'tools') {
-        fetchBotStatus();
-      }
-      
-      if (activeTab === 'logs') {
-        fetchLogs();
-      }
-      if (activeTab === 'vps') {
-        fetchVpsStats();
-      }
-      if (activeTab === 'screenshots') {
-        console.log('🔄 Calling fetchScreenshotFolders because activeTab is screenshots');
-        fetchScreenshotFolders();
-      }
-      if (activeTab === 'terminal') {
-        checkTerminalAccess();
-      }
-      if (activeTab === 'deregistered-users') {
-        fetchDeregisteredUsers();
-      }
-      if (activeTab === 'system-integration') {
-        fetchSystemIntegrationData();
-      }
-      if (activeTab === 'active-services' || activeTab === 'overview') {
-        fetchActiveServices();
-        fetchHeartbeatData();
-      }
-    }
-  }, [isAuthenticated, isAdmin, activeTab]);
-
   // Update VPS stats from WebSocket when received
   useEffect(() => {
     if (wsVpsStats) {
@@ -419,28 +386,10 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, [activeTab, vpsStats, wsVpsStats, fetchVpsStats]);
 
-  // Polling fallback for VPS stats updates (if WebSocket not connected or not receiving updates)
-  useEffect(() => {
-    if (activeTab !== 'vps') {
-      return; // Only poll when on VPS tab
-    }
+  // WebSocket handles VPS stats updates - no polling needed
+  // If WebSocket is not connected, show connection status to user
 
-    // Poll every 1 second for real-time updates
-    const pollInterval = setInterval(() => {
-      // Only poll if WebSocket is not connected or not receiving updates in last 5 seconds
-      const lastUpdate = chartData.length > 0 ? chartData[chartData.length - 1].timestamp : 0;
-      const timeSinceLastUpdate = Date.now() - lastUpdate;
-      const shouldPoll = !wsConnected || timeSinceLastUpdate > 5000;
-
-      if (shouldPoll) {
-        fetchVpsStats();
-      }
-    }, 1000); // Poll every 1 second
-
-    return () => clearInterval(pollInterval);
-  }, [activeTab, wsConnected, chartData, fetchVpsStats]);
-
-  const fetchUserIp = async () => {
+  const fetchUserIp = useCallback(async () => {
     try {
       // Get user's public IP address
       const response = await axios.get('https://api.ipify.org?format=json');
@@ -448,9 +397,9 @@ const AdminDashboardPage: React.FC = () => {
     } catch (error) {
       setUserIp('Unable to fetch IP');
     }
-  };
+  }, []);
 
-  const fetchAdminData = async () => {
+  const fetchAdminData = useCallback(async () => {
     setIsLoadingData(true);
     try {
       const [overviewResponse, registrationsResponse] = await Promise.all([
@@ -466,9 +415,9 @@ const AdminDashboardPage: React.FC = () => {
     } finally {
       setIsLoadingData(false);
     }
-  };
+  }, []);
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (logFilters.level) params.append('level', logFilters.level);
@@ -482,7 +431,7 @@ const AdminDashboardPage: React.FC = () => {
       toast.error('Failed to fetch logs');
       console.error('Error fetching logs:', error);
     }
-  };
+  }, [logFilters]);
 
   const handleAddRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -559,7 +508,7 @@ const AdminDashboardPage: React.FC = () => {
     }
   };
 
-  const fetchTestUsers = async () => {
+  const fetchTestUsers = useCallback(async () => {
     setIsLoadingTestUsers(true);
     try {
       const response = await axios.get(API_ENDPOINTS.ADMIN_TEST_USERS, { withCredentials: true });
@@ -575,7 +524,7 @@ const AdminDashboardPage: React.FC = () => {
     } finally {
       setIsLoadingTestUsers(false);
     }
-  };
+  }, []);
 
   const changeBotStatus = async (status: string) => {
     setIsChangingBotStatus(true);
@@ -687,7 +636,7 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, []);
 
-  const fetchActiveServices = async () => {
+  const fetchActiveServices = useCallback(async () => {
     setIsLoadingActiveServices(true);
     try {
       console.log('🔄 Fetching active services...');
@@ -717,7 +666,7 @@ const AdminDashboardPage: React.FC = () => {
     } finally {
       setIsLoadingActiveServices(false);
     }
-  };
+  }, []);
 
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => ({
@@ -801,7 +750,7 @@ const AdminDashboardPage: React.FC = () => {
     }
   };
 
-  const fetchScreenshotFolders = async () => {
+  const fetchScreenshotFolders = useCallback(async () => {
     // Clear any existing timeout
     if (screenshotFetchTimeout) {
       clearTimeout(screenshotFetchTimeout);
@@ -840,7 +789,7 @@ const AdminDashboardPage: React.FC = () => {
     }, 1000);
     
     setScreenshotFetchTimeout(timeout);
-  };
+  }, [screenshotFetchTimeout, screenshotSearchQuery, activeTab, isAuthenticated, isAdmin]);
 
   const filterScreenshotsByUser = (folders: any[], searchQuery: string) => {
     if (!searchQuery.trim()) {
@@ -863,8 +812,58 @@ const AdminDashboardPage: React.FC = () => {
     filterScreenshotsByUser(allScreenshotFolders, query);
   };
 
+  // Fetch deregistration requests
+  const fetchDeregistrationRequests = useCallback(async () => {
+    setIsLoadingDeregistrationRequests(true);
+    try {
+      const response = await axios.get(API_ENDPOINTS.ADMIN_DEREGISTRATION_REQUESTS, { withCredentials: true });
+      if (response.data.success) {
+        setDeregistrationRequests(response.data.requests || []);
+      } else {
+        toast.error(response.data.error || 'Failed to fetch deregistration requests');
+      }
+    } catch (error: any) {
+      console.error('Error fetching deregistration requests:', error);
+      const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to fetch deregistration requests';
+      toast.error(errorMessage);
+    } finally {
+      setIsLoadingDeregistrationRequests(false);
+    }
+  }, []);
+
+  // Approve deregistration request
+  const handleApproveDeregistration = async (requestId: string, eightBallPoolId: string) => {
+    const notes = reviewNotes[requestId] || '';
+    try {
+      await axios.post(API_ENDPOINTS.ADMIN_DEREGISTRATION_REQUEST_APPROVE(requestId), {
+        reviewNotes: notes
+      }, { withCredentials: true });
+      toast.success('Deregistration request approved');
+      setReviewNotes({ ...reviewNotes, [requestId]: '' });
+      fetchDeregistrationRequests();
+      fetchAdminData(); // Refresh admin data to update counts
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to approve deregistration request');
+    }
+  };
+
+  // Deny deregistration request
+  const handleDenyDeregistration = async (requestId: string) => {
+    const notes = reviewNotes[requestId] || '';
+    try {
+      await axios.post(API_ENDPOINTS.ADMIN_DEREGISTRATION_REQUEST_DENY(requestId), {
+        reviewNotes: notes
+      }, { withCredentials: true });
+      toast.success('Deregistration request denied');
+      setReviewNotes({ ...reviewNotes, [requestId]: '' });
+      fetchDeregistrationRequests();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to deny deregistration request');
+    }
+  };
+
   // Fetch deregistered users
-  const fetchDeregisteredUsers = async () => {
+  const fetchDeregisteredUsers = useCallback(async () => {
     setIsLoadingDeregisteredUsers(true);
     try {
       const response = await axios.get(API_ENDPOINTS.VALIDATION_DEREGISTERED_USERS, { withCredentials: true });
@@ -875,41 +874,100 @@ const AdminDashboardPage: React.FC = () => {
     } finally {
       setIsLoadingDeregisteredUsers(false);
     }
+  }, []);
+
+  // Reregister a user (process registration again)
+  const handleReregisterUser = async (eightBallPoolId: string, username?: string) => {
+    try {
+      toast.loading('Reregistering user...', { id: 'reregister-user' });
+      
+      // Use the eightBallPoolId as username if not provided (fallback)
+      const userUsername = username || eightBallPoolId;
+      
+      // First, try to remove from invalid_users and registrations if they exist
+      // This allows fresh registration
+      try {
+        // Remove from invalid_users (deregistered users table)
+        await axios.delete(
+          API_ENDPOINTS.ADMIN_DEREGISTERED_USER_REMOVE(eightBallPoolId),
+          { withCredentials: true }
+        ).catch(() => {
+          // Ignore errors - user might not exist in all tables
+        });
+        
+        // Remove from registrations if exists
+        await axios.delete(
+          `${API_ENDPOINTS.ADMIN_REGISTRATIONS}/${eightBallPoolId}`,
+          { withCredentials: true }
+        ).catch(() => {
+          // Ignore errors - registration might not exist
+        });
+      } catch (cleanupError) {
+        // Continue even if cleanup fails
+        console.log('Cleanup step completed (some records may not exist)');
+      }
+      
+      // Now register fresh
+      const response = await axios.post(
+        API_ENDPOINTS.ADMIN_REGISTRATIONS,
+        { eightBallPoolId, username: userUsername },
+        { withCredentials: true }
+      );
+
+      if (response.data.message || response.data.user) {
+        toast.success('User reregistered successfully! Registration and validation triggered.', { id: 'reregister-user' });
+        
+        // Refresh the deregistered users list
+        await fetchDeregisteredUsers();
+      } else {
+        toast.error(response.data.error || 'Reregistration failed', { id: 'reregister-user' });
+      }
+    } catch (error: any) {
+      console.error('Error reregistering user:', error);
+      toast.error(
+        error.response?.data?.error || error.response?.data?.details || 'Failed to reregister user',
+        { id: 'reregister-user' }
+      );
+    }
   };
 
-  // Revalidate a specific user
-  const handleRevalidateUser = async (eightBallPoolId: string) => {
+  // Completely remove a user from all tables (fresh start)
+  const handleRemoveUser = async (eightBallPoolId: string) => {
     try {
-      toast.loading('Revalidating user...', { id: 'revalidate-user' });
+      const confirmed = window.confirm(
+        `Are you sure you want to completely remove user ${eightBallPoolId} from all tables?\n\nThis will delete:\n- Registration\n- Deregistered user record\n- All claim records\n- All validation logs\n\nThis action cannot be undone.`
+      );
       
-      const response = await axios.post(
-        API_ENDPOINTS.VALIDATION_REVALIDATE_USER,
-        { uniqueId: eightBallPoolId },
+      if (!confirmed) {
+        return;
+      }
+
+      toast.loading('Removing user from all tables...', { id: 'remove-user' });
+      
+      const response = await axios.delete(
+        API_ENDPOINTS.ADMIN_DEREGISTERED_USER_REMOVE(eightBallPoolId),
         { withCredentials: true }
       );
 
       if (response.data.success) {
-        toast.success('User revalidated successfully!', { id: 'revalidate-user' });
+        toast.success(`User ${eightBallPoolId} completely removed from all tables.`, { id: 'remove-user' });
         
         // Refresh the deregistered users list
         await fetchDeregisteredUsers();
-        
-        // If validation passed, the user should be removed from invalid_users table
-        // and potentially re-registered
       } else {
-        toast.error(response.data.error || 'Revalidation failed', { id: 'revalidate-user' });
+        toast.error(response.data.error || 'Failed to remove user', { id: 'remove-user' });
       }
     } catch (error: any) {
-      console.error('Error revalidating user:', error);
+      console.error('Error removing user:', error);
       toast.error(
-        error.response?.data?.error || error.response?.data?.details || 'Failed to revalidate user',
-        { id: 'revalidate-user' }
+        error.response?.data?.error || error.response?.data?.details || 'Failed to remove user',
+        { id: 'remove-user' }
       );
     }
   };
 
   // Fetch system integration data
-  const fetchSystemIntegrationData = async () => {
+  const fetchSystemIntegrationData = useCallback(async () => {
     setIsLoadingSystemIntegration(true);
     try {
       const [integrationResponse, healthResponse] = await Promise.all([
@@ -925,10 +983,10 @@ const AdminDashboardPage: React.FC = () => {
     } finally {
       setIsLoadingSystemIntegration(false);
     }
-  };
+  }, []);
 
   // Terminal functions
-  const checkTerminalAccess = async () => {
+  const checkTerminalAccess = useCallback(async () => {
     try {
       const response = await axios.get('/api/admin/terminal/check-access', { withCredentials: true });
       const hasAccess = response.data.hasAccess;
@@ -936,7 +994,7 @@ const AdminDashboardPage: React.FC = () => {
       
       // If user doesn't have access, redirect to admin dashboard
       if (!hasAccess) {
-        toast.error('Access denied. You are not authorized to access the Terminal.');
+        toast.error('Access denied. You are not authorised to access the Terminal.');
         setActiveTab('overview');
         return;
       }
@@ -949,7 +1007,53 @@ const AdminDashboardPage: React.FC = () => {
       setTerminalAccess(false);
       setActiveTab('overview');
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    console.log('🔄 useEffect triggered:', { isAuthenticated, isAdmin, activeTab });
+    if (isAuthenticated && isAdmin) {
+      // Debounce rapid tab switches to prevent excessive API calls
+      const timeoutId = setTimeout(() => {
+        fetchAdminData();
+        fetchUserIp();
+        fetchTestUsers(); // Fetch test users on component mount
+        
+        // Only fetch bot status when on tools tab
+        if (activeTab === 'tools') {
+          fetchBotStatus();
+        }
+        
+        if (activeTab === 'logs') {
+          fetchLogs();
+        }
+        if (activeTab === 'vps') {
+          fetchVpsStats();
+        }
+        if (activeTab === 'screenshots') {
+          console.log('🔄 Calling fetchScreenshotFolders because activeTab is screenshots');
+          fetchScreenshotFolders();
+        }
+        if (activeTab === 'terminal') {
+          checkTerminalAccess();
+        }
+        if (activeTab === 'deregistered-users') {
+          fetchDeregisteredUsers();
+        }
+        if (activeTab === 'deregistration-requests') {
+          fetchDeregistrationRequests();
+        }
+        if (activeTab === 'system-integration') {
+          fetchSystemIntegrationData();
+        }
+        if (activeTab === 'active-services' || activeTab === 'overview') {
+          fetchActiveServices();
+          fetchHeartbeatData();
+        }
+      }, 300); // 300ms debounce to prevent rapid-fire requests
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isAuthenticated, isAdmin, activeTab, fetchAdminData, fetchUserIp, fetchTestUsers, fetchBotStatus, fetchLogs, fetchVpsStats, fetchScreenshotFolders, checkTerminalAccess, fetchDeregisteredUsers, fetchDeregistrationRequests, fetchSystemIntegrationData, fetchActiveServices, fetchHeartbeatData]);
 
   const verifyMFA = async () => {
     // Check if user is using email or Discord/Telegram
@@ -1110,7 +1214,7 @@ const AdminDashboardPage: React.FC = () => {
       }
     } catch (error: any) {
       if (error.response?.status === 403) {
-        toast.error('Your email is not authorized for email authentication. Please use Discord/Telegram authentication.');
+        toast.error('Your email is not authorised for email authentication. Please use Discord/Telegram authentication.');
       } else {
         toast.error(error.response?.data?.message || 'Failed to request MFA codes');
       }
@@ -1149,23 +1253,33 @@ const AdminDashboardPage: React.FC = () => {
     reg.username.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredUsers = registrations.filter((reg: any) =>
-    reg.eightBallPoolId.includes(userSearchQuery) ||
-    reg.username.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-    (reg.registrationIp && reg.registrationIp.includes(userSearchQuery)) ||
-    (reg.deviceId && reg.deviceId.toLowerCase().includes(userSearchQuery.toLowerCase())) ||
-    (reg.deviceType && reg.deviceType.toLowerCase().includes(userSearchQuery.toLowerCase()))
-  );
+  const filteredUsers = registrations.filter((reg: any) => {
+    const query = userSearchQuery.toLowerCase();
+    if (!query) return true;
+    
+    // Filter by status
+    if (query.startsWith('active:')) return reg.isActive !== false && !reg.isBlocked;
+    if (query.startsWith('blocked:')) return reg.isBlocked === true;
+    
+    return (
+      reg.eightBallPoolId.includes(query) ||
+      reg.username.toLowerCase().includes(query) ||
+      (reg.discordId && reg.discordId.includes(query)) ||
+      (reg.registrationIp && reg.registrationIp.includes(query)) ||
+      (reg.deviceId && reg.deviceId.toLowerCase().includes(query)) ||
+      (reg.deviceType && reg.deviceType.toLowerCase().includes(query))
+    );
+  });
 
   return (
-    <div className="min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8"
+          className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-10"
         >
           <div>
             <h1 className="text-3xl font-bold text-text-primary mb-2">
@@ -1179,8 +1293,18 @@ const AdminDashboardPage: React.FC = () => {
           <div className="flex items-center space-x-4 mt-4 sm:mt-0">
             <div className="flex items-center space-x-2 text-sm text-text-secondary">
               <User className="w-4 h-4" />
-              <span>{user?.username}#{user?.discriminator}</span>
+              <span>
+                {user?.username}
+                {user?.discriminator && user.discriminator !== '0' && `#${user.discriminator}`}
+              </span>
             </div>
+            <Link
+              to="/user-dashboard"
+              className="btn-primary text-sm inline-flex items-center space-x-2"
+            >
+              <User className="w-4 h-4" />
+              <span>Switch Dashboard</span>
+            </Link>
             <button
               onClick={handleLogout}
               className="btn-outline text-sm inline-flex items-center space-x-2"
@@ -1196,13 +1320,14 @@ const AdminDashboardPage: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="card mb-8"
+          className="card mb-10"
         >
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-3">
             {[
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'registrations', label: 'Registrations', icon: Users },
               { id: 'users', label: 'User Management', icon: Shield },
+              { id: 'deregistration-requests', label: 'Requested Deregistrations', icon: Send },
               { id: 'deregistered-users', label: 'Deregistered Users', icon: XCircle },
               { id: 'system-integration', label: 'System Integration Map', icon: Network },
               { id: 'logs', label: 'Logs', icon: FileText },
@@ -1250,7 +1375,7 @@ const AdminDashboardPage: React.FC = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.4 }}
-            className="space-y-8"
+            className="space-y-10"
           >
             {isLoadingData ? (
               <div className="text-center py-12">
@@ -1260,7 +1385,7 @@ const AdminDashboardPage: React.FC = () => {
             ) : overview ? (
               <>
                 {/* Stats Cards */}
-                <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-6">
+                <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-6 lg:gap-8">
                   <div className="card text-center">
                     <Users className="w-8 h-8 text-primary-600 mx-auto mb-2" />
                     <h3 className="text-lg font-semibold text-text-primary mb-1">
@@ -1353,18 +1478,23 @@ const AdminDashboardPage: React.FC = () => {
                     <div className="space-y-4">
                       {overview.recentClaims.map((claim, index) => (
                         <div key={index} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-transparent dark:border-dark-accent-navy">
-                          <div>
-                            <p className="font-medium text-text-primary dark:text-text-dark-primary">
-                              {claim.eightBallPoolId}
-                            </p>
-                            <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
-                              {claim.itemsClaimed.length > 0 
-                                ? claim.itemsClaimed.join(', ')
-                                : 'No items claimed'
-                              }
-                            </p>
+                          <div className="flex items-start gap-4 flex-1">
+                            <div className="flex-1">
+                              <p className="font-medium text-text-primary dark:text-text-dark-primary">
+                                {claim.username || claim.eightBallPoolId}
+                              </p>
+                              <p className="text-xs text-text-secondary dark:text-text-dark-secondary">
+                                ID: {claim.eightBallPoolId}
+                              </p>
+                              <p className="text-sm text-text-secondary dark:text-text-dark-secondary mt-1">
+                                {claim.itemsClaimed && claim.itemsClaimed.length > 0 
+                                  ? `${claim.itemsClaimed.length} item(s): ${claim.itemsClaimed.slice(0, 3).join(', ')}${claim.itemsClaimed.length > 3 ? '...' : ''}`
+                                  : 'No items claimed'
+                                }
+                              </p>
+                            </div>
                           </div>
-                          <div className="text-right">
+                          <div className="text-right flex-shrink-0 ml-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               claim.status === 'success' 
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
@@ -1532,10 +1662,10 @@ const AdminDashboardPage: React.FC = () => {
           >
             <div className="card">
               <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-6">
-                User Management & Security
+                User Management
               </h2>
               <p className="text-text-secondary dark:text-text-dark-secondary mb-4">
-                Monitor and manage user access. Block users who misuse the system.
+                View and manage all users. See user status, linked Discord IDs, registration dates, and claim information.
               </p>
 
               {/* Search Bar */}
@@ -1544,7 +1674,7 @@ const AdminDashboardPage: React.FC = () => {
                   <Search className="w-5 h-5 text-text-secondary dark:text-text-dark-secondary" />
                   <input
                     type="text"
-                    placeholder="Search by username, 8BP ID, IP address, or device type..."
+                    placeholder="Search by username, 8BP ID, Discord ID, IP address, or device type..."
                     value={userSearchQuery}
                     onChange={(e) => setUserSearchQuery(e.target.value)}
                     className="input flex-1"
@@ -1557,61 +1687,312 @@ const AdminDashboardPage: React.FC = () => {
                 )}
               </div>
 
+              {/* Status Filter */}
+              <div className="mb-6">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setUserSearchQuery('')}
+                    className="btn-outline text-sm"
+                  >
+                    All Users
+                  </button>
+                  <button
+                    onClick={() => setUserSearchQuery('active:')}
+                    className="btn-outline text-sm"
+                  >
+                    Active
+                  </button>
+                  <button
+                    onClick={() => setUserSearchQuery('blocked:')}
+                    className="btn-outline text-sm"
+                  >
+                    Blocked
+                  </button>
+                </div>
+              </div>
+
               {isLoadingData ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
                   <p className="text-text-secondary dark:text-text-dark-secondary">Loading users...</p>
                 </div>
               ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-700">
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Username</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">8BP ID</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Status</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Discord ID</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Registration Date</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Successful Claims</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Failed Claims</th>
+                        <th className="text-left py-3 px-4 font-semibold text-text-primary dark:text-text-dark-primary">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.map((reg: any) => {
+                        // Determine user status
+                        const userStatus = reg.isBlocked ? 'Blocked' : (reg.isActive === false ? 'Inactive' : 'Active');
+                        const statusColor = userStatus === 'Active' 
+                          ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                          : userStatus === 'Blocked'
+                          ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                          : 'bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200';
+
+                        return (
+                          <tr key={reg._id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <td className="py-3 px-4">
+                              <div>
+                                <p className="font-medium text-text-primary dark:text-text-dark-primary">
+                                  {reg.username || 'Unknown'}
+                                </p>
+                                {reg.registrationIp && (
+                                  <p className="text-xs text-text-secondary dark:text-text-dark-secondary font-mono">
+                                    IP: {reg.registrationIp}
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="font-mono text-text-primary dark:text-text-dark-primary">
+                                {reg.eightBallPoolId}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor}`}>
+                                {userStatus}
+                              </span>
+                              {reg.isBlocked && reg.blockedReason && (
+                                <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                  {reg.blockedReason}
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {reg.discordId ? (
+                                <span className="font-mono text-text-primary dark:text-text-dark-primary">
+                                  {reg.discordId}
+                                </span>
+                              ) : (
+                                <span className="text-text-secondary dark:text-text-dark-secondary text-sm">
+                                  Not linked
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="text-text-secondary dark:text-text-dark-secondary text-sm">
+                                {reg.createdAt ? new Date(reg.createdAt).toLocaleDateString() : 'Unknown'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="font-semibold text-green-600 dark:text-green-400">
+                                {reg.successfulClaims !== undefined ? reg.successfulClaims : '-'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="font-semibold text-red-600 dark:text-red-400">
+                                {reg.failedClaims !== undefined ? reg.failedClaims : '-'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                onClick={async () => {
+                                  const reason = reg.isBlocked ? '' : prompt('Reason for blocking this user?');
+                                  if (reg.isBlocked || (reason !== null && reason.trim())) {
+                                    try {
+                                      await axios.post(getAdminUserBlockEndpoint(reg.eightBallPoolId), {
+                                        isBlocked: !reg.isBlocked,
+                                        reason: reason?.trim()
+                                      }, { withCredentials: true });
+                                      toast.success(reg.isBlocked ? 'User unblocked' : 'User blocked');
+                                      fetchAdminData();
+                                    } catch (error) {
+                                      toast.error('Failed to update block status');
+                                    }
+                                  }
+                                }}
+                                className={`btn ${reg.isBlocked ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'} text-sm inline-flex items-center space-x-2`}
+                              >
+                                <Shield className="w-4 h-4" />
+                                <span>{reg.isBlocked ? 'Unblock' : 'Block'}</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {filteredUsers.length === 0 && (
+                    <div className="text-center py-8 text-text-secondary dark:text-text-dark-secondary">
+                      <Users className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                      <p>No users found</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Requested Deregistrations Tab */}
+        {activeTab === 'deregistration-requests' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary flex items-center">
+                  <Send className="w-8 h-8 text-orange-500 mr-3" />
+                  Requested Deregistrations
+                </h2>
+                <button
+                  onClick={fetchDeregistrationRequests}
+                  disabled={isLoadingDeregistrationRequests}
+                  className="btn-primary flex items-center"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingDeregistrationRequests ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+
+              {isLoadingDeregistrationRequests ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                  <p className="text-text-secondary dark:text-text-dark-secondary mt-2">Loading deregistration requests...</p>
+                </div>
+              ) : deregistrationRequests.length === 0 ? (
+                <div className="text-center py-12">
+                  <Send className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                  <p className="text-text-secondary dark:text-text-dark-secondary text-lg">No pending deregistration requests</p>
+                  <p className="text-text-secondary dark:text-text-dark-secondary text-sm mt-2">All requests have been processed</p>
+                </div>
+              ) : (
                 <div className="space-y-4">
-                  {filteredUsers.map((reg: any) => (
-                    <div key={reg._id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-gray-200 dark:border-dark-accent-navy space-y-3 sm:space-y-0">
-                      <div className="flex-1">
-                        <div>
-                          <p className="font-medium text-text-primary dark:text-text-dark-primary">
-                            {reg.username}
-                          </p>
-                          <p className="text-sm text-text-secondary dark:text-text-dark-secondary">
-                            8BP ID: {reg.eightBallPoolId}
-                          </p>
-                          <div className="text-xs text-text-muted dark:text-text-dark-muted font-mono space-y-1">
-                            <p>IP: {reg.registrationIp || 'Unknown'}</p>
-                            {reg.deviceId && (
-                              <p>Device ID: {reg.deviceId}</p>
-                            )}
-                            {reg.deviceType && (
-                              <p>Device: {reg.deviceType}</p>
-                            )}
+                  {deregistrationRequests.map((request: any) => (
+                    <div key={request.id} className="p-6 bg-gray-50 dark:bg-background-dark-tertiary rounded-lg border border-gray-200 dark:border-dark-accent-navy">
+                      <div className="grid md:grid-cols-2 gap-6">
+                        {/* Left Column - Request Info */}
+                        <div className="space-y-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3">
+                              Request Details
+                            </h3>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary dark:text-text-dark-secondary">8 Ball Pool ID:</span>
+                                <span className="font-mono text-text-primary dark:text-text-dark-primary">{request.eight_ball_pool_id}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary dark:text-text-dark-secondary">Username:</span>
+                                <span className="text-text-primary dark:text-text-dark-primary">{request.username || 'Unknown'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary dark:text-text-dark-secondary">Discord ID:</span>
+                                <span className="font-mono text-text-primary dark:text-text-dark-primary">{request.discord_id || 'Not linked'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary dark:text-text-dark-secondary">Date Requested:</span>
+                                <span className="text-text-primary dark:text-text-dark-primary">
+                                  {new Date(request.requested_at).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-text-secondary dark:text-text-dark-secondary">Status:</span>
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  request.status === 'pending' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' :
+                                  request.status === 'approved' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' :
+                                  'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                                }`}>
+                                  {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                                </span>
+                              </div>
+                              {request.ip_address && (
+                                <div className="flex justify-between">
+                                  <span className="text-text-secondary dark:text-text-dark-secondary">IP Address:</span>
+                                  <span className="font-mono text-text-primary dark:text-text-dark-primary">{request.ip_address}</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          {reg.isBlocked && (
-                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                              🚫 Blocked: {reg.blockedReason || 'No reason provided'}
-                            </p>
+
+                          {/* Claim Statistics */}
+                          <div className="pt-4 border-t border-gray-200 dark:border-dark-accent-navy">
+                            <h4 className="text-md font-semibold text-text-primary dark:text-text-dark-primary mb-2">
+                              Claim Statistics
+                            </h4>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <div>
+                                <span className="text-text-secondary dark:text-text-dark-secondary">Successful:</span>
+                                <span className="ml-2 font-semibold text-green-600 dark:text-green-400">{request.successfulClaims || 0}</span>
+                              </div>
+                              <div>
+                                <span className="text-text-secondary dark:text-text-dark-secondary">Failed:</span>
+                                <span className="ml-2 font-semibold text-red-600 dark:text-red-400">{request.failedClaims || 0}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Screenshot */}
+                          {request.screenshotUrl && (
+                            <div className="pt-4 border-t border-gray-200 dark:border-dark-accent-navy">
+                              <h4 className="text-md font-semibold text-text-primary dark:text-text-dark-primary mb-2">
+                                Confirmation Screenshot
+                              </h4>
+                              <img
+                                src={request.screenshotUrl}
+                                alt={`Confirmation for ${request.eight_ball_pool_id}`}
+                                className="w-full max-w-md rounded-lg border border-gray-200 dark:border-dark-accent-navy cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => window.open(request.screenshotUrl, '_blank')}
+                              />
+                            </div>
                           )}
                         </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={async () => {
-                            const reason = reg.isBlocked ? '' : prompt('Reason for blocking this user?');
-                            if (reg.isBlocked || (reason !== null && reason.trim())) {
-                              try {
-                                await axios.post(getAdminUserBlockEndpoint(reg.eightBallPoolId), {
-                                  isBlocked: !reg.isBlocked,
-                                  reason: reason?.trim()
-                                }, { withCredentials: true });
-                                toast.success(reg.isBlocked ? 'User unblocked' : 'User blocked');
-                                fetchAdminData();
-                              } catch (error) {
-                                toast.error('Failed to update block status');
-                              }
-                            }
-                          }}
-                          className={`btn ${reg.isBlocked ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'} text-sm inline-flex items-center space-x-2 w-full sm:w-auto`}
-                        >
-                          <Shield className="w-4 h-4" />
-                          <span>{reg.isBlocked ? 'Unblock' : 'Block'}</span>
-                        </button>
+
+                        {/* Right Column - Actions */}
+                        <div className="space-y-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-3">
+                              Review Notes
+                            </h3>
+                            <textarea
+                              value={reviewNotes[request.id] || ''}
+                              onChange={(e) => setReviewNotes({ ...reviewNotes, [request.id]: e.target.value })}
+                              placeholder="Add review notes (optional)..."
+                              className="input w-full h-32 resize-none"
+                              rows={5}
+                            />
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to approve the deregistration request for ${request.eight_ball_pool_id}? This will permanently delete the account.`)) {
+                                  handleApproveDeregistration(request.id, request.eight_ball_pool_id);
+                                }
+                              }}
+                              className="btn-primary flex-1 inline-flex items-center justify-center space-x-2"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              <span>Approve</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to deny the deregistration request for ${request.eight_ball_pool_id}?`)) {
+                                  handleDenyDeregistration(request.id);
+                                }
+                              }}
+                              className="btn-outline border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-1 inline-flex items-center justify-center space-x-2"
+                            >
+                              <XCircle className="w-4 h-4" />
+                              <span>Deny</span>
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1742,13 +2123,22 @@ const AdminDashboardPage: React.FC = () => {
                             {new Date(user.deregistered_at).toLocaleString()}
                           </td>
                           <td className="py-3 px-4">
-                            <button
-                              onClick={() => handleRevalidateUser(user.eight_ball_pool_id)}
-                              className="btn-secondary text-sm hover:bg-blue-100 dark:hover:bg-blue-900"
-                              title={`Revalidate user ${user.eight_ball_pool_id}`}
-                            >
-                              Revalidate
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleReregisterUser(user.eight_ball_pool_id, user.eight_ball_pool_id)}
+                                className="btn-secondary text-sm hover:bg-green-100 dark:hover:bg-green-900 px-3 py-1"
+                                title={`Reregister user ${user.eight_ball_pool_id}`}
+                              >
+                                Reregister
+                              </button>
+                              <button
+                                onClick={() => handleRemoveUser(user.eight_ball_pool_id)}
+                                className="btn-secondary text-sm hover:bg-red-100 dark:hover:bg-red-900 px-3 py-1 text-red-600 dark:text-red-400"
+                                title={`Completely remove user ${user.eight_ball_pool_id} from all tables`}
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1829,25 +2219,27 @@ const AdminDashboardPage: React.FC = () => {
                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
                         <div className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
-                          {moduleHealthData?.cacheSize || 0}
+                          {moduleHealthData?.data?.cacheSize || moduleHealthData?.data?.heartbeat?.totalActiveFiles || 0}
                         </div>
                         <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Cache Entries</div>
                       </div>
                       <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
                         <div className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
-                          {moduleHealthData?.errorCounts || 0}
+                          {moduleHealthData?.data?.errorCounts || 0}
                         </div>
                         <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Error Counts</div>
                       </div>
                       <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
                         <div className="text-2xl font-bold text-text-primary dark:text-text-dark-primary">
-                          {Object.keys(moduleHealthData?.moduleStats || {}).length}
+                          {Object.keys(moduleHealthData?.data?.moduleStats || {}).length}
                         </div>
                         <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Active Modules</div>
                       </div>
                       <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center">
-                        <div className="text-2xl font-bold text-green-500">
-                          {moduleHealthData?.timestamp ? 'Online' : 'Offline'}
+                        <div className={`text-2xl font-bold ${
+                          moduleHealthData?.data?.status === 'online' ? 'text-green-500' : 'text-red-500'
+                        }`}>
+                          {moduleHealthData?.data?.status === 'online' || moduleHealthData?.data?.timestamp ? 'Online' : 'Offline'}
                         </div>
                         <div className="text-sm text-text-secondary dark:text-text-dark-secondary">Status</div>
                       </div>
@@ -1858,30 +2250,73 @@ const AdminDashboardPage: React.FC = () => {
                   <div>
                     <h3 className="text-lg font-semibold text-text-primary dark:text-text-dark-primary mb-4">Integration Map</h3>
                     <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg">
-                      <div className="grid md:grid-cols-2 gap-6">
-                        <div>
-                          <h4 className="font-semibold text-text-primary dark:text-text-dark-primary mb-3">Claimers</h4>
-                          <div className="space-y-2">
-                            {['playwright-claimer-discord', 'playwright-claimer', 'first-time-claimer', '8bp-claimer-ts', 'simple-claimer'].map(claimer => (
-                              <div key={claimer} className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded">
-                                <span className="text-sm text-text-primary dark:text-text-dark-primary">{claimer}</span>
-                                <CheckCircle className="w-4 h-4 text-green-500" />
+                      {systemIntegrationData?.data?.modulesByCategory ? (
+                        <div className="grid md:grid-cols-2 gap-6">
+                          {Object.entries(systemIntegrationData.data.modulesByCategory).map(([category, modules]: [string, any]) => (
+                            <div key={category}>
+                              <h4 className="font-semibold text-text-primary dark:text-text-dark-primary mb-3">{category}</h4>
+                              <div className="space-y-2">
+                                {modules.map((module: any) => {
+                                  const isOnline = module.status === 'integrated' || module.isLive;
+                                  const hasStats = module.stats && (
+                                    module.stats.validation_attempt > 0 ||
+                                    module.stats.validation_success > 0 ||
+                                    module.stats.validation_failure > 0 ||
+                                    module.stats.validation_error > 0
+                                  );
+                                  const isActive = isOnline && hasStats;
+                                  
+                                  return (
+                                    <div key={module.name} className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded">
+                                      <span className="text-sm text-text-primary dark:text-text-dark-primary">{module.name}</span>
+                                      {isActive ? (
+                                        <div title="Online">
+                                          <CheckCircle className="w-4 h-4 text-green-500" />
+                                        </div>
+                                      ) : isOnline ? (
+                                        <div className="w-4 h-4 rounded-full bg-yellow-500" title="Detected but no activity" />
+                                      ) : (
+                                        <div title="Offline">
+                                          <XCircle className="w-4 h-4 text-gray-400" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            ))}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-text-secondary dark:text-text-dark-secondary">
+                          <p>No integration data available. Please refresh to load service status.</p>
+                        </div>
+                      )}
+                      {systemIntegrationData?.data?.heartbeat && (
+                        <div className="mt-6 pt-6 border-t border-gray-300 dark:border-gray-600">
+                          <h4 className="font-semibold text-text-primary dark:text-text-dark-primary mb-3">Heartbeat Status</h4>
+                          <div className="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <div className="text-text-secondary dark:text-text-dark-secondary">Active Files</div>
+                              <div className="text-lg font-bold text-text-primary dark:text-text-dark-primary">
+                                {systemIntegrationData.data.heartbeat.totalActiveFiles || 0}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-text-secondary dark:text-text-dark-secondary">Active Processes</div>
+                              <div className="text-lg font-bold text-text-primary dark:text-text-dark-primary">
+                                {systemIntegrationData.data.heartbeat.activeProcesses || 0}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-text-secondary dark:text-text-dark-secondary">Active Services</div>
+                              <div className="text-lg font-bold text-text-primary dark:text-text-dark-primary">
+                                {systemIntegrationData.data.heartbeat.activeServices?.length || 0}
+                              </div>
+                            </div>
                           </div>
                         </div>
-                        <div>
-                          <h4 className="font-semibold text-text-primary dark:text-text-dark-primary mb-3">Services</h4>
-                          <div className="space-y-2">
-                            {['scheduler-service', 'registration-api', 'validation-service', 'monitoring-service'].map(service => (
-                              <div key={service} className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded">
-                                <span className="text-sm text-text-primary dark:text-text-dark-primary">{service}</span>
-                                <CheckCircle className="w-4 h-4 text-green-500" />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2843,7 +3278,7 @@ const AdminDashboardPage: React.FC = () => {
                     </div>
                     
                     <div className="mt-3 text-xs text-gray-400">
-                      <p><strong>Allowed commands:</strong> ls, pwd, whoami, date, uptime, df, free, ps, top, htop, systemctl, docker, git, npm, node, pm2, nginx, apache2, tail, head, grep, find, cat, less, more</p>
+										<p><strong>Allowed commands:</strong> ls, pwd, whoami, date, uptime, df, free, ps, top, htop, systemctl, docker, git, npm, node, nginx, apache2, tail, head, grep, find, cat, less, more</p>
                     </div>
                   </div>
                 </div>
@@ -2990,12 +3425,12 @@ const AdminDashboardPage: React.FC = () => {
                         <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Check Docker status</p>
                       </div>
                       <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
-                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">pm2 status</code>
-                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Check PM2 processes</p>
+											<code className="text-sm font-mono text-blue-600 dark:text-blue-400">docker compose ps</code>
+											<p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Check container status</p>
                       </div>
                       <div className="bg-gray-50 dark:bg-background-dark-secondary p-3 rounded-lg">
-                        <code className="text-sm font-mono text-blue-600 dark:text-blue-400">pm2 logs</code>
-                        <p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Show PM2 logs</p>
+											<code className="text-sm font-mono text-blue-600 dark:text-blue-400">docker compose logs backend</code>
+											<p className="text-xs text-text-secondary dark:text-text-dark-secondary mt-1">Tail backend logs</p>
                       </div>
                     </div>
                   </div>

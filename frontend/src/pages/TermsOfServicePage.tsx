@@ -20,7 +20,7 @@ const TermsOfServicePage: React.FC = () => {
             Terms of Service
           </h1>
           <p className="text-text-secondary dark:text-text-dark-secondary">
-            Last Updated: September 30, 2025
+            Last Updated: 23 November 2025
           </p>
         </motion.div>
 
@@ -50,8 +50,14 @@ const TermsOfServicePage: React.FC = () => {
             <ul className="list-disc list-inside text-text-secondary dark:text-text-dark-secondary space-y-2 ml-4">
               <li>Automated reward claiming at scheduled intervals (every 6 hours)</li>
               <li>User registration and account management</li>
-              <li>Discord bot integration for notifications and commands</li>
+              <li>Account verification via Discord bot (optional verification of 8 Ball Pool account level and rank)</li>
+              <li>Discord bot integration for notifications, commands, and account verification</li>
               <li>Web-based admin dashboard for monitoring and management</li>
+              <li>User dashboard for viewing linked accounts, claim history, and screenshots</li>
+              <li>Leaderboard system tracking claim statistics and verified account information</li>
+              <li>Screenshot storage and viewing of claim confirmations</li>
+              <li>Account deregistration requests and management</li>
+              <li>Multi-account support with Discord OAuth authentication</li>
             </ul>
           </section>
 
@@ -68,12 +74,48 @@ const TermsOfServicePage: React.FC = () => {
               <li>Use the Service only for your own personal 8 Ball Pool accounts</li>
               <li>Not abuse, exploit, or attempt to disrupt the Service</li>
               <li>Comply with all applicable 8 Ball Pool terms of service</li>
+              <li>Ensure any screenshots submitted for verification are accurate and represent your own account</li>
+              <li>Maintain the accuracy of your account information and notify us of any changes</li>
+              <li>Respect the privacy and rights of other users</li>
             </ul>
           </section>
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              4. Service Availability
+              4. Account Verification
+            </h2>
+            <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed mb-3">
+              The Service offers optional account verification through our Discord bot:
+            </p>
+            <ul className="list-disc list-inside text-text-secondary dark:text-text-dark-secondary space-y-2 ml-4">
+              <li>You may submit screenshots of your 8 Ball Pool account to verify your level and rank</li>
+              <li>Verification data (level, rank, username) may be stored and displayed on the leaderboard</li>
+              <li>Verification is optional and not required to use the automated claiming service</li>
+              <li>We use automated image processing (OCR/Vision API) to extract account information</li>
+              <li>You are responsible for ensuring submitted screenshots accurately represent your account</li>
+              <li>We reserve the right to verify or reject verification submissions at our discretion</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
+              5. Screenshot Storage and Privacy
+            </h2>
+            <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed mb-3">
+              The Service stores screenshots related to your account activity:
+            </p>
+            <ul className="list-disc list-inside text-text-secondary dark:text-text-dark-secondary space-y-2 ml-4">
+              <li>Claim confirmation screenshots are automatically captured and stored</li>
+              <li>Screenshots are stored securely and only accessible to you and authorised administrators</li>
+              <li>You may request deletion of your screenshots through your user dashboard</li>
+              <li>Screenshots may be used for troubleshooting, verification, and service improvement</li>
+              <li>We retain screenshots for a reasonable period as described in our Privacy Policy</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
+              6. Service Availability
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
               We strive to maintain high availability of the Service, but we do not guarantee uninterrupted access. The Service may be temporarily unavailable due to maintenance, updates, or factors beyond our control. We are not liable for any missed reward claims due to service interruptions.
@@ -82,7 +124,7 @@ const TermsOfServicePage: React.FC = () => {
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              5. Disclaimer of Warranties
+              7. Disclaimer of Warranties
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
               THE SERVICE IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED. We do not guarantee that rewards will always be successfully claimed, and we are not responsible for any issues arising from the use of this Service with your 8 Ball Pool account.
@@ -91,7 +133,7 @@ const TermsOfServicePage: React.FC = () => {
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              6. Limitation of Liability
+              8. Limitation of Liability
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
               In no event shall EpilDevConnect or its operators be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use or inability to use the Service. This includes, but is not limited to, loss of game progress, account suspension, or any other damages.
@@ -100,34 +142,43 @@ const TermsOfServicePage: React.FC = () => {
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              7. Third-Party Services
+              9. Third-Party Services
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-              This Service interacts with 8 Ball Pool, which is owned and operated by Miniclip. We are not affiliated with, endorsed by, or sponsored by Miniclip. Use of this Service is at your own risk, and you acknowledge that it may violate 8 Ball Pool's terms of service.
+              This Service interacts with 8 Ball Pool (owned by Miniclip), Discord, and other third-party services. We are not affiliated with, endorsed by, or sponsored by these third parties. Use of this Service is at your own risk, and you acknowledge that it may violate 8 Ball Pool's terms of service. Third-party services have their own terms of service and privacy policies that you must comply with.
             </p>
           </section>
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              8. Data and Privacy
+              10. Data and Privacy
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-              We collect and store your 8 Ball Pool User ID and username to provide the Service. We do not collect passwords or other sensitive account information. For more details, please see our Privacy Policy.
+              We collect and store your 8 Ball Pool User ID, username, verification data (if provided), Discord information (if you use OAuth), claim records, and screenshots to provide the Service. We do not collect passwords or other sensitive account information. For more details, please see our Privacy Policy.
             </p>
           </section>
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              9. Account Termination
+              11. Account Termination and Deregistration
             </h2>
-            <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
+            <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed mb-3">
+              You may request account deregistration at any time through your user dashboard. Upon request:
+            </p>
+            <ul className="list-disc list-inside text-text-secondary dark:text-text-dark-secondary space-y-2 ml-4">
+              <li>Automated claiming will cease immediately</li>
+              <li>Your account data will be marked for deletion</li>
+              <li>Administrators will process your request within a reasonable timeframe</li>
+              <li>Some data may be retained for legal compliance or dispute resolution purposes</li>
+            </ul>
+            <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed mt-3">
               We reserve the right to suspend or terminate your access to the Service at any time, with or without notice, for conduct that we believe violates these Terms of Service or is harmful to other users, us, or third parties.
             </p>
           </section>
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              10. Changes to Terms
+              12. Changes to Terms
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
               We reserve the right to modify these Terms of Service at any time. Changes will be effective immediately upon posting. Your continued use of the Service after changes constitutes acceptance of the modified terms.
@@ -136,7 +187,7 @@ const TermsOfServicePage: React.FC = () => {
 
           <section>
             <h2 className="text-2xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
-              11. Contact Information
+              13. Contact Information
             </h2>
             <p className="text-text-secondary dark:text-text-dark-secondary leading-relaxed">
               If you have any questions about these Terms of Service, please contact us through our Contact page or email us at connectwithme@epildevconnect.uk
@@ -151,7 +202,7 @@ const TermsOfServicePage: React.FC = () => {
                   Important Notice
                 </h3>
                 <p className="text-sm text-blue-700 dark:text-text-dark-secondary">
-                  This Service is provided for convenience and entertainment purposes. Use at your own discretion and ensure compliance with all applicable 8 Ball Pool terms and conditions.
+                  This Service is provided for convenience and entertainment purposes. Use at your own discretion and ensure compliance with all applicable 8 Ball Pool terms and conditions. Automated claiming may violate Miniclip's terms of service, and use of this Service is at your own risk.
                 </p>
               </div>
             </div>

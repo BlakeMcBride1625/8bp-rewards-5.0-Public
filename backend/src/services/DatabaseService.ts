@@ -63,9 +63,9 @@ export class DatabaseService {
       user: process.env.POSTGRES_USER || 'admin',
       password: process.env.POSTGRES_PASSWORD,
       ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false,
-      // Connection pool settings
-      max: parseInt(process.env.POSTGRES_POOL_MAX || '20'), // Maximum number of clients in the pool
-      min: parseInt(process.env.POSTGRES_POOL_MIN || '5'),   // Minimum number of clients to maintain
+      // Connection pool settings - aggressively reduced to prevent connection exhaustion
+      max: parseInt(process.env.POSTGRES_POOL_MAX || '5'), // Maximum number of clients in the pool (reduced from 10)
+      min: parseInt(process.env.POSTGRES_POOL_MIN || '1'),   // Minimum number of clients to maintain (reduced from 2)
       // Connection lifecycle
       idleTimeoutMillis: parseInt(process.env.POSTGRES_IDLE_TIMEOUT || '30000'), // Close idle clients after 30s
       connectionTimeoutMillis: parseInt(process.env.POSTGRES_CONNECTION_TIMEOUT || '20000'), // Wait 20s for connection
@@ -199,7 +199,14 @@ export class DatabaseService {
     const registration = await PostgresRegistration.findOne({ eightBallPoolId });
     if (!registration) return null;
     
-    Object.assign(registration, data);
+    // Only update fields that are provided in data (partial update)
+    // This prevents resetting fields that aren't being updated
+    Object.keys(data).forEach(key => {
+      if (data[key] !== undefined) {
+        (registration as any)[key] = data[key];
+      }
+    });
+    
     return await registration.save();
   }
 
@@ -295,6 +302,88 @@ export class DatabaseService {
   public async deleteClaimRecords(filter: any): Promise<number> {
     const result = await PostgresClaimRecord.deleteMany(filter);
     return result;
+  }
+
+  public async cleanupFailedClaims(): Promise<{
+    removedClaimRecords: number;
+    removedLogEntries: number;
+    removedValidationLogs: number;
+  }> {
+    await this.ensureConnection();
+    if (!this.postgresPool) {
+      throw new Error('PostgreSQL pool not initialized');
+    }
+
+    const client = await this.postgresPool.connect();
+    let claimResultCount = 0;
+    let logResultCount = 0;
+    let validationResultCount = 0;
+
+    try {
+      await client.query('BEGIN');
+
+      const claimResult = await client.query(
+        `DELETE FROM claim_records WHERE status = 'failed'`
+      );
+      claimResultCount = claimResult.rowCount ?? 0;
+
+      const logResult = await client.query(
+        `
+          DELETE FROM log_entries
+          WHERE metadata->>'action' IN ('claim_failed', 'failed_claim')
+             OR (
+               metadata->>'action' = 'claim'
+               AND metadata->>'success' = 'false'
+             )
+        `
+      );
+      logResultCount = logResult.rowCount ?? 0;
+
+      try {
+        const validationResult = await client.query(
+          `
+            DELETE FROM validation_logs
+            WHERE source_module IN ('claimer', 'scheduler', 'first-time-claim')
+              AND (
+                validation_result->>'isValid' = 'false'
+                OR validation_result->>'status' = 'failed'
+              )
+          `
+        );
+        validationResultCount = validationResult.rowCount ?? 0;
+      } catch (validationError) {
+        logger.warn('Validation logs cleanup skipped', {
+          action: 'cleanup_failed_claims_validation_logs_error',
+          error: validationError instanceof Error ? validationError.message : 'Unknown error'
+        });
+      }
+
+      await client.query('COMMIT');
+
+      logger.info('🧹 Failed claims cleanup complete', {
+        action: 'cleanup_failed_claims_success',
+        removedClaimRecords: claimResultCount,
+        removedLogEntries: logResultCount,
+        removedValidationLogs: validationResultCount
+      });
+
+      return {
+        removedClaimRecords: claimResultCount,
+        removedLogEntries: logResultCount,
+        removedValidationLogs: validationResultCount
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+
+      logger.error('❌ Failed to cleanup failed claims', {
+        action: 'cleanup_failed_claims_error',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // Validation and deregistration methods

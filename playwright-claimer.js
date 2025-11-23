@@ -1,15 +1,25 @@
 const { chromium } = require('playwright');
-const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
+const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton, isButtonAlreadyClaimed } = require('./claimer-utils');
 const fs = require('fs');
 const cron = require('node-cron');
 const DatabaseService = require('./services/database-service');
 const BrowserPool = require('./browser-pool');
+const DiscordService = require('./services/discord-service');
 require('dotenv').config();
+
+// ImageGenerator is optional
+let ImageGenerator;
+try {
+  ImageGenerator = require('./services/image-generator');
+} catch (error) {
+  console.log('ℹ️ ImageGenerator not available - screenshots will be used instead');
+  ImageGenerator = null;
+}
 
 const dbService = DatabaseService.getInstance();
 
 // LAYER 1: Database-level duplicate prevention
-async function saveClaimRecord(userId, username, claimedItems, success, error = null, schedulerRunTime = null) {
+async function saveClaimRecord(userId, username, claimedItems, success, error = null, schedulerRunTime = null, screenshotPath = null) {
   try {
     // Check if this user already has a successful claim today
     const today = new Date();
@@ -27,21 +37,33 @@ async function saveClaimRecord(userId, username, claimedItems, success, error = 
       return { saved: false, reason: 'duplicate', existingClaim: existingClaims[0] };
     }
 
-    // Create claim record using DatabaseService
+    // If user already has a successful claim today, don't save failed claims (they already claimed, not a real failure)
+    if (existingClaims.length > 0 && !success) {
+      console.log(`⏭️ Skipping failed claim save - user ${username} already has successful claim today at ${existingClaims[0].claimedAt.toLocaleTimeString()} (not a real failure)`);
+      return { saved: false, reason: 'already_claimed_today', existingClaim: existingClaims[0] };
+    }
+
+    // Create claim record using DatabaseService with screenshot path in metadata
     const claimData = {
       eightBallPoolId: userId,
       websiteUserId: username,
       status: success ? 'success' : 'failed',
       itemsClaimed: claimedItems || [],
       error: error,
-      schedulerRun: schedulerRunTime,
-      claimedAt: new Date()
+      schedulerRun: schedulerRunTime || new Date(),
+      claimedAt: new Date(),
+      metadata: screenshotPath ? {
+        screenshotPath: screenshotPath,
+        confirmationImagePath: screenshotPath,
+        timestamp: new Date().toISOString()
+      } : undefined
     };
     
     console.log(`💾 Saving claim record for user ${userId}:`, {
       status: claimData.status,
       itemsCount: claimData.itemsClaimed.length,
-      success: success
+      success: success,
+      hasScreenshot: !!screenshotPath
     });
     
     await dbService.createClaimRecord(claimData);
@@ -99,7 +121,8 @@ async function ensureScreenshotDirectories() {
     'screenshots/login',
     'screenshots/id-entry',
     'screenshots/go-click',
-    'screenshots/final-page'
+    'screenshots/final-page',
+    'screenshots/confirmation'
   ];
 
   directories.forEach(dir => {
@@ -150,7 +173,7 @@ async function claimRewardsForUser(userId) {
   // Ensure screenshot directories exist
   await ensureScreenshotDirectories();
   
-  const claimedItems = [];
+  let claimedItems = [];
   
   const shopUrl = 'https://8ballpool.com/en/shop';
   
@@ -489,7 +512,36 @@ async function claimRewardsForUser(userId) {
 
     console.log(`Found ${uniqueButtons.length} unique FREE buttons`);
     
+    // Check if all buttons are already claimed before attempting to claim
+    let allButtonsClaimed = true;
+    let claimableButtonsCount = 0;
+    
     if (uniqueButtons.length > 0) {
+      for (const buttonInfo of uniqueButtons) {
+        try {
+          const buttonText = buttonInfo.text || '';
+          const isDisabled = await buttonInfo.element.isDisabled().catch(() => false);
+          const isAlreadyClaimed = isButtonAlreadyClaimed(buttonText);
+          
+          if (!isDisabled && !isAlreadyClaimed) {
+            allButtonsClaimed = false;
+            claimableButtonsCount++;
+          }
+        } catch (error) {
+          // If we can't check, assume it's claimable
+          allButtonsClaimed = false;
+          claimableButtonsCount++;
+        }
+      }
+      
+      // If all buttons are already claimed, return early with success flag
+      if (allButtonsClaimed && uniqueButtons.length > 0) {
+        console.log('✅ All items are already claimed - no new items to claim');
+        console.log('⏭️ Skipping claim attempt (items already claimed, not a failure)');
+        return { claimedItems: [], alreadyClaimed: true };
+      }
+      
+      console.log(`🎯 Found ${claimableButtonsCount} claimable buttons out of ${uniqueButtons.length} total`);
       console.log('🎯 Clicking all FREE buttons...');
       
       for (let i = 0; i < uniqueButtons.length; i++) {
@@ -793,7 +845,8 @@ async function claimRewardsForUser(userId) {
     }
     
     // Take final screenshot
-    await takeScreenshot(page, `screenshots/final-page/final-page-${userId}.png`, 'Final page');
+    const finalScreenshotPath = `screenshots/final-page/final-page-${userId}.png`;
+    await takeScreenshot(page, finalScreenshotPath, 'Final page');
     
     // Wait a bit to see results
     await page.waitForTimeout(1000);
@@ -802,9 +855,12 @@ async function claimRewardsForUser(userId) {
     console.log('🚪 Logging out...');
     await logout(page);
     
+    return { claimedItems, screenshotPath: finalScreenshotPath };
+    
   } catch (error) {
     console.error('❌ Error:', error.message);
     console.error('Stack:', error.stack);
+    throw error;
   } finally {
     if (browser) {
       try {
@@ -916,11 +972,11 @@ async function claimRewards() {
   let failureCount = 0;
   const schedulerRunTime = new Date();
   
-  // Create browser pool with max 6 concurrent browsers
-  const browserPool = new BrowserPool(6);
+  // Create browser pool with max 10 concurrent browsers
+  const browserPool = new BrowserPool(10);
   
   // Process all users with browser pool limiting! 🚀
-  console.log(`\n🚀 Running ${users.length} claims with BROWSER POOL (max 6 concurrent browsers)!`);
+  console.log(`\n🚀 Running ${users.length} claims with BROWSER POOL (max 10 concurrent browsers)!`);
   console.log(`📊 Browser Pool Status: ${browserPool.getStatus().activeBrowsers}/${browserPool.getStatus().maxConcurrent} active, ${browserPool.getStatus().queued} queued`);
   
   const claimPromises = users.map(async (user, index) => {
@@ -935,10 +991,17 @@ async function claimRewards() {
       const claimResult = await claimRewardsForUser(user.eightBallPoolId);
       console.log(`✅ Successfully processed user: ${user.username}`);
       
+      // Check if all items were already claimed
+      if (claimResult?.alreadyClaimed) {
+        console.log(`⏭️ All items already claimed for user ${user.username} - not saving failed record`);
+        return { success: true, user: user.username, alreadyClaimed: true };
+      }
+      
       // LAYER 3: Pre-save validation - check if any items were actually claimed
       const claimedItems = claimResult?.claimedItems || ['Daily Reward', 'Free Items'];
+      const screenshotPath = claimResult?.screenshotPath || null;
       
-      if (claimedItems.length === 0) {
+      if (claimedItems.length === 0 && !claimResult?.alreadyClaimed) {
         console.log(`⏭️ No new items claimed for user ${user.username} - skipping database save`);
         return { success: true, user: user.username, alreadyClaimed: true };
       }
@@ -950,7 +1013,8 @@ async function claimRewards() {
         claimedItems, 
         true, 
         null, 
-        schedulerRunTime
+        schedulerRunTime,
+        screenshotPath
       );
       
       // Handle duplicate detection from Layer 1
@@ -959,19 +1023,121 @@ async function claimRewards() {
         return { success: true, user: user.username, alreadyClaimed: true };
       }
       
+      // Send Discord confirmation for successful claims via Discord API service
+      if (claimedItems.length > 0 && screenshotPath) {
+        try {
+          const discordServiceUrl = process.env.DISCORD_BOT_SERVICE_URL || 'http://discord-api:2700';
+          const axios = require('axios');
+          
+          // Try to create confirmation image if ImageGenerator is available
+          let confirmationImagePath = screenshotPath;
+          if (ImageGenerator) {
+            try {
+              const imageGenerator = new ImageGenerator();
+              const generatedPath = await imageGenerator.createConfirmationImage(
+                user.eightBallPoolId,
+                user.username,
+                claimedItems,
+                screenshotPath
+              );
+              if (generatedPath) {
+                confirmationImagePath = generatedPath;
+                console.log(`✅ Confirmation image created for ${user.username}`);
+              }
+            } catch (imageError) {
+              console.log(`⚠️ Could not create confirmation image: ${imageError.message}`);
+              // Fallback to screenshot
+            }
+          } else {
+            // ImageGenerator not available - copy final-page screenshot to confirmation directory
+            if (screenshotPath && fs.existsSync(screenshotPath)) {
+              try {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const confirmationDir = 'screenshots/confirmation';
+                
+                // Ensure confirmation directory exists
+                if (!fs.existsSync(confirmationDir)) {
+                  fs.mkdirSync(confirmationDir, { recursive: true });
+                }
+                
+                const confirmationPath = `${confirmationDir}/confirmation-${user.eightBallPoolId}-${timestamp}.png`;
+                fs.copyFileSync(screenshotPath, confirmationPath);
+                confirmationImagePath = confirmationPath;
+                console.log(`✅ Copied screenshot to confirmation directory: ${confirmationPath}`);
+              } catch (copyError) {
+                console.log(`⚠️ Could not copy screenshot to confirmation directory: ${copyError.message}`);
+                // Fallback to original screenshot path
+              }
+            }
+          }
+          
+          // Call Discord API service to send confirmation
+          const response = await axios.post(`${discordServiceUrl}/send-confirmation`, {
+            bpAccountId: user.eightBallPoolId,
+            username: user.username,
+            imagePath: confirmationImagePath,
+            claimedItems: claimedItems
+          }, {
+            timeout: 5000
+          }).catch(err => {
+            console.log(`⚠️ Could not send Discord confirmation via API: ${err.message}`);
+            return null;
+          });
+          
+          if (response && response.data && response.data.success) {
+            console.log(`✅ Discord confirmation sent for ${user.username}`);
+          } else {
+            console.log(`⚠️ Discord API service returned error for ${user.username}`);
+          }
+        } catch (discordError) {
+          console.log(`⚠️ Error sending Discord confirmation: ${discordError.message}`);
+        }
+      }
+      
       return { success: true, user: user.username };
     } catch (error) {
       console.log(`❌ Failed to process user ${user.username}: ${error.message}`);
       
-      // Save failed claim to database
-      await saveClaimRecord(
+      // Check if error is due to already claimed items (not a real failure)
+      const errorMessage = error.message || '';
+      const isAlreadyClaimedError = errorMessage.toLowerCase().includes('already claimed') ||
+                                    errorMessage.toLowerCase().includes('already collected') ||
+                                    errorMessage.toLowerCase().includes('items already claimed');
+      
+      if (isAlreadyClaimedError) {
+        console.log(`⏭️ Error indicates items already claimed - not saving failed record`);
+        return { success: true, user: user.username, alreadyClaimed: true };
+      }
+      
+      // Check if user already has a successful claim today before saving failed claim
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const existingSuccessClaims = await dbService.findClaimRecords({
+        eightBallPoolId: user.eightBallPoolId,
+        status: 'success',
+        claimedAt: { $gte: today }
+      });
+      
+      if (existingSuccessClaims.length > 0) {
+        console.log(`⏭️ User ${user.username} already has successful claim today - skipping failed claim save (not a real failure)`);
+        return { success: true, user: user.username, alreadyClaimed: true };
+      }
+      
+      // Save failed claim to database only for actual errors (network, page errors, etc.)
+      const saveResult = await saveClaimRecord(
         user.eightBallPoolId, 
         user.username, 
         [], 
         false, 
         error.message, 
-        schedulerRunTime
+        schedulerRunTime,
+        null
       );
+      
+      // If save was skipped due to duplicate, treat as success
+      if (saveResult && !saveResult.saved && saveResult.reason === 'already_claimed_today') {
+        return { success: true, user: user.username, alreadyClaimed: true };
+      }
       
       return { success: false, user: user.username, error: error.message };
     } finally {
@@ -1036,6 +1202,30 @@ function startScheduler() {
   
   // Keep alive
   setInterval(() => {}, 1000);
+}
+
+// Initialize heartbeat for service tracking
+let heartbeatInitialized = false;
+try {
+  const heartbeatUrl = process.env.HEARTBEAT_URL || `${process.env.PUBLIC_URL || 'http://localhost:2600'}/8bp-rewards/api/heartbeat/beat`;
+  const axios = require('axios');
+  const intervalMs = Math.max(5000, parseInt(process.env.HEARTBEAT_INTERVAL_MS || '5000', 10));
+  
+  const sendHeartbeat = () => {
+    axios.post(heartbeatUrl, {
+      moduleId: __filename,
+      filePath: __filename,
+      processId: process.pid,
+      service: 'claimer'
+    }, { timeout: 2000 }).catch(() => {});
+  };
+  
+  sendHeartbeat();
+  setInterval(sendHeartbeat, intervalMs);
+  heartbeatInitialized = true;
+  console.log('✅ Heartbeat initialized for claimer service');
+} catch (error) {
+  console.log('⚠️ Could not initialize heartbeat:', error.message);
 }
 
 // Check if we should run once or start scheduler

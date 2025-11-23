@@ -23,7 +23,7 @@ export class DeviceDetectionService {
    * Extract device information from request headers and body
    */
   public extractDeviceInfo(req: Request): DeviceInfo {
-    const userAgent = req.headers['user-agent'] || '';
+    const userAgent = this.normalizeHeader(req.headers['user-agent']);
     const deviceId = this.extractDeviceId(req);
     const deviceType = this.detectDeviceType(userAgent);
     const platform = this.detectPlatform(userAgent);
@@ -48,17 +48,27 @@ export class DeviceDetectionService {
   }
 
   /**
+   * Normalize header value to string (handles string | string[] | undefined)
+   */
+  private normalizeHeader(header: string | string[] | undefined): string {
+    if (!header) return '';
+    return Array.isArray(header) ? header[0] : header;
+  }
+
+  /**
    * Extract device ID from various sources
    */
   private extractDeviceId(req: Request): string {
     // Priority order: custom header, fingerprint, Windows-specific headers, fallback to IP-based
-    const customDeviceId = req.headers['x-device-id'] || req.body?.deviceId;
+    const customDeviceIdHeader = this.normalizeHeader(req.headers['x-device-id']);
+    const customDeviceId = customDeviceIdHeader || req.body?.deviceId;
     if (customDeviceId && this.isValidDeviceId(customDeviceId)) {
       return customDeviceId;
     }
 
     // Try to extract from fingerprint data
-    const fingerprint = req.body?.fingerprint || req.headers['x-fingerprint'];
+    const fingerprintHeader = this.normalizeHeader(req.headers['x-fingerprint']);
+    const fingerprint = req.body?.fingerprint || fingerprintHeader;
     if (fingerprint) {
       return this.generateDeviceIdFromFingerprint(fingerprint);
     }
@@ -71,7 +81,7 @@ export class DeviceDetectionService {
 
     // Fallback to IP + User-Agent based ID
     const ip = req.ip || req.connection?.remoteAddress || 'unknown';
-    const userAgent = req.headers['user-agent'] || '';
+    const userAgent = this.normalizeHeader(req.headers['user-agent']);
     return this.generateFallbackDeviceId(ip, userAgent);
   }
 
@@ -79,7 +89,7 @@ export class DeviceDetectionService {
    * Extract Windows-specific device identifiers
    */
   private extractWindowsDeviceId(req: Request): string | null {
-    const userAgent = req.headers['user-agent'] || '';
+    const userAgent = this.normalizeHeader(req.headers['user-agent']);
     
     if (!userAgent.toLowerCase().includes('windows')) {
       return null;
@@ -87,10 +97,10 @@ export class DeviceDetectionService {
 
     // Try to extract Windows-specific identifiers
     const windowsHeaders = [
-      req.headers['x-windows-device-id'],
-      req.headers['x-device-uuid'],
-      req.headers['x-hardware-id'],
-      req.headers['x-machine-id']
+      this.normalizeHeader(req.headers['x-windows-device-id']),
+      this.normalizeHeader(req.headers['x-device-uuid']),
+      this.normalizeHeader(req.headers['x-hardware-id']),
+      this.normalizeHeader(req.headers['x-machine-id'])
     ].filter(Boolean);
 
     if (windowsHeaders.length > 0) {

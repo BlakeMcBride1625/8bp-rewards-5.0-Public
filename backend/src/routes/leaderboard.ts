@@ -20,17 +20,40 @@ router.get('/', async (req, res): Promise<void> => {
     let leaderboardData: any[] = [];
     try {
       // Optimized SQL query that aggregates in the database
+      // Exclude failed claims where user has successful claim on same day (duplicate attempts, not real failures)
+      // user_id = username (8BP account username from registration or verification image)
       const leaderboardQuery = `
         SELECT 
-          eight_ball_pool_id,
-          COUNT(*) as total_claims,
-          COUNT(*) FILTER (WHERE status = 'success') as successful_claims,
-          COUNT(*) FILTER (WHERE status = 'failed') as failed_claims,
-          COALESCE(SUM(ARRAY_LENGTH(items_claimed, 1)) FILTER (WHERE status = 'success'), 0) as total_items_claimed,
-          MAX(claimed_at) as last_claimed
-        FROM claim_records
-        WHERE claimed_at >= $1
-        GROUP BY eight_ball_pool_id
+          r.username as user_id,
+          r.username,
+          r.eight_ball_pool_id,
+          r.account_level,
+          r.account_rank,
+          COUNT(*) FILTER (
+            WHERE cr.status = 'success' 
+            OR (cr.status = 'failed' AND NOT EXISTS (
+              SELECT 1 FROM claim_records cr2 
+              WHERE cr2.eight_ball_pool_id = cr.eight_ball_pool_id 
+              AND cr2.status = 'success' 
+              AND DATE(cr2.claimed_at) = DATE(cr.claimed_at)
+              AND cr2.claimed_at >= $1
+            ))
+          ) as total_claims,
+          COUNT(*) FILTER (WHERE cr.status = 'success') as successful_claims,
+          COUNT(*) FILTER (WHERE cr.status = 'failed' AND NOT EXISTS (
+            SELECT 1 FROM claim_records cr2 
+            WHERE cr2.eight_ball_pool_id = cr.eight_ball_pool_id 
+            AND cr2.status = 'success' 
+            AND DATE(cr2.claimed_at) = DATE(cr.claimed_at)
+            AND cr2.claimed_at >= $1
+          )) as failed_claims,
+          COALESCE(SUM(ARRAY_LENGTH(cr.items_claimed, 1)) FILTER (WHERE cr.status = 'success'), 0) as total_items_claimed,
+          MAX(cr.claimed_at) as last_claimed
+        FROM claim_records cr
+        INNER JOIN registrations r ON cr.eight_ball_pool_id = r.eight_ball_pool_id
+        WHERE cr.claimed_at >= $1
+          AND r.username IS NOT NULL
+        GROUP BY r.eight_ball_pool_id, r.username, r.account_level, r.account_rank
         ORDER BY total_items_claimed DESC
         LIMIT $2
       `;
@@ -42,14 +65,37 @@ router.get('/', async (req, res): Promise<void> => {
         )
       ]);
       
-      leaderboardData = result.rows.map((row: any) => ({
-        eightBallPoolId: row.eight_ball_pool_id,
-        totalClaims: parseInt(row.total_claims),
-        successfulClaims: parseInt(row.successful_claims),
-        failedClaims: parseInt(row.failed_claims),
-        totalItemsClaimed: parseInt(row.total_items_claimed || 0),
-        lastClaimed: row.last_claimed
-      }));
+      leaderboardData = result.rows.map((row: any) => {
+        const successfulClaims = parseInt(row.successful_claims);
+        const failedClaims = parseInt(row.failed_claims);
+        const totalClaims = parseInt(row.total_claims); // Now correctly excludes duplicate failed claims
+        
+        // Validate that totalClaims = successfulClaims + failedClaims
+        // This should always be true now, but keeping as a safety check
+        const expectedTotal = successfulClaims + failedClaims;
+        if (totalClaims !== expectedTotal) {
+          logger.warn('Total claims mismatch', {
+            eightBallPoolId: row.eight_ball_pool_id,
+            totalClaims,
+            expectedTotal,
+            successfulClaims,
+            failedClaims
+          });
+        }
+        
+        return {
+          user_id: row.user_id, // username from registration or verification
+          username: row.username,
+          eightBallPoolId: row.eight_ball_pool_id,
+          account_level: row.account_level || null,
+          account_rank: row.account_rank || null,
+          totalClaims: totalClaims, // Use SQL-calculated total (already excludes duplicates)
+          successfulClaims: successfulClaims,
+          failedClaims: failedClaims,
+          totalItemsClaimed: parseInt(row.total_items_claimed || 0),
+          lastClaimed: row.last_claimed
+        };
+      });
       
     } catch (error) {
       logger.error('Leaderboard query timeout or error', {
@@ -66,49 +112,24 @@ router.get('/', async (req, res): Promise<void> => {
       return;
     }
 
-    // Get user details for each entry with optimized batch query
-    const userIds = leaderboardData.map(entry => entry.eightBallPoolId);
-    let userMap = new Map<string, string>();
-    
-    if (userIds.length > 0) {
-      try {
-        // Batch fetch usernames in a single query
-        const usernameQuery = `
-          SELECT eight_ball_pool_id, username 
-          FROM registrations 
-          WHERE eight_ball_pool_id = ANY($1)
-        `;
-        const usernameResult = await Promise.race([
-          dbService.executeQuery(usernameQuery, [userIds]),
-          new Promise<any>((_, reject) => 
-            setTimeout(() => reject(new Error('Query timeout')), 3000)
-          )
-        ]);
-        
-        usernameResult.rows.forEach((row: any) => {
-          userMap.set(row.eight_ball_pool_id, row.username);
-        });
-      } catch (error) {
-        logger.warn('Failed to batch fetch usernames, will use individual lookups', {
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
-      }
-    }
-    
-    // Build leaderboard response
-    const leaderboard = leaderboardData.map((entry: any, index: number) => ({
-      rank: index + 1,
-      eightBallPoolId: entry.eightBallPoolId,
-      username: userMap.get(entry.eightBallPoolId) || 'Unknown',
-      totalClaims: entry.totalClaims,
-      successfulClaims: entry.successfulClaims,
-      failedClaims: entry.failedClaims,
-      totalItemsClaimed: entry.totalItemsClaimed,
-      successRate: entry.totalClaims > 0 
-        ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
-        : 0,
-      lastClaimed: entry.lastClaimed
-    }));
+      // Build leaderboard response (usernames, levels, and ranks are already included in the query)
+      // user_id = username (8BP account username from registration or verification image)
+      const leaderboard = leaderboardData.map((entry: any, index: number) => ({
+        rank: index + 1,
+        user_id: entry.user_id, // username from registration or verification
+        username: entry.username,
+        eightBallPoolId: entry.eightBallPoolId,
+        account_level: entry.account_level || null,
+        account_rank: entry.account_rank || null,
+        totalClaims: entry.totalClaims,
+        successfulClaims: entry.successfulClaims,
+        failedClaims: entry.failedClaims,
+        totalItemsClaimed: entry.totalItemsClaimed,
+        successRate: entry.totalClaims > 0 
+          ? Math.round((entry.successfulClaims / entry.totalClaims) * 100) 
+          : 0,
+        lastClaimed: entry.lastClaimed
+      }));
 
     res.json({
       timeframe,
@@ -153,20 +174,43 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
       return;
     }
 
-    // Calculate user stats
+    // Calculate user stats - exclude failed claims where user has successful claim on same day
     let totalClaims = 0;
     let successfulClaims = 0;
     let failedClaims = 0;
     let totalItemsClaimed = 0;
     let lastClaimed: string | null = null;
 
+    // Group claims by date to check for same-day duplicates
+    const claimsByDate = new Map<string, any[]>();
     userClaims.forEach((claim: any) => {
-      totalClaims++;
+      const claimDate = new Date(claim.claimedAt).toISOString().split('T')[0];
+      if (!claimsByDate.has(claimDate)) {
+        claimsByDate.set(claimDate, []);
+      }
+      claimsByDate.get(claimDate)!.push(claim);
+    });
+
+    userClaims.forEach((claim: any) => {
+      const claimDate = new Date(claim.claimedAt).toISOString().split('T')[0];
+      const dateClaims = claimsByDate.get(claimDate) || [];
+      
+      // Check if user has successful claim on same day
+      const hasSameDaySuccess = dateClaims.some((c: any) => 
+        c.status === 'success' && c.id !== claim.id
+      );
+      
       if (claim.status === 'success') {
+        totalClaims++;
         successfulClaims++;
         totalItemsClaimed += claim.itemsClaimed?.length || 0;
-      } else {
-        failedClaims++;
+      } else if (claim.status === 'failed') {
+        // Only count as failed if user doesn't have successful claim on same day
+        if (!hasSameDaySuccess) {
+          totalClaims++;
+          failedClaims++;
+        }
+        // Skip duplicate failed claims (don't count them in total)
       }
       
       if (!lastClaimed || new Date(claim.claimedAt) > new Date(lastClaimed)) {
@@ -201,8 +245,9 @@ router.get('/user/:eightBallPoolId', async (req, res): Promise<void> => {
 
     res.json({
       rank,
+      user_id: registration?.username || null, // username from registration or verification
+      username: registration?.username || null,
       eightBallPoolId,
-      username: registration?.username || 'Unknown',
       totalClaims,
       successfulClaims,
       failedClaims,
@@ -241,7 +286,23 @@ router.get('/stats', async (req, res) => {
       claimedAt: { $gte: startDate }
     });
 
-    // Calculate overall statistics
+    // Group claims by user and date to identify duplicate attempts
+    const userDateClaims = new Map<string, Map<string, any[]>>();
+    claimRecords.forEach((claim: any) => {
+      const userId = claim.eightBallPoolId;
+      const claimDate = new Date(claim.claimedAt).toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      if (!userDateClaims.has(userId)) {
+        userDateClaims.set(userId, new Map());
+      }
+      const dateClaims = userDateClaims.get(userId)!;
+      if (!dateClaims.has(claimDate)) {
+        dateClaims.set(claimDate, []);
+      }
+      dateClaims.get(claimDate)!.push(claim);
+    });
+
+    // Calculate overall statistics, excluding failed claims where user has successful claim on same day
     let totalClaims = 0;
     let successfulClaims = 0;
     let failedClaims = 0;
@@ -249,14 +310,28 @@ router.get('/stats', async (req, res) => {
     const uniqueUsers = new Set<string>();
 
     claimRecords.forEach((claim: any) => {
-      totalClaims++;
-      uniqueUsers.add(claim.eightBallPoolId);
+      const userId = claim.eightBallPoolId;
+      const claimDate = new Date(claim.claimedAt).toISOString().split('T')[0];
+      const dateClaims = userDateClaims.get(userId)?.get(claimDate) || [];
+      
+      // Check if user has successful claim on same day
+      const hasSameDaySuccess = dateClaims.some((c: any) => 
+        c.status === 'success' && c.id !== claim.id
+      );
+      
+      uniqueUsers.add(userId);
       
       if (claim.status === 'success') {
+        totalClaims++; // Count successful claims
         successfulClaims++;
         totalItemsClaimed += claim.itemsClaimed?.length || 0;
-      } else {
-        failedClaims++;
+      } else if (claim.status === 'failed') {
+        // Only count as failed (and in total) if user doesn't have successful claim on same day
+        if (!hasSameDaySuccess) {
+          totalClaims++; // Only count non-duplicate failed claims
+          failedClaims++;
+        }
+        // Skip duplicate failed claims (don't count them in total)
       }
     });
 

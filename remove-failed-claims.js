@@ -18,7 +18,7 @@ async function connectToDatabase() {
       port: process.env.POSTGRES_PORT || 5432,
       database: process.env.POSTGRES_DB || '8bp_rewards',
       user: process.env.POSTGRES_USER || 'admin',
-      password: process.env.POSTGRES_PASSWORD || '192837DB25',
+      password: process.env.POSTGRES_PASSWORD || '',
       ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false
     });
 
@@ -49,35 +49,71 @@ async function removeFailedClaims(pool) {
     const failedCount = parseInt(countResult.rows[0].count);
     
     if (failedCount === 0) {
-      console.log('✅ No failed claims found in the database');
-      return;
+      console.log('ℹ️ No failed claim records found, continuing with log cleanup');
     }
     
     console.log(`📊 Found ${failedCount} failed claims to remove`);
     
-    // Remove failed claims
-    const deleteResult = await pool.query(
-      'DELETE FROM claim_records WHERE status = $1',
+    await pool.query('BEGIN');
+
+    const deleteClaimsResult = await pool.query(
+      `DELETE FROM claim_records WHERE status = $1`,
       ['failed']
     );
-    
-    console.log(`🗑️ Removed ${deleteResult.rowCount} failed claims from the database`);
+
+    const deleteLogsResult = await pool.query(
+      `
+        DELETE FROM log_entries
+        WHERE metadata->>'action' IN ('claim_failed', 'failed_claim')
+           OR (
+             metadata->>'action' = 'claim'
+             AND metadata->>'success' = 'false'
+           )
+      `
+    );
+
+    let deleteValidationLogsResult = { rowCount: 0 };
+    try {
+      deleteValidationLogsResult = await pool.query(
+        `
+          DELETE FROM validation_logs
+          WHERE source_module IN ('claimer', 'scheduler', 'first-time-claim')
+            AND (
+              validation_result->>'isValid' = 'false'
+              OR validation_result->>'status' = 'failed'
+            )
+        `
+      );
+    } catch (validationError) {
+      console.warn('⚠️ Validation logs cleanup skipped:', validationError.message || validationError);
+    }
+
+    await pool.query('COMMIT');
+
+    console.log(`🗑️ Removed ${deleteClaimsResult.rowCount} failed claim records`);
+    console.log(`🧹 Removed ${deleteLogsResult.rowCount} related log entries`);
+    console.log(`🧾 Removed ${deleteValidationLogsResult.rowCount} validation log entries`);
     
     // Verify removal
-    const verifyResult = await pool.query(
+    const verifyClaimsResult = await pool.query(
       'SELECT COUNT(*) as count FROM claim_records WHERE status = $1',
       ['failed']
     );
     
-    const remainingFailed = parseInt(verifyResult.rows[0].count);
+    const remainingFailed = parseInt(verifyClaimsResult.rows[0].count);
     
     if (remainingFailed === 0) {
-      console.log('✅ All failed claims have been successfully removed');
+      console.log('✅ All failed claim records have been successfully removed');
     } else {
-      console.log(`⚠️ ${remainingFailed} failed claims still remain`);
+      console.log(`⚠️ ${remainingFailed} failed claim records still remain`);
     }
     
   } catch (error) {
+    try {
+      await pool.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('❌ Failed to rollback transaction:', rollbackError.message || rollbackError);
+    }
     console.error('❌ Error removing failed claims:', error.message);
     throw error;
   }

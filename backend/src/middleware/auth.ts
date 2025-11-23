@@ -1,6 +1,97 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../services/LoggerService';
 import { validateRegistrationData } from '../utils/validation';
+import axios from 'axios';
+
+// Authenticate any user (Discord server member)
+export const authenticateUser = async (req: Request, res: Response, next: NextFunction): Promise<void | Response> => {
+  // Development bypass - auto-authenticate in development mode
+  if (process.env.NODE_ENV === 'development') {
+    const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
+    const devUserId = allowedAdmins[0] || '850726663289700373';
+    
+    (req as any).user = {
+      id: devUserId,
+      username: 'dev-user',
+      discriminator: '0000',
+      avatar: 'dev-avatar'
+    };
+    
+    return next();
+  }
+
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    const user = req.user as any;
+    const discordId = user.id;
+    const guildId = process.env.DISCORD_GUILD_ID;
+    const botToken = process.env.DISCORD_TOKEN;
+
+    // If no guild ID is set, allow all authenticated users (fallback)
+    if (!guildId) {
+      logger.warn('DISCORD_GUILD_ID not set, allowing all authenticated users');
+      return next();
+    }
+
+    // Check if user is in the Discord server
+    try {
+      const memberResponse = await axios.get(
+        `https://discord.com/api/v10/guilds/${guildId}/members/${discordId}`,
+        {
+          headers: {
+            'Authorization': `Bot ${botToken}`
+          },
+          validateStatus: (status) => status < 500
+        }
+      );
+
+      if (memberResponse.status === 404) {
+        logger.warn('User not in Discord server', {
+          action: 'user_not_in_guild',
+          discordId,
+          username: user.username
+        });
+        return res.status(403).json({
+          error: 'You must be a member of the 8BP Rewards Discord server to access this page.',
+          joinUrl: process.env.DISCORD_INVITE_URL || 'https://discord.gg/7EgQJSXY6d'
+        });
+      }
+
+      if (memberResponse.status !== 200) {
+        logger.error('Error checking Discord guild membership', {
+          action: 'guild_check_error',
+          status: memberResponse.status,
+          discordId
+        });
+        return res.status(500).json({
+          error: 'Failed to verify Discord server membership'
+        });
+      }
+
+      // User is in the server, proceed
+      logger.info('User authenticated', {
+        action: 'user_authenticated',
+        discordId,
+        username: user.username
+      });
+      return next();
+    } catch (error) {
+      logger.error('Error checking Discord guild membership', {
+        action: 'guild_check_exception',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        discordId
+      });
+      return res.status(500).json({
+        error: 'Failed to verify Discord server membership'
+      });
+    }
+  } else {
+    logger.warn('Unauthenticated user access attempt', {
+      action: 'user_access_unauthenticated',
+      ip: req.ip
+    });
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+};
 
 export const authenticateAdmin = (req: Request, res: Response, next: NextFunction): void => {
   // Development bypass - auto-authenticate as admin in development mode

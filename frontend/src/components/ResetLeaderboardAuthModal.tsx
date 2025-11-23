@@ -56,7 +56,7 @@ const ResetLeaderboardAuthModal: React.FC<ResetLeaderboardAuthModalProps> = ({
       setAccessStatus(response.data);
       
       if (!response.data.isAllowed) {
-        toast.error('Access denied. You are not authorized to reset the leaderboard.');
+        toast.error('Access denied. You are not authorised to reset the leaderboard.');
         onClose();
         return;
       }
@@ -88,7 +88,7 @@ const ResetLeaderboardAuthModal: React.FC<ResetLeaderboardAuthModalProps> = ({
     } catch (error: any) {
       console.error('Failed to request Discord code:', error);
       if (error.response?.status === 403) {
-        toast.error('Access denied. You are not authorized to reset the leaderboard.');
+        toast.error('Access denied. You are not authorised to reset the leaderboard.');
       } else {
         toast.error('Failed to send Discord code. Please try again.');
       }
@@ -114,7 +114,7 @@ const ResetLeaderboardAuthModal: React.FC<ResetLeaderboardAuthModalProps> = ({
     } catch (error: any) {
       console.error('Failed to request Telegram code:', error);
       if (error.response?.status === 403) {
-        toast.error('Access denied. You are not authorized to reset the leaderboard.');
+        toast.error('Access denied. You are not authorised to reset the leaderboard.');
       } else {
         toast.error('Failed to send Telegram code. Please try again.');
       }
@@ -141,7 +141,7 @@ const ResetLeaderboardAuthModal: React.FC<ResetLeaderboardAuthModalProps> = ({
     } catch (error: any) {
       console.error('Failed to request email code:', error);
       if (error.response?.status === 403) {
-        toast.error('Access denied. Your email is not authorized.');
+        toast.error('Access denied. Your email is not authorised.');
       } else {
         toast.error('Failed to send email code. Please try again.');
       }

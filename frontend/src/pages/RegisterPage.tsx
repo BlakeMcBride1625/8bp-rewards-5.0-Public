@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
@@ -77,15 +78,15 @@ const RegisterPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8 py-12">
+    <div className="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8 }}
-        className="max-w-md w-full"
+        className="max-w-lg w-full"
       >
         <div className="card">
-          <div className="text-center mb-8">
+          <div className="text-center mb-10">
             <div className="w-16 h-16 bg-primary-100 dark:bg-gradient-to-br dark:from-blue-500 dark:to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg dark:shadow-blue-500/40">
               <UserPlus className="w-8 h-8 text-primary-600 dark:text-text-dark-highlight" />
             </div>
@@ -97,7 +98,7 @@ const RegisterPage: React.FC = () => {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>
               <label htmlFor="eightBallPoolId" className="label">
                 8 Ball Pool User ID
@@ -181,9 +182,9 @@ const RegisterPage: React.FC = () => {
           <div className="mt-6 text-center">
             <p className="text-sm text-text-secondary">
               Already registered?{' '}
-              <a href="/leaderboard" className="text-primary-600 hover:text-primary-700 font-medium">
+              <Link to="/leaderboard" className="text-primary-600 hover:text-primary-700 font-medium">
                 Check the leaderboard
-              </a>
+              </Link>
             </p>
           </div>
         </div>

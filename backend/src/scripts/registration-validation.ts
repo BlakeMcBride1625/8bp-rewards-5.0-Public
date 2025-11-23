@@ -128,7 +128,10 @@ async function deregisterUser(eightBallPoolId: string, reason: string, errorMess
 }
 
 async function triggerFirstTimeClaim(eightBallPoolId: string, username: string): Promise<void> {
+  // Fire and forget - don't block validation script
+  // Spawn the claim process immediately (not in setTimeout) to ensure it starts before process.exit
   try {
+    console.log(`✅ [VALIDATION] Triggering first-time claim for ${eightBallPoolId}`);
     logger.info('Triggering first-time claim for validated user', {
       action: 'trigger_first_time_claim',
       eightBallPoolId,
@@ -159,6 +162,7 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
     }
     
     if (!claimScript) {
+      console.log(`❌ [VALIDATION] Could not find first-time-claim.js script for ${eightBallPoolId}`);
       logger.error('Could not find first-time-claim.js script', {
         action: 'first_time_claim_script_not_found',
         eightBallPoolId,
@@ -168,6 +172,7 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
       return;
     }
     
+    console.log(`✅ [VALIDATION] Running first-time claim script: ${claimScript}`);
     logger.info('Running first-time claim script', {
       action: 'first_time_claim_start',
       eightBallPoolId,
@@ -175,11 +180,31 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
       scriptPath: claimScript
     });
     
+    // Spawn immediately - use detached: true but redirect stdio to files so child survives parent exit
+    // Redirect stdout/stderr to log files so child doesn't depend on parent's pipes
+    const fsModule = require('fs');
+    const pathModule = require('path');
+    const logsDir = pathModule.join(process.cwd(), 'logs');
+    if (!fsModule.existsSync(logsDir)) {
+      fsModule.mkdirSync(logsDir, { recursive: true });
+    }
+    const stdoutFile = pathModule.join(logsDir, `first-time-claim-${eightBallPoolId}-${Date.now()}.stdout.log`);
+    const stderrFile = pathModule.join(logsDir, `first-time-claim-${eightBallPoolId}-${Date.now()}.stderr.log`);
+    const stdoutFd = fsModule.openSync(stdoutFile, 'w');
+    const stderrFd = fsModule.openSync(stderrFile, 'w');
+    
     const claimProcess = spawn('node', [claimScript, eightBallPoolId, username], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', stdoutFd, stderrFd],
       cwd: process.cwd(),
-      detached: false
+      detached: true  // Detach so child can survive parent exit
     });
+    
+    // Unref so parent can exit, but child will continue running independently
+    claimProcess.unref();
+    
+    // Close file descriptors in parent (child has its own copies)
+    fsModule.closeSync(stdoutFd);
+    fsModule.closeSync(stderrFd);
     
     // Set a timeout for the claim process
     const timeout = setTimeout(() => {
@@ -194,12 +219,12 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
     let stdout = '';
     let stderr = '';
     
-      claimProcess.stdout?.on('data', (data: Buffer) => {
+    claimProcess.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString();
-      // Log important progress
+      // Log important progress - include heartbeat and timeout messages
       const lines = data.toString().split('\n').filter(line => line.trim());
       lines.forEach(line => {
-        if (line.includes('✅') || line.includes('❌') || line.includes('🎁') || line.includes('📋')) {
+        if (line.includes('[STAGE_2]') || line.includes('✅') || line.includes('❌') || line.includes('🎁') || line.includes('📋') || line.includes('⏱️') || line.includes('TIMEOUT')) {
           logger.info('First-time claim progress', {
             action: 'first_time_claim_progress',
             eightBallPoolId,
@@ -212,12 +237,27 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
     
     claimProcess.stderr?.on('data', (data: Buffer) => {
       stderr += data.toString();
-      logger.warn('First-time claim stderr', {
-        action: 'first_time_claim_stderr',
-        eightBallPoolId,
-        username,
-        stderr: data.toString().trim()
+      // Log stderr with more detail, especially for [STAGE_2] messages
+      const lines = data.toString().split('\n').filter(line => line.trim());
+      lines.forEach(line => {
+        if (line.includes('[STAGE_2]') || line.includes('TIMEOUT') || line.includes('❌')) {
+          logger.warn('First-time claim stderr (important)', {
+            action: 'first_time_claim_stderr_important',
+            eightBallPoolId,
+            username,
+            stderr: line.trim()
+          });
+        }
       });
+      // Also log full stderr for debugging
+      if (data.toString().trim()) {
+        logger.debug('First-time claim stderr (full)', {
+          action: 'first_time_claim_stderr',
+          eightBallPoolId,
+          username,
+          stderr: data.toString().trim()
+        });
+      }
     });
     
     claimProcess.on('close', (code: number | null) => {
@@ -248,6 +288,10 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
       });
     });
     
+    // Give spawn a moment to actually start before returning
+    // This ensures the process is spawned before the parent exits
+    await new Promise(resolve => setImmediate(resolve));
+    
   } catch (error) {
     logger.error('Failed to trigger first-time claim', {
       action: 'first_time_claim_error',
@@ -256,6 +300,10 @@ async function triggerFirstTimeClaim(eightBallPoolId: string, username: string):
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
+  
+  // Return immediately - don't wait for claim process to complete
+  // This allows validation script to continue and cleanup browser
+  return Promise.resolve();
 }
 
 async function validateUserRegistration(eightBallPoolId: string, username: string): Promise<void> {
@@ -291,10 +339,45 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       eightBallPoolId,
       username
     });
-    browser = await chromium.launch({ 
+    
+    // Launch browser with robust options for headless environment
+    const launchOptions: any = {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-software-rasterizer',
+        '--disable-gpu'
+      ]
+    };
+    
+    // If running in Docker, use system chromium (faster, already installed)
+    // Otherwise, Playwright will use its downloaded browsers
+    if (process.env.CHROMIUM_PATH) {
+      launchOptions.executablePath = process.env.CHROMIUM_PATH;
+      logger.info('Using system chromium from CHROMIUM_PATH', {
+        path: process.env.CHROMIUM_PATH
+      });
+    } else if (process.env.CHROME_BIN) {
+      launchOptions.executablePath = process.env.CHROME_BIN;
+      logger.info('Using system chromium from CHROME_BIN', {
+        path: process.env.CHROME_BIN
+      });
+    }
+    
+    try {
+      browser = await chromium.launch(launchOptions);
+    } catch (error: any) {
+      logger.error('Failed to launch browser', {
+        action: 'browser_launch_error',
+        eightBallPoolId,
+        username,
+        error: error.message,
+        stack: error.stack
+      });
+      throw new Error(`Failed to launch browser: ${error.message}`);
+    }
     
     page = await browser.newPage();
     logger.info('Created new page', {
@@ -308,6 +391,22 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       throw new Error('Page was not created');
     }
 
+    // Set realistic headers like manual claims to avoid detection
+    await page.setExtraHTTPHeaders({
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'sec-ch-ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"'
+    });
+
     // Navigate to shop page
     logger.info('Navigating to Daily Reward section', {
       action: 'validation_navigate',
@@ -315,18 +414,24 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       username
     });
     await page.goto('https://8ballpool.com/en/shop#daily_reward', {
-      waitUntil: 'networkidle', 
+      waitUntil: 'domcontentloaded', 
       timeout: TIMEOUTS.PAGE_NAVIGATION
     });
-    logger.info('Page loaded successfully', {
+    logger.info('Page DOM loaded, waiting for full render', {
       action: 'validation_page_loaded',
       eightBallPoolId,
       username
     });
 
+    // Wait for page to fully render (like manual claims do)
+    await page.waitForTimeout(5000);
+    console.log(`✅ [VALIDATION] Page fully loaded for ${eightBallPoolId}`);
+
     await takeScreenshot(page, `${SCREENSHOT_PATHS.SHOP_PAGE}/shop-page-${eightBallPoolId}.png`, 'Initial shop page');
+    console.log(`✅ [VALIDATION] Shop page screenshot taken for ${eightBallPoolId}`);
 
     // STEP 1: Handle login with comprehensive anti-bot logic
+    console.log(`✅ [VALIDATION] Starting comprehensive login process for ${eightBallPoolId}`);
     logger.info('Starting comprehensive login process', {
       action: 'validation_login_start',
       eightBallPoolId,
@@ -550,6 +655,7 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
     }
     
     await takeScreenshot(page!, `screenshots/id-entry/after-id-entry-${eightBallPoolId}.png`, 'After ID entry');
+    console.log(`✅ [VALIDATION] ID entry screenshot taken for ${eightBallPoolId}`);
     
     // STEP 4: Click Go button with comprehensive logic
     logger.debug('Looking for Go button with comprehensive logic', {
@@ -716,6 +822,7 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
     });
     await page!.waitForTimeout(3000); // Wait for page to respond
     await takeScreenshot(page!, `${SCREENSHOT_PATHS.GO_CLICK}/after-go-click-${eightBallPoolId}.png`, 'After Go click');
+    console.log(`✅ [VALIDATION] Go click screenshot taken for ${eightBallPoolId}`);
     
     // STEP 6: Check for invalid user indicators
     logger.debug('Checking for invalid user indicators', {
@@ -724,33 +831,42 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       username
     });
     
-    const invalidIndicators = INVALID_USER_INDICATORS;
-    
-    const pageContent = await page!.content();
-    const hasInvalidIndicator = invalidIndicators.some(indicator => 
-      pageContent.toLowerCase().includes(indicator.toLowerCase())
-    );
-    
-    // Check for red error styling on input field
-    let hasErrorStyling = false;
-    if (inputField) {
-      hasErrorStyling = await inputField.evaluate((el: HTMLElement) => {
-        const styles = window.getComputedStyle(el);
-        return (
-          styles.borderColor.includes('red') ||
-          styles.backgroundColor.includes('red') ||
-          el.classList.contains('error') ||
-          el.classList.contains('invalid') ||
-          el.classList.contains('not-valid') ||
-          el.classList.contains('is-invalid')
-        );
-      }).catch(() => false);
-    }
-    
-    // Check if login modal is still visible (indicates failure)
+    // Check if login modal is still visible FIRST (this is the strongest indicator)
+    // If modal closed, it means login likely succeeded
     const loginModalStillVisible = inputField ? await inputField.isVisible().catch(() => false) : false;
     
-    if (hasInvalidIndicator || hasErrorStyling || loginModalStillVisible) {
+    // If modal is NOT visible, prioritize that as a positive indicator
+    // Only check for invalid text if modal is still visible
+    let hasInvalidIndicator = false;
+    let hasErrorStyling = false;
+    
+    // Only do expensive checks if modal is still visible (uncertain state)
+    if (loginModalStillVisible) {
+      const invalidIndicators = INVALID_USER_INDICATORS;
+      const pageContent = await page!.content();
+      hasInvalidIndicator = invalidIndicators.some(indicator => 
+        pageContent.toLowerCase().includes(indicator.toLowerCase())
+      );
+      
+      // Check for red error styling on input field
+      if (inputField) {
+        hasErrorStyling = await inputField.evaluate((el: HTMLElement) => {
+          const styles = window.getComputedStyle(el);
+          return (
+            styles.borderColor.includes('red') ||
+            styles.backgroundColor.includes('red') ||
+            el.classList.contains('error') ||
+            el.classList.contains('invalid') ||
+            el.classList.contains('not-valid') ||
+            el.classList.contains('is-invalid')
+          );
+        }).catch(() => false);
+      }
+    }
+    
+    // Only mark as invalid if modal is visible AND there are clear error indicators
+    // If modal closed, that's a strong positive signal
+    if (loginModalStillVisible && (hasInvalidIndicator || hasErrorStyling)) {
       logger.warn('User validation failed', {
         action: 'validation_failed',
         eightBallPoolId,
@@ -777,7 +893,7 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
             correlationId: correlationId,
             timestamp: new Date().toISOString(),
             attempts: 1,
-            error: `Invalid indicators detected: ${hasInvalidIndicator ? 'invalid_text' : ''} ${hasErrorStyling ? 'error_styling' : ''} ${loginModalStillVisible ? 'modal_visible' : ''}`
+            error: `Invalid indicators detected: modal_visible=${loginModalStillVisible} ${hasInvalidIndicator ? 'invalid_text' : ''} ${hasErrorStyling ? 'error_styling' : ''}`
           },
           context: {
             hasInvalidIndicator: hasInvalidIndicator,
@@ -815,6 +931,8 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
     });
     
     const currentUrl = page!.url();
+    // Get page content if we need it for valid indicators check
+    const pageContent = await page!.content();
     const hasValidIndicators = (
       VALID_USER_INDICATORS.URL_KEYWORDS.some(keyword => currentUrl.includes(keyword)) ||
       VALID_USER_INDICATORS.PAGE_CONTENT.some(content => pageContent.includes(content)) ||
@@ -867,6 +985,7 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       }
       
       // Trigger first-time claim
+      console.log(`✅ [VALIDATION] User validated successfully, triggering first-time claim for ${eightBallPoolId}`);
       await triggerFirstTimeClaim(eightBallPoolId, username);
       
       logger.info('Validation process complete - User validated and claim triggered', {
@@ -874,6 +993,7 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
         eightBallPoolId,
         username
       });
+      console.log(`✅ [VALIDATION] Validation complete for ${eightBallPoolId}, first-time claim triggered`);
       } else {
       logger.warn('Ambiguous validation result', {
         action: 'validation_ambiguous',
@@ -937,6 +1057,10 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
     }
     
   } catch (error) {
+    console.log(`❌ [VALIDATION] Error during validation for ${eightBallPoolId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (error instanceof Error && error.stack) {
+      console.log(`❌ [VALIDATION] Stack trace: ${error.stack.substring(0, 500)}`);
+    }
     logger.error('Error during validation', {
       action: 'validation_error',
       eightBallPoolId,
@@ -997,14 +1121,65 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       username
     });
   } finally {
-    // Cleanup
+    // Cleanup - ensure browser always closes even if there were errors
+    // Use Promise.allSettled to ensure cleanup doesn't block
+    const cleanupPromises: Promise<void>[] = [];
+    
     if (page) {
-      await page.close();
+      cleanupPromises.push(
+        Promise.race([
+          page.close().catch(() => {}),
+          new Promise<void>((resolve) => setTimeout(() => {
+            logger.warn('Page close timeout, forcing continue', {
+              action: 'validation_page_close_timeout',
+              eightBallPoolId,
+              username
+            });
+            resolve();
+          }, 3000))
+        ])
+      );
     }
+    
     if (browser) {
-      await browser.close();
+      cleanupPromises.push(
+        Promise.race([
+          browser.close().catch(() => {}),
+          new Promise<void>((resolve) => setTimeout(() => {
+            logger.warn('Browser close timeout, forcing continue', {
+              action: 'validation_browser_close_timeout',
+              eightBallPoolId,
+              username
+            });
+            resolve();
+          }, 3000))
+        ])
+      );
     }
-    logger.info('Validation browser closed', {
+    
+    // Wait for cleanup with overall timeout
+    try {
+      await Promise.race([
+        Promise.allSettled(cleanupPromises),
+        new Promise<void>((resolve) => setTimeout(() => {
+          logger.warn('Cleanup overall timeout, forcing continue', {
+            action: 'validation_cleanup_overall_timeout',
+            eightBallPoolId,
+            username
+          });
+          resolve();
+        }, 5000))
+      ]);
+    } catch (error) {
+      logger.warn('Cleanup error, continuing anyway', {
+        action: 'validation_cleanup_error',
+        eightBallPoolId,
+        username,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+    
+    logger.info('Validation browser cleanup completed', {
       action: 'validation_browser_closed',
       eightBallPoolId,
       username
@@ -1047,6 +1222,15 @@ async function main(): Promise<void> {
       }
     });
     
+    // Explicitly exit to ensure process terminates
+    // Give enough time for first-time claim to spawn (if it was triggered)
+    // Use setImmediate to ensure the event loop processes any pending spawns
+    setImmediate(() => {
+      setTimeout(() => {
+        process.exit(0);
+      }, 2000); // Increased to 2 seconds to ensure spawn completes
+    });
+    
   } catch (error) {
     logger.error('Fatal error in validation main', {
       action: 'validation_main_error',
@@ -1054,7 +1238,9 @@ async function main(): Promise<void> {
       username,
       error: error instanceof Error ? error.message : 'Unknown error'
     });
-    process.exit(1);
+    setTimeout(() => {
+      process.exit(1);
+    }, 1000);
   }
 }
 

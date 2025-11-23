@@ -80,6 +80,9 @@ export class DiscordBot {
 					case "dailyreport":
 						await this.handleDailyReportCommand(interaction);
 						break;
+					case "dm-rm-rf":
+						await this.handleDmRmRfCommand(interaction);
+						break;
 					default:
 						await interaction.reply({ content: "Unknown command", ephemeral: true });
 				}
@@ -182,6 +185,126 @@ export class DiscordBot {
 		} catch (error) {
 			this.logger.error("Error in daily report command:", error);
 			await interaction.editReply({ content: "Failed to send daily report" });
+		}
+	}
+
+	private async handleDmRmRfCommand(interaction: CommandInteraction): Promise<void> {
+		// Check if user has administrator permission
+		if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+			await interaction.reply({
+				content: "❌ Only administrators can use this command.",
+				ephemeral: true
+			});
+			return;
+		}
+
+		await interaction.deferReply({ ephemeral: true });
+
+		try {
+			this.logger.info("DM rm -rf command executed", {
+				userId: interaction.user.id,
+				username: interaction.user.username,
+			});
+
+			// Get all DM channels the bot has access to
+			const dmChannels = this.client.channels.cache.filter(channel => channel.isDMBased());
+
+			if (dmChannels.size === 0) {
+				await interaction.editReply({
+					content: "✅ No DM channels found. All DMs are already clean.",
+				});
+				return;
+			}
+
+			let totalDeleted = 0;
+			let totalChannels = 0;
+			let errors = 0;
+
+			// Process each DM channel
+			for (const [channelId, channel] of dmChannels) {
+				try {
+					if (!channel.isDMBased() || !channel.messages) continue;
+
+					totalChannels++;
+
+					// Fetch all messages from this DM channel
+					let hasMore = true;
+					let lastMessageId: string | null = null;
+
+					while (hasMore) {
+						const fetchOptions: any = { limit: 100 };
+						if (lastMessageId) {
+							fetchOptions.before = lastMessageId;
+						}
+
+						const messages = await channel.messages.fetch(fetchOptions);
+
+						if (messages.size === 0) {
+							hasMore = false;
+							break;
+						}
+
+						// Filter to only bot messages
+						const botMessages = messages.filter(msg => msg.author.id === this.client.user?.id);
+
+						// Delete bot messages
+						for (const [msgId, message] of botMessages) {
+							try {
+								await message.delete();
+								totalDeleted++;
+								// Small delay to avoid rate limits
+								await new Promise(resolve => setTimeout(resolve, 100));
+							} catch (deleteError) {
+								this.logger.error("Failed to delete message", {
+									messageId: msgId,
+									error: deleteError instanceof Error ? deleteError.message : "Unknown error",
+								});
+								errors++;
+							}
+						}
+
+						// Update lastMessageId for next iteration
+						if (messages.size > 0) {
+							lastMessageId = messages.last()?.id || null;
+						} else {
+							hasMore = false;
+						}
+
+						// If we got less than 100 messages, we've reached the end
+						if (messages.size < 100) {
+							hasMore = false;
+						}
+					}
+				} catch (channelError) {
+					this.logger.error("Error processing DM channel", {
+						channelId,
+						error: channelError instanceof Error ? channelError.message : "Unknown error",
+					});
+					errors++;
+				}
+			}
+
+			const embed = new DiscordEmbedBuilder()
+				.setTitle("✅ DM Cleanup Complete")
+				.setDescription(`Deleted all bot messages from all DM channels`)
+				.addFields(
+					{ name: "DM Channels Processed", value: `${totalChannels}`, inline: true },
+					{ name: "Messages Deleted", value: `${totalDeleted}`, inline: true },
+					{ name: "Errors", value: `${errors}`, inline: true }
+				)
+				.setColor(0x00ff00)
+				.setTimestamp();
+
+			await interaction.editReply({ embeds: [embed] });
+		} catch (error) {
+			this.logger.error("Error in dm-rm-rf command", {
+				error: error instanceof Error ? error.message : "Unknown error",
+				userId: interaction.user.id,
+			});
+
+			await interaction.editReply({
+				content: "❌ An error occurred while deleting DM messages.",
+			});
 		}
 	}
 
@@ -294,6 +417,11 @@ export class DiscordBot {
 				new SlashCommandBuilder()
 					.setName("dailyreport")
 					.setDescription("Manually trigger a daily status report")
+					.setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+				
+				new SlashCommandBuilder()
+					.setName("dm-rm-rf")
+					.setDescription("Delete all bot messages from all DMs (Admin only)")
 					.setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 			];
 

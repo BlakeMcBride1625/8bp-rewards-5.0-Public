@@ -1,0 +1,115 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("VERIFICATION_DATABASE_URL")
+}
+
+model Verification {
+  discord_id      String   @id
+  username        String
+  rank_name       String
+  level_detected  Int
+  role_id_assigned String
+  verified_at     DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([discord_id])
+  @@map("verifications")
+}
+
+model ScreenshotLock {
+  id              String   @id @default(cuid())
+  screenshot_hash String   @unique
+  ocr_unique_id   String?  @unique
+  discord_user_id String
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([discord_user_id])
+  @@map("screenshot_locks")
+}
+
+enum VerificationStatus {
+  SUCCESS
+  FAILURE
+  MANUAL_REVIEW
+}
+
+model VerificationEvent {
+  id              String              @id @default(cuid())
+  discord_user_id String
+  status          VerificationStatus
+  confidence      Float?
+  ocr_unique_id   String?
+  screenshot_hash String?
+  message_id      String?
+  attachment_url  String?
+  metadata        Json?
+  created_at      DateTime            @default(now())
+
+  @@index([discord_user_id])
+  @@index([status])
+  @@map("verification_events")
+}
+
+model User {
+  discord_id  String   @id
+  username    String
+  avatar_url  String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  accounts    PoolAccount[]
+  unique_links UniqueLink[]
+
+  @@map("users")
+}
+
+model PoolAccount {
+  id                String   @id @default(cuid())
+  owner_discord_id  String
+  unique_id         String
+  level             Int
+  rank_name         String
+  verified_at       DateTime @default(now())
+  is_primary        Boolean  @default(false)
+  metadata          Json?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  owner             User     @relation(fields: [owner_discord_id], references: [discord_id], onDelete: Cascade)
+
+  @@unique([owner_discord_id, unique_id])
+  @@index([owner_discord_id])
+  @@index([unique_id])
+  @@index([level])
+  @@map("pool_accounts")
+}
+
+model UniqueLink {
+  discord_id String   @id
+  unique_id  String   @unique
+  created_at DateTime @default(now())
+
+  user       User     @relation(fields: [discord_id], references: [discord_id], onDelete: Cascade)
+
+  @@map("unique_links")
+}
+
+model BlockedUser {
+  id          String   @id @default(cuid())
+  discord_id  String   @unique
+  reason      String?
+  blocked_at  DateTime @default(now())
+  blocked_by  String
+
+  @@index([discord_id])
+  @@map("blocked_users")
+}
+

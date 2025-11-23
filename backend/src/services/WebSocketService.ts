@@ -275,6 +275,37 @@ class WebSocketService {
           room: 'vps-stats'
         });
       });
+
+      // Join user-specific screenshots room
+      socket.on('join-screenshots', (targetUserId?: string) => {
+        // Use the authenticated user's ID or the provided targetUserId
+        const roomUserId = socketWithSession.userId || targetUserId;
+        if (roomUserId) {
+          const room = `screenshots-${roomUserId}`;
+          socket.join(room);
+          logger.info('Client joined screenshots room', {
+            action: 'websocket_join_room',
+            socketId: socket.id,
+            userId: userId,
+            room: room
+          });
+        }
+      });
+
+      // Leave user-specific screenshots room
+      socket.on('leave-screenshots', (targetUserId?: string) => {
+        const roomUserId = socketWithSession.userId || targetUserId;
+        if (roomUserId) {
+          const room = `screenshots-${roomUserId}`;
+          socket.leave(room);
+          logger.info('Client left screenshots room', {
+            action: 'websocket_leave_room',
+            socketId: socket.id,
+            userId: userId,
+            room: room
+          });
+        }
+      });
     });
 
     logger.info('WebSocket service initialized');
@@ -306,6 +337,43 @@ class WebSocketService {
     logger.debug('Emitted VPS stats event', {
       action: 'websocket_emit_vps_stats',
       timestamp: stats.timestamp
+    });
+  }
+
+  public emitScreenshotUpdate(userId: string, screenshotData: {
+    eightBallPoolId: string;
+    username: string;
+    screenshotUrl: string;
+    claimedAt: string | null;
+    capturedAt?: string | null;
+    filename?: string;
+  }): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized, cannot emit screenshot update');
+      return;
+    }
+
+    this.io.to(`screenshots-${userId}`).emit('screenshot-update', screenshotData);
+    
+    logger.debug('Emitted screenshot update event', {
+      action: 'websocket_emit_screenshot_update',
+      userId: userId,
+      eightBallPoolId: screenshotData.eightBallPoolId,
+      filename: screenshotData.filename
+    });
+  }
+
+  public emitScreenshotsRefresh(userId: string): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized, cannot emit screenshots refresh');
+      return;
+    }
+
+    this.io.to(`screenshots-${userId}`).emit('screenshots-refresh');
+    
+    logger.debug('Emitted screenshots refresh event', {
+      action: 'websocket_emit_screenshots_refresh',
+      userId: userId
     });
   }
 

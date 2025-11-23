@@ -7,15 +7,16 @@ import { useAuth } from '../hooks/useAuth';
 const HomePage: React.FC = () => {
   const { isAuthenticated, isAdmin, isLoading } = useAuth();
 
-  // Redirect admins to dashboard
-  if (!isLoading && isAuthenticated && isAdmin) {
-    return <Navigate to="/admin-dashboard" replace />;
+  // Redirect authenticated non-admin users to their dashboard
+  // Admins can access the home page directly
+  if (!isLoading && isAuthenticated && !isAdmin) {
+    return <Navigate to="/user-dashboard" replace />;
   }
 
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative py-20 px-4 sm:px-6 lg:px-8">
+      <section className="relative py-24 sm:py-32 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -54,13 +55,13 @@ const HomePage: React.FC = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-white/50 dark:bg-gradient-to-br dark:from-background-dark-tertiary dark:to-background-dark-quaternary">
+      <section className="py-20 sm:py-24 px-4 sm:px-6 lg:px-8 bg-white/50 dark:bg-gradient-to-br dark:from-background-dark-tertiary dark:to-background-dark-quaternary">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.2 }}
-            className="text-center mb-12"
+            className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
               Why Choose Our System?
@@ -70,7 +71,7 @@ const HomePage: React.FC = () => {
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
             {[
               {
                 icon: Clock,
@@ -127,13 +128,13 @@ const HomePage: React.FC = () => {
       </section>
 
       {/* Featured Creators Section */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8">
+      <section className="py-20 sm:py-24 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="text-center mb-12"
+            className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
               Featured Creators
@@ -143,7 +144,7 @@ const HomePage: React.FC = () => {
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-8 lg:gap-12 max-w-5xl mx-auto">
             {/* Lewis Shoutout */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -226,13 +227,13 @@ const HomePage: React.FC = () => {
       </section>
 
       {/* How It Works Section */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8">
+      <section className="py-20 sm:py-24 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.4 }}
-            className="text-center mb-12"
+            className="text-center mb-16"
           >
             <h2 className="text-3xl font-bold text-text-primary dark:text-text-dark-primary mb-4">
               How It Works
@@ -242,7 +243,7 @@ const HomePage: React.FC = () => {
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid md:grid-cols-3 gap-8 lg:gap-12">
             {[
               {
                 step: '1',
@@ -283,7 +284,7 @@ const HomePage: React.FC = () => {
       </section>
 
       {/* CTA Section */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-white/50 dark:bg-gradient-to-br dark:from-background-dark-tertiary dark:to-background-dark-quaternary">
+      <section className="py-20 sm:py-24 px-4 sm:px-6 lg:px-8 bg-white/50 dark:bg-gradient-to-br dark:from-background-dark-tertiary dark:to-background-dark-quaternary">
         <div className="max-w-4xl mx-auto text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}

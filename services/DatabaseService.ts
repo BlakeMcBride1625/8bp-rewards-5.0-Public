@@ -1,8 +1,8 @@
 import { Pool } from 'pg';
 import mongoose from 'mongoose';
-import { Registration as PostgresRegistration, ClaimRecord as PostgresClaimRecord } from '../models/postgresql/Registration';
+import { PostgresRegistration, PostgresClaimRecord } from '../models/postgresql/Registration';
 import Registration from '../models/Registration';
-import { ClaimRecord } from '../dist/backend/models/ClaimRecord';
+import { ClaimRecord } from '../backend/src/models/ClaimRecord';
 
 export class DatabaseService {
   private static instance: DatabaseService;

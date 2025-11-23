@@ -1,18 +1,7 @@
 #!/bin/bash
 
-echo "🛑 Stopping 8BP Rewards System"
-echo "=============================="
+echo "🛑 PM2 shutdown script is deprecated."
+echo "   PM2 is no longer part of the deployment path."
 echo ""
-
-# Stop PM2 processes
-pm2 delete all 2>/dev/null || echo "No PM2 processes running"
-
-# Stop database
-# PostgreSQL runs as system service - don't stop it
-echo "PostgreSQL runs as system service (not stopping)"
-
-echo ""
-echo "✅ All services stopped"
-
-
-
+echo "👉 To stop the running Docker stack, use:"
+echo "   docker compose down"

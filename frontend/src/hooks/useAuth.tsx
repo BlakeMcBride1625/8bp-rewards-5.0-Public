@@ -10,10 +10,13 @@ interface User {
   email?: string;
 }
 
+type UserRole = 'Owner' | 'Admin' | 'Member';
+
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  role: UserRole;
   isLoading: boolean;
   login: () => void;
   logout: () => Promise<void>;
@@ -37,6 +40,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState<UserRole>('Member');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -44,9 +48,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const checkAuthStatus = async () => {
-    // Set loading to false immediately to allow app to render
-    setIsLoading(false);
-    
     try {
       // Check if user manually logged out (development mode)
       const devLoggedOut = localStorage.getItem('dev_logged_out');
@@ -54,6 +55,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setIsAuthenticated(false);
         setIsAdmin(false);
         setUser(null);
+        setIsLoading(false);
         return;
       }
       
@@ -63,16 +65,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         timeout: 5000, // 5 second timeout
       });
       
-      const { authenticated, isAdmin: adminStatus, user: userData } = response.data;
+      const { authenticated, isAdmin: adminStatus, role: userRole, user: userData } = response.data;
       
       setIsAuthenticated(authenticated);
       setIsAdmin(adminStatus);
+      setRole(userRole || 'Member');
       setUser(authenticated ? userData : null);
     } catch (error) {
       // Silently fail - user just won't be authenticated
       setIsAuthenticated(false);
       setIsAdmin(false);
+      setRole('Member');
       setUser(null);
+    } finally {
+      // Set loading to false after auth check completes
+      setIsLoading(false);
     }
   };
 
@@ -91,6 +98,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await axios.post(API_ENDPOINTS.AUTH_LOGOUT, {}, { withCredentials: true });
       setIsAuthenticated(false);
       setIsAdmin(false);
+      setRole('Member');
       setUser(null);
       
       // Redirect to home after logout (with correct base path)
@@ -100,6 +108,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Still log out locally even if backend fails
       setIsAuthenticated(false);
       setIsAdmin(false);
+      setRole('Member');
       setUser(null);
       window.location.href = '/8bp-rewards/home';
     }
@@ -109,6 +118,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     isAuthenticated,
     isAdmin,
+    role,
     isLoading,
     login,
     logout,

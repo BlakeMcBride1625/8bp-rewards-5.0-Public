@@ -1,0 +1,50 @@
+# Dockerfile for Verification Bot Service
+FROM node:20-alpine
+
+# Install dependencies for image processing and OpenSSL for Prisma
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev \
+    tesseract-ocr \
+    tesseract-ocr-data-eng \
+    openssl \
+    openssl-dev
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files for verification bot
+COPY services/verification-bot/package*.json ./services/verification-bot/
+COPY services/verification-bot/tsconfig.json ./services/verification-bot/
+
+# Install dependencies for verification bot
+WORKDIR /app/services/verification-bot
+RUN npm ci
+
+# Copy verification bot source
+COPY services/verification-bot/src ./src/
+COPY services/verification-bot/prisma ./prisma/
+# Copy config directory (ranks.json)
+COPY services/verification-bot/src/config ./src/config/
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Build TypeScript
+RUN npm run build
+
+# Create directories for logs and assets
+RUN mkdir -p /app/logs /app/assets
+
+# Switch back to verification bot directory
+WORKDIR /app/services/verification-bot
+
+# Run the bot
+CMD ["node", "dist/bot.js"]
+

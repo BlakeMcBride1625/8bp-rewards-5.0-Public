@@ -52,7 +52,7 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
       setAccessStatus(response.data);
       
       if (!response.data.isAllowed) {
-        toast.error('Access denied. You are not authorized to access VPS Monitor.');
+        toast.error('Access denied. You are not authorised to access VPS Monitor.');
         onClose();
         return;
       }
@@ -84,7 +84,7 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
     } catch (error: any) {
       console.error('Failed to request Discord code:', error);
       if (error.response?.status === 403) {
-        toast.error('Access denied. You are not authorized to access VPS Monitor.');
+        toast.error('Access denied. You are not authorised to access VPS Monitor.');
       } else {
         toast.error('Failed to send Discord code. Please try again.');
       }
@@ -110,7 +110,7 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
     } catch (error: any) {
       console.error('Failed to request Telegram code:', error);
       if (error.response?.status === 403) {
-        toast.error('Access denied. You are not authorized to access VPS Monitor.');
+        toast.error('Access denied. You are not authorised to access VPS Monitor.');
       } else {
         toast.error('Failed to send Telegram code. Please try again.');
       }
@@ -138,7 +138,7 @@ const VPSAuthModal: React.FC<VPSAuthModalProps> = ({ isOpen, onClose, onSuccess 
     } catch (error: any) {
       console.error('Failed to request email code:', error);
       if (error.response?.status === 403) {
-        toast.error('Access denied. You are not authorized to access VPS Monitor.');
+        toast.error('Access denied. You are not authorised to access VPS Monitor.');
       } else {
         toast.error('Failed to send email code. Please try again.');
       }

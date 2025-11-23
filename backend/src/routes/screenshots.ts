@@ -14,7 +14,11 @@ router.use(authenticateAdmin);
 // Get screenshot folders and their contents
 router.get('/folders', async (req, res) => {
   try {
-    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
+    // Use absolute path - screenshots are in /app/screenshots in container
+    const screenshotsDir = process.env.SCREENSHOTS_BASE_DIR || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/screenshots'
+        : path.join(__dirname, '../../../../../screenshots'));
     const folders = [
       { name: 'confirmation', displayName: 'Confirmation Images' },
       { name: 'shop-page', displayName: 'Shop Page Screenshots' },
@@ -22,7 +26,8 @@ router.get('/folders', async (req, res) => {
       { name: 'go-click', displayName: 'After Go Click Screenshots' },
       { name: 'login', displayName: 'After Login Screenshots' },
       { name: 'initial', displayName: 'Initial Screenshots' },
-      { name: 'final-page', displayName: 'Final Page Screenshots' }
+      { name: 'final-page', displayName: 'Final Page Screenshots' },
+      { name: 'validation', displayName: 'Validation Screenshots' }
     ];
 
     const folderData: Array<{
@@ -45,18 +50,28 @@ router.get('/folders', async (req, res) => {
 
       if (fs.existsSync(folderPath)) {
         const fileList = fs.readdirSync(folderPath);
-        files = fileList
+        // Limit to most recent 1000 files per folder to prevent performance issues
+        // For confirmation folder with 1500+ files, this prevents slowdown
+        const imageFiles = fileList
           .filter(file => file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg'))
+          .slice(0, 1000); // Limit to 1000 most recent files
+        
+        files = imageFiles
           .map(file => {
             const filePath = path.join(folderPath, file);
-            const stats = fs.statSync(filePath);
-            
-            return {
-              name: file,
-              size: formatFileSize(stats.size),
-              modified: stats.mtime
-            };
+            try {
+              const stats = fs.statSync(filePath);
+              return {
+                name: file,
+                size: formatFileSize(stats.size),
+                modified: stats.mtime
+              };
+            } catch (statError) {
+              // Skip files that can't be stat'd (permissions, deleted, etc.)
+              return null;
+            }
           })
+          .filter((file): file is { name: string; size: string; modified: Date } => file !== null)
           .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
       }
 
@@ -97,7 +112,7 @@ router.get('/view/:folder/:filename', async (req, res) => {
     const { folder, filename } = req.params;
     
     // Validate folder name to prevent directory traversal
-    const allowedFolders = ['final-page', 'shop-page', 'id-entry', 'go-click', 'login', 'confirmation', 'initial'];
+    const allowedFolders = ['final-page', 'shop-page', 'id-entry', 'go-click', 'login', 'confirmation', 'initial', 'validation'];
     if (!allowedFolders.includes(folder)) {
       return res.status(400).json({
         success: false,
@@ -113,7 +128,11 @@ router.get('/view/:folder/:filename', async (req, res) => {
       });
     }
 
-    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
+    // Use absolute path - screenshots are in /app/screenshots in container
+    const screenshotsDir = process.env.SCREENSHOTS_BASE_DIR || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/screenshots'
+        : path.join(__dirname, '../../../../../screenshots'));
     const imagePath = path.join(screenshotsDir, folder, filename);
 
     if (!fs.existsSync(imagePath)) {
@@ -170,7 +189,7 @@ router.post('/clear-user', async (req, res) => {
     const users = await dbService.findRegistrations();
     const user = users.find(u => 
       u.eightBallPoolId === userQuery || 
-      u.username.toLowerCase().includes(userQuery.toLowerCase())
+      u.username?.toLowerCase().includes(userQuery.toLowerCase())
     );
 
     if (!user) {
@@ -180,7 +199,11 @@ router.post('/clear-user', async (req, res) => {
       });
     }
 
-    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
+    // Use absolute path - screenshots are in /app/screenshots in container
+    const screenshotsDir = process.env.SCREENSHOTS_BASE_DIR || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/screenshots'
+        : path.join(__dirname, '../../../../../screenshots'));
     let deletedCount = 0;
 
     // Clear screenshots for this specific user
@@ -191,7 +214,8 @@ router.post('/clear-user', async (req, res) => {
       'go-click',
       'login',
       'confirmation',
-      'initial'
+      'initial',
+      'validation'
     ];
 
     for (const dir of userScreenshotDirs) {
@@ -242,7 +266,11 @@ router.post('/clear-user', async (req, res) => {
 // Clear all screenshots
 router.post('/clear-all', async (req, res) => {
   try {
-    const screenshotsDir = path.join(__dirname, '../../../../../screenshots');
+    // Use absolute path - screenshots are in /app/screenshots in container
+    const screenshotsDir = process.env.SCREENSHOTS_BASE_DIR || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/screenshots'
+        : path.join(__dirname, '../../../../../screenshots'));
     let deletedCount = 0;
 
     if (!fs.existsSync(screenshotsDir)) {
@@ -261,7 +289,8 @@ router.post('/clear-all', async (req, res) => {
       'go-click',
       'login',
       'confirmation',
-      'initial'
+      'initial',
+      'validation'
     ];
 
     for (const dir of screenshotDirs) {

@@ -4,13 +4,13 @@ const dotenv = require('dotenv');
 const cron = require('node-cron');
 const DiscordService = require('./services/discord-service');
 const DatabaseService = require('./services/database-service');
-const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton } = require('./claimer-utils');
+const { validateClaimResult, shouldSkipButtonForCounting, shouldClickButton, isButtonAlreadyClaimed } = require('./claimer-utils');
 const BrowserPool = require('./browser-pool');
 
 // ImageGenerator is optional
 let ImageGenerator;
 try {
-  ImageGenerator = require('./archive/image-generator');
+  ImageGenerator = require('./services/image-generator');
 } catch (error) {
   console.log('ℹ️ ImageGenerator not available - screenshots will be used instead');
   ImageGenerator = null;
@@ -33,7 +33,7 @@ class EightBallPoolClaimer {
     this.timeout = parseInt(process.env.TIMEOUT || '20000', 10);
     this.headless = process.env.HEADLESS !== 'false';
     this.dbConnected = false;
-    this.browserPool = new BrowserPool(6); // Max 6 concurrent browsers
+    this.browserPool = new BrowserPool(10); // Max 10 concurrent browsers
     
     // Check and create screenshot directories with proper permissions
     this.initializeScreenshotDirectories();
@@ -107,7 +107,7 @@ class EightBallPoolClaimer {
     }
   }
 
-  async saveClaimRecord(userId, claimedItems, success, error = null) {
+  async saveClaimRecord(userId, claimedItems, success, error = null, screenshotPath = null) {
     if (!this.dbConnected) {
       console.log('⚠️ Database not connected - skipping claim record save');
       return { saved: false, reason: 'no_db' };
@@ -134,7 +134,13 @@ class EightBallPoolClaimer {
         return { saved: false, reason: 'duplicate', existingClaim: existingClaims[0] };
       }
 
-      // Create claim record using DatabaseService
+      // If user already has a successful claim today, don't save failed claims (they already claimed, not a real failure)
+      if (existingClaims.length > 0 && !success) {
+        console.log(`⏭️ Skipping failed claim save - user ${userId} already has successful claim today at ${existingClaims[0].claimedAt.toLocaleTimeString()} (not a real failure)`);
+        return { saved: false, reason: 'already_claimed_today', existingClaim: existingClaims[0] };
+      }
+
+      // Create claim record using DatabaseService with screenshot path in metadata
       const claimData = {
         eightBallPoolId: userId,
         websiteUserId: userId, // Use the same ID for both fields
@@ -142,13 +148,19 @@ class EightBallPoolClaimer {
         itemsClaimed: claimedItems || [],
         error: error,
         claimedAt: new Date(),
-        schedulerRun: new Date()
+        schedulerRun: new Date(),
+        metadata: {
+          screenshotPath: screenshotPath || null,
+          confirmationImagePath: screenshotPath || null, // Also store as confirmationImagePath for compatibility
+          timestamp: new Date().toISOString()
+        }
       };
       
       console.log(`💾 Saving claim record for user ${userId}:`, {
         status: claimData.status,
         itemsCount: claimData.itemsClaimed.length,
-        success: success
+        success: success,
+        hasScreenshot: !!screenshotPath
       });
       
       await dbService.createClaimRecord(claimData);
@@ -361,8 +373,16 @@ class EightBallPoolClaimer {
       // Check for FREE buttons in Daily Reward section
       console.log('🎁 Checking Daily Reward section for FREE items...');
       let dailyItems = await this.claimFreeItems(page, userId);
-      claimedItems = claimedItems.concat(dailyItems);
-      console.log(`✅ Claimed ${dailyItems.length} items from Daily Reward section`);
+      
+      // Check if all items were already claimed
+      if (dailyItems && typeof dailyItems === 'object' && dailyItems.alreadyClaimed) {
+        console.log(`⏭️ All items already claimed in Daily Reward section`);
+        dailyItems = [];
+      } else {
+        const itemsArray = Array.isArray(dailyItems) ? dailyItems : (dailyItems?.claimedItems || []);
+        claimedItems = claimedItems.concat(itemsArray);
+        console.log(`✅ Claimed ${itemsArray.length} items from Daily Reward section`);
+      }
 
       // Wait between sections
       await page.waitForTimeout(1000);
@@ -382,10 +402,17 @@ class EightBallPoolClaimer {
       console.log('🎁 Checking Free Daily Cue Piece section for FREE items...');
       let cueItems = await this.claimFreeItems(page, userId);
       
-      // Filter out duplicate items that were already claimed
-      const uniqueCueItems = cueItems.filter(item => !claimedItems.includes(item));
-      claimedItems = claimedItems.concat(uniqueCueItems);
-      console.log(`✅ Claimed ${uniqueCueItems.length} unique items from Free Daily Cue Piece section`);
+      // Check if all items were already claimed
+      if (cueItems && typeof cueItems === 'object' && cueItems.alreadyClaimed) {
+        console.log(`⏭️ All items already claimed in Free Daily Cue Piece section`);
+        cueItems = [];
+      } else {
+        const itemsArray = Array.isArray(cueItems) ? cueItems : (cueItems?.claimedItems || []);
+        // Filter out duplicate items that were already claimed
+        const uniqueCueItems = itemsArray.filter(item => !claimedItems.includes(item));
+        claimedItems = claimedItems.concat(uniqueCueItems);
+        console.log(`✅ Claimed ${uniqueCueItems.length} unique items from Free Daily Cue Piece section`);
+      }
 
       // Take final screenshot
       screenshotPath = `screenshots/final-page/final-page-${userId}.png`;
@@ -397,8 +424,17 @@ class EightBallPoolClaimer {
 
       console.log(`✅ Claim process completed for user: ${userId}`);
       
+      // Check if all items were already claimed
+      if (claimedItems && typeof claimedItems === 'object' && claimedItems.alreadyClaimed) {
+        console.log(`⏭️ All items already claimed for user ${userId} - not saving failed record`);
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
+      }
+      
+      // Extract claimedItems array if it's an object with alreadyClaimed flag
+      const itemsArray = Array.isArray(claimedItems) ? claimedItems : (claimedItems?.claimedItems || []);
+      
       // LAYER 3: Pre-save validation - check if any items were actually claimed
-      if (claimedItems.length === 0) {
+      if (itemsArray.length === 0) {
         console.log(`⚠️ No items detected in claimedItems array for user ${userId} - this may indicate a counting issue`);
         console.log(`🔍 However, we'll still save the claim record as 'success' since the process completed without errors`);
         console.log(`🔍 This could mean: 1) Items already claimed today, 2) No free items available, 3) Website structure changed`);
@@ -406,33 +442,88 @@ class EightBallPoolClaimer {
         // Cleanup old screenshots
         await this.cleanupOldScreenshots();
         
-        // Still save a record with empty items but success status
-        const saveResult = await this.saveClaimRecord(userId, [], true);
+        // Still save a record with empty items but success status (include screenshot path)
+        const saveResult = await this.saveClaimRecord(userId, [], true, null, screenshotPath);
         return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: false };
       }
       
+      // Update claimedItems to use the array
+      claimedItems = itemsArray;
+      
       console.log(`🎉 SUCCESS: User ${userId} claimed ${claimedItems.length} items: ${claimedItems.join(', ')}`);
 
-      // Save claim record to database (with Layer 1 duplicate check)
-      const saveResult = await this.saveClaimRecord(userId, claimedItems, true);
+      // Try to create confirmation image before saving (so we can store its path)
+      let confirmationImagePath = screenshotPath;
+      if (this.imageGenerator) {
+        try {
+          const users = await this.dbService.getAllUsers();
+          const user = users.find(u => u.eightBallPoolId === userId);
+          const username = user?.username || 'Unknown User';
+          
+          const generatedPath = await this.imageGenerator.createConfirmationImage(
+            userId, 
+            username, 
+            claimedItems, 
+            screenshotPath
+          );
+          if (generatedPath) {
+            confirmationImagePath = generatedPath;
+            console.log(`✅ Confirmation image created for user ${userId}`);
+          }
+        } catch (imageError) {
+          console.log(`⚠️ Could not create confirmation image, using screenshot: ${imageError.message}`);
+        }
+      } else {
+        // ImageGenerator not available - copy final-page screenshot to confirmation directory
+        if (screenshotPath && fs.existsSync(screenshotPath)) {
+          try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const confirmationDir = 'screenshots/confirmation';
+            
+            // Ensure confirmation directory exists
+            if (!fs.existsSync(confirmationDir)) {
+              fs.mkdirSync(confirmationDir, { recursive: true });
+            }
+            
+            const confirmationPath = `${confirmationDir}/confirmation-${userId}-${timestamp}.png`;
+            fs.copyFileSync(screenshotPath, confirmationPath);
+            confirmationImagePath = confirmationPath;
+            console.log(`✅ Copied screenshot to confirmation directory: ${confirmationPath}`);
+          } catch (copyError) {
+            console.log(`⚠️ Could not copy screenshot to confirmation directory: ${copyError.message}`);
+            // Fallback to original screenshot path
+            confirmationImagePath = screenshotPath;
+          }
+        }
+      }
+
+      // Save claim record to database (with Layer 1 duplicate check) - include confirmation image path if available
+      const saveResult = await this.saveClaimRecord(userId, claimedItems, true, null, confirmationImagePath || screenshotPath);
 
       // Handle duplicate detection from Layer 1
-      if (saveResult && !saveResult.saved && saveResult.reason === 'duplicate') {
+      const isDuplicate = saveResult && !saveResult.saved && saveResult.reason === 'duplicate';
+      if (isDuplicate) {
         console.log(`⏭️ Duplicate detected by database layer - claim already recorded today`);
-        
-        // Don't send Discord confirmation for duplicates - they already got their message
-        console.log('⏭️ Skipping Discord notification for duplicate claim');
-        
-        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
+        console.log('💡 Note: User already has a claim record today, but will still attempt Discord notification');
+        console.log('💡 Discord service will handle its own duplicate check (within 2 minutes)');
       }
       
       // Cleanup old screenshots
       await this.cleanupOldScreenshots();
       
-      // Send Discord confirmation
+      // Send Discord confirmation - even if database save was duplicate, attempt Discord
+      // The Discord service has its own duplicate check (within 2 minutes) that will prevent
+      // duplicate messages from the same claim attempt, but allow new claims later in the day
       if (this.discordService && this.discordService.isReady) {
         console.log('📤 Sending Discord confirmation...');
         await this.sendDiscordConfirmation(userId, screenshotPath, claimedItems);
+      } else {
+        console.log('⚠️ Discord service not ready, skipping confirmation');
+      }
+
+      // Return result - include alreadyClaimed flag if duplicate was detected
+      if (isDuplicate) {
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
       }
 
       return { success: true, claimedItems, screenshotPath };
@@ -440,14 +531,31 @@ class EightBallPoolClaimer {
     } catch (error) {
       console.error(`❌ Error during claim process for ${userId}:`, error.message);
       
+      // Check if error is due to already claimed items (not a real failure)
+      const errorMessage = error.message || '';
+      const isAlreadyClaimedError = errorMessage.toLowerCase().includes('already claimed') ||
+                                    errorMessage.toLowerCase().includes('already collected') ||
+                                    errorMessage.toLowerCase().includes('items already claimed');
+      
+      if (isAlreadyClaimedError) {
+        console.log(`⏭️ Error indicates items already claimed - not saving failed record`);
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
+      }
+      
       // Check if it's a screenshot-related error
       if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
         console.warn(`⚠️ Permission error detected for ${userId} - this may be related to screenshot saving`);
         console.warn(`⚠️ Consider checking screenshot directory permissions`);
       }
       
-      // Save failed claim record to database
-      await this.saveClaimRecord(userId, [], false, error.message);
+      // Save failed claim record to database only for actual errors (network, page errors, etc.)
+      const saveResult = await this.saveClaimRecord(userId, [], false, error.message, screenshotPath);
+      
+      // If save was skipped due to user already having success today, treat as success
+      if (saveResult && !saveResult.saved && saveResult.reason === 'already_claimed_today') {
+        console.log(`⏭️ User ${userId} already has successful claim today - not a real failure`);
+        return { success: true, claimedItems: [], screenshotPath, alreadyClaimed: true };
+      }
       
       return { success: false, error: error.message };
     } finally {
@@ -813,13 +921,45 @@ class EightBallPoolClaimer {
 
       console.log(`Found ${uniqueButtons.length} unique FREE buttons`);
 
+      // Check if all buttons are already claimed before attempting to claim
+      let allButtonsClaimed = true;
+      let claimableButtonsCount = 0;
+      
+      if (uniqueButtons.length > 0) {
+        for (const buttonInfo of uniqueButtons) {
+          try {
+            const buttonText = buttonInfo.text || '';
+            const isDisabled = await buttonInfo.element.isDisabled().catch(() => false);
+            const isAlreadyClaimed = isButtonAlreadyClaimed(buttonText);
+            
+            if (!isDisabled && !isAlreadyClaimed) {
+              allButtonsClaimed = false;
+              claimableButtonsCount++;
+            }
+          } catch (error) {
+            // If we can't check, assume it's claimable
+            allButtonsClaimed = false;
+            claimableButtonsCount++;
+          }
+        }
+        
+        // If all buttons are already claimed, return early with success flag
+        if (allButtonsClaimed && uniqueButtons.length > 0) {
+          console.log('✅ All items are already claimed - no new items to claim');
+          console.log('⏭️ Skipping claim attempt (items already claimed, not a failure)');
+          return { claimedItems: [], alreadyClaimed: true };
+        }
+        
+        console.log(`🎯 Found ${claimableButtonsCount} claimable buttons out of ${uniqueButtons.length} total`);
+      }
+
       if (uniqueButtons.length === 0) {
         console.log('❌ No FREE buttons found - may already be claimed or not available');
         
         // Count total buttons for debugging
         const allButtons = await page.locator('button').all();
         console.log(`Found ${allButtons.length} total buttons on page`);
-        return claimedItems;
+        return { claimedItems: [], alreadyClaimed: true };
       }
 
       // Click each FREE button (after checking if it's claimable)
@@ -1105,7 +1245,30 @@ class EightBallPoolClaimer {
           // Fallback to screenshot if image generation fails
         }
       } else {
-        console.log('ℹ️ ImageGenerator not available, using screenshot for Discord confirmation');
+        // ImageGenerator not available - copy final-page screenshot to confirmation directory
+        if (screenshotPath && fs.existsSync(screenshotPath)) {
+          try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const confirmationDir = 'screenshots/confirmation';
+            
+            // Ensure confirmation directory exists
+            if (!fs.existsSync(confirmationDir)) {
+              fs.mkdirSync(confirmationDir, { recursive: true });
+            }
+            
+            const confirmationPath = `${confirmationDir}/confirmation-${userId}-${timestamp}.png`;
+            fs.copyFileSync(screenshotPath, confirmationPath);
+            confirmationImagePath = confirmationPath;
+            console.log(`✅ Copied screenshot to confirmation directory: ${confirmationPath}`);
+          } catch (copyError) {
+            console.log(`⚠️ Could not copy screenshot to confirmation directory: ${copyError.message}`);
+            console.log('ℹ️ Using original screenshot path for Discord confirmation');
+            // Fallback to original screenshot path
+            confirmationImagePath = screenshotPath;
+          }
+        } else {
+          console.log('ℹ️ ImageGenerator not available and no screenshot found');
+        }
       }
 
       // Send Discord confirmation (will use screenshot if confirmation image not available)
@@ -1140,7 +1303,7 @@ class EightBallPoolClaimer {
     console.log(`🚀 Starting 8ball pool reward claimer for ${this.userIds.length} users...`);
     console.log(`👥 Users: ${this.userIds.join(', ')}`);
     
-    console.log(`\n🚀 Running ${this.userIds.length} claims with BROWSER POOL (max 6 concurrent browsers)!`);
+    console.log(`\n🚀 Running ${this.userIds.length} claims with BROWSER POOL (max 10 concurrent browsers)!`);
     console.log(`📊 Browser Pool Status: ${this.browserPool.getStatus().activeBrowsers}/${this.browserPool.getStatus().maxConcurrent} active, ${this.browserPool.getStatus().queued} queued`);
 
     // Process all users with browser pool limiting! 🚀
@@ -1194,6 +1357,36 @@ class EightBallPoolClaimer {
     console.log('   - 06:00 (6:00 AM) UTC');
     console.log('   - 12:00 (12:00 PM noon) UTC');
     console.log('   - 18:00 (6:00 PM) UTC');
+    console.log('🧹 Channel cleanup will run 2 minutes before each claim');
+    
+    // Schedule channel cleanup 2 minutes before each claim (23:58, 05:58, 11:58, 17:58 UTC)
+    cron.schedule('58 23 * * *', async () => {
+      console.log('\n🧹 23:58 UTC - Cleaning up old bot messages from rewards channel...');
+      if (this.discordService && this.discordService.isReady) {
+        await this.discordService.clearOldRewardsChannelMessages();
+      }
+    });
+
+    cron.schedule('58 5 * * *', async () => {
+      console.log('\n🧹 05:58 UTC - Cleaning up old bot messages from rewards channel...');
+      if (this.discordService && this.discordService.isReady) {
+        await this.discordService.clearOldRewardsChannelMessages();
+      }
+    });
+
+    cron.schedule('58 11 * * *', async () => {
+      console.log('\n🧹 11:58 UTC - Cleaning up old bot messages from rewards channel...');
+      if (this.discordService && this.discordService.isReady) {
+        await this.discordService.clearOldRewardsChannelMessages();
+      }
+    });
+
+    cron.schedule('58 17 * * *', async () => {
+      console.log('\n🧹 17:58 UTC - Cleaning up old bot messages from rewards channel...');
+      if (this.discordService && this.discordService.isReady) {
+        await this.discordService.clearOldRewardsChannelMessages();
+      }
+    });
     
     // Schedule at 00:00 (midnight) UTC
     cron.schedule('0 0 * * *', async () => {

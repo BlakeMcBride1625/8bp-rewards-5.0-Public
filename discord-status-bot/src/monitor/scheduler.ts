@@ -2,23 +2,21 @@ import { Client, TextChannel } from "discord.js";
 import { ServiceChecker } from "./checkService";
 import { EmbedBuilder } from "./buildEmbed";
 import { BotConfig } from "../utils/env";
-import { ServiceCheckResult, StatusSummary, AlertData, DailyReportData, ServiceStatus } from "../types/service";
+import { ServiceCheckResult, StatusSummary, DailyReportData, ServiceStatus } from "../types/service";
 import { Logger } from "../utils/logger";
-import { WebhookService } from "../utils/webhook";
 
 export class Scheduler {
 	private client: Client;
 	private serviceChecker: ServiceChecker;
 	private embedBuilder: EmbedBuilder;
-	private webhookService?: WebhookService;
 	private config: BotConfig;
 	private logger: Logger;
 	
 	private checkInterval: NodeJS.Timeout | null = null;
 	private dailyReportInterval: NodeJS.Timeout | null = null;
-	private previousDailyMessageId: string | null = null;
 	private lastServiceStates: Map<string, "online" | "slow" | "offline"> = new Map();
 	private serviceDownTime: Map<string, Date> = new Map();
+	private statusMessageId: string | null = null; // Main status message ID
 
 	constructor(client: Client, serviceChecker: ServiceChecker, embedBuilder: EmbedBuilder, config: BotConfig) {
 		this.client = client;
@@ -26,12 +24,6 @@ export class Scheduler {
 		this.embedBuilder = embedBuilder;
 		this.config = config;
 		this.logger = Logger.getInstance();
-		
-		// Initialize webhook service if URL is provided
-		if (config.webhookUrl) {
-			this.webhookService = new WebhookService(config.webhookUrl);
-			this.logger.info("Webhook service initialized");
-		}
 	}
 
 	public start(): void {
@@ -99,83 +91,109 @@ export class Scheduler {
 	}
 
 	private async processServiceResults(results: ServiceCheckResult[]): Promise<void> {
-		const alerts: AlertData[] = [];
+		let hasStateChange = false;
 		
 		for (const result of results) {
 			const previousState = this.lastServiceStates.get(result.name);
 			const currentState = result.status;
 			
-			// Update last known state
-			this.lastServiceStates.set(result.name, currentState);
-			
 			// Check for state changes
 			if (previousState && previousState !== currentState) {
+				hasStateChange = true;
+				
 				if (currentState === "offline") {
 					// Service went down
 					this.serviceDownTime.set(result.name, result.timestamp);
-					const serviceStatus = this.convertToServiceStatus(result);
-					alerts.push({
-						type: "service_down",
-						services: [serviceStatus],
-						timestamp: result.timestamp,
-						message: `Service ${result.name} is now offline`
-					});
 				} else if (previousState === "offline" && (currentState === "online" || currentState === "slow")) {
 					// Service came back online
-					const downTime = this.serviceDownTime.get(result.name);
-					const duration = downTime ? this.formatDuration(result.timestamp.getTime() - downTime.getTime()) : "unknown";
-					
 					this.serviceDownTime.delete(result.name);
-					
-					if (this.config.notifyRestore) {
-						const serviceStatus = this.convertToServiceStatus(result);
-						alerts.push({
-							type: "service_restored",
-							services: [serviceStatus],
-							timestamp: result.timestamp,
-							message: `Service ${result.name} is back online (was down for ${duration})`
-						});
-					}
 				}
 			}
+			
+			// Update last known state
+			this.lastServiceStates.set(result.name, currentState);
 		}
 		
-		// Check for multiple services down
-		const offlineServices = results.filter(r => r.status === "offline");
-		if (offlineServices.length >= 3) {
-			const serviceStatuses = offlineServices.map(r => this.convertToServiceStatus(r));
-			alerts.push({
-				type: "multiple_down",
-				services: serviceStatuses,
-				timestamp: new Date(),
-				message: `Multiple services are offline (${offlineServices.length} services down)`
-			});
-		}
-		
-		// Send alerts
-		for (const alert of alerts) {
-			await this.sendAlert(alert);
+		// If there's a state change, update the main status message instead of sending alerts
+		if (hasStateChange) {
+			await this.updateStatusMessage(results);
 		}
 	}
 
-	private async sendAlert(alert: AlertData): Promise<void> {
+	private async updateStatusMessage(results: ServiceCheckResult[]): Promise<void> {
 		try {
-			const embed = this.embedBuilder.buildAlertEmbed(alert);
+			// Get current service statuses
+			const serviceStatuses = results.map(r => this.convertToServiceStatus(r));
+			const summary = this.calculateSummary(results);
 			
-			if (this.webhookService) {
-				await this.webhookService.sendEmbed(embed);
+			const reportData: DailyReportData = {
+				summary,
+				services: serviceStatuses,
+				timestamp: new Date(),
+				previousMessageId: this.statusMessageId || undefined
+			};
+			
+			const embed = this.embedBuilder.buildDailyReportEmbed(reportData);
+			
+			// Always use Discord channel for message editing (webhooks can't edit)
+			const channel = await this.getStatusChannel();
+			if (!channel) return;
+			
+			// Always try to edit the existing message - never create new ones
+			if (this.statusMessageId) {
+				try {
+					// Try to edit the existing status message
+					const statusMessage = await channel.messages.fetch(this.statusMessageId);
+					await statusMessage.edit({ embeds: [embed] });
+					this.logger.info("Status message updated successfully");
+				} catch (error) {
+					// If message doesn't exist, try to find the last message from this bot
+					this.logger.warn("Could not edit status message, searching for existing message:", error);
+					await this.findAndSetStatusMessage(channel, embed);
+				}
 			} else {
-				const channel = await this.getStatusChannel();
-				if (!channel) return;
-				await channel.send({ embeds: [embed] });
+				// No message ID stored - find existing message or create one
+				await this.findAndSetStatusMessage(channel, embed);
 			}
 			
-			this.logger.alert(alert.type, alert.services.map(s => s.name));
-			
 		} catch (error) {
-			this.logger.error("Failed to send alert:", error);
+			this.logger.error("Failed to update status message:", error);
 		}
 	}
+
+	private async findAndSetStatusMessage(channel: TextChannel, embed: any): Promise<void> {
+		try {
+			// Search for the last message from this bot (check last 50 messages)
+			const messages = await channel.messages.fetch({ limit: 50 });
+			const botMessages = messages.filter(msg => {
+				if (!this.client.user) return false;
+				return msg.author.id === this.client.user.id && 
+					msg.embeds.length > 0 &&
+					msg.embeds[0]?.footer?.text === "Service monitoring system";
+			});
+			
+			if (botMessages.size > 0) {
+				// Found existing message - use the most recent one
+				const lastMessage = botMessages.first();
+				if (lastMessage) {
+					this.statusMessageId = lastMessage.id;
+					await lastMessage.edit({ embeds: [embed] });
+					this.logger.info("Found and updated existing status message");
+					return;
+				}
+			}
+			
+			// No existing message found - create one (only if we don't have a message ID)
+			if (!this.statusMessageId) {
+				const message = await channel.send({ embeds: [embed] });
+				this.statusMessageId = message.id;
+				this.logger.info("Created new status message (first time)");
+			}
+		} catch (error) {
+			this.logger.error("Failed to find or create status message:", error);
+		}
+	}
+
 
 	private async sendDailyReport(): Promise<void> {
 		try {
@@ -190,7 +208,7 @@ export class Scheduler {
 				summary,
 				services: serviceStatuses,
 				timestamp: new Date(),
-				previousMessageId: this.previousDailyMessageId || undefined
+				previousMessageId: this.statusMessageId || undefined
 			};
 			
 			const embed = this.embedBuilder.buildDailyReportEmbed(reportData);
@@ -199,24 +217,21 @@ export class Scheduler {
 			const channel = await this.getStatusChannel();
 			if (!channel) return;
 			
-			if (this.previousDailyMessageId) {
+			// Always try to edit the existing message - never create new ones
+			if (this.statusMessageId) {
 				try {
 					// Try to edit the existing message
-					const previousMessage = await channel.messages.fetch(this.previousDailyMessageId);
-					await previousMessage.edit({ embeds: [embed] });
+					const statusMessage = await channel.messages.fetch(this.statusMessageId);
+					await statusMessage.edit({ embeds: [embed] });
 					this.logger.info("Status update edited successfully");
 				} catch (error) {
-					this.logger.warn("Could not edit previous message, sending new one:", error);
-					// If editing fails, send a new message
-					const message = await channel.send({ embeds: [embed] });
-					this.previousDailyMessageId = message.id;
-					this.logger.info("Status update sent successfully (new message)");
+					// If message doesn't exist, try to find the last message from this bot
+					this.logger.warn("Could not edit status message, searching for existing message:", error);
+					await this.findAndSetStatusMessage(channel, embed);
 				}
 			} else {
-				// Send new message
-				const message = await channel.send({ embeds: [embed] });
-				this.previousDailyMessageId = message.id;
-				this.logger.info("Status update sent successfully");
+				// No message ID stored - find existing message or create one
+				await this.findAndSetStatusMessage(channel, embed);
 			}
 			
 			this.logger.dailyReport({
@@ -272,22 +287,6 @@ export class Scheduler {
 		}
 	}
 
-	private formatDuration(ms: number): string {
-		const seconds = Math.floor(ms / 1000);
-		const minutes = Math.floor(seconds / 60);
-		const hours = Math.floor(minutes / 60);
-		const days = Math.floor(hours / 24);
-		
-		if (days > 0) {
-			return `${days}d ${hours % 24}h ${minutes % 60}m`;
-		} else if (hours > 0) {
-			return `${hours}h ${minutes % 60}m`;
-		} else if (minutes > 0) {
-			return `${minutes}m ${seconds % 60}s`;
-		} else {
-			return `${seconds}s`;
-		}
-	}
 
 	private convertToServiceStatus(result: ServiceCheckResult): ServiceStatus {
 		const uptimePercentage = this.serviceChecker.getUptimePercentage(result.name);

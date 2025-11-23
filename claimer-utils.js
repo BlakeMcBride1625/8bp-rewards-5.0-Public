@@ -108,5 +108,6 @@ async function shouldClickButton(button, buttonText, logger) {
 module.exports = {
   validateClaimResult,
   shouldSkipButtonForCounting,
-  shouldClickButton
+  shouldClickButton,
+  isButtonAlreadyClaimed
 };

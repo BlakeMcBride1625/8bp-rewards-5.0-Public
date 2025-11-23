@@ -30,7 +30,7 @@ class DatabaseService {
           port: process.env.POSTGRES_PORT || 5432,
           database: process.env.POSTGRES_DB || '8bp_rewards',
           user: process.env.POSTGRES_USER || 'admin',
-          password: process.env.POSTGRES_PASSWORD || '192837DB25',
+          password: process.env.POSTGRES_PASSWORD || '',
           ssl: process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: false } : false
         });
 
@@ -147,6 +147,74 @@ class DatabaseService {
         claimedAt: row.claimed_at,
         metadata: typeof row.metadata === 'object' ? row.metadata : JSON.parse(row.metadata || '{}')
       }));
+    } finally {
+      client.release();
+    }
+  }
+
+  async cleanupFailedClaims() {
+    if (!this.isConnected || !this.pool) {
+      throw new Error('Database not connected');
+    }
+
+    const client = await this.pool.connect();
+    let claimResultCount = 0;
+    let logResultCount = 0;
+    let validationResultCount = 0;
+
+    try {
+      await client.query('BEGIN');
+
+      const claimResult = await client.query(
+        `DELETE FROM claim_records WHERE status = 'failed'`
+      );
+      claimResultCount = claimResult.rowCount ?? 0;
+
+      const logResult = await client.query(
+        `
+          DELETE FROM log_entries
+          WHERE metadata->>'action' IN ('claim_failed', 'failed_claim')
+             OR (
+               metadata->>'action' = 'claim'
+               AND metadata->>'success' = 'false'
+             )
+        `
+      );
+      logResultCount = logResult.rowCount ?? 0;
+
+      try {
+        const validationResult = await client.query(
+          `
+            DELETE FROM validation_logs
+            WHERE source_module IN ('claimer', 'scheduler', 'first-time-claim')
+              AND (
+                validation_result->>'isValid' = 'false'
+                OR validation_result->>'status' = 'failed'
+              )
+          `
+        );
+        validationResultCount = validationResult.rowCount ?? 0;
+      } catch (validationError) {
+        console.warn('⚠️ Validation logs cleanup skipped:', validationError.message || validationError);
+      }
+
+      await client.query('COMMIT');
+
+      console.log('🧹 Failed claims cleanup complete', {
+        removedClaimRecords: claimResultCount,
+        removedLogEntries: logResultCount,
+        removedValidationLogs: validationResultCount
+      });
+
+      return {
+        removedClaimRecords: claimResultCount,
+        removedLogEntries: logResultCount,
+        removedValidationLogs: validationResultCount
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Failed to cleanup failed claims:', error.message || error);
+      throw error;
     } finally {
       client.release();
     }

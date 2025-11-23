@@ -2,6 +2,7 @@ import express from 'express';
 import passport from 'passport';
 import { Strategy as DiscordStrategy } from 'passport-discord';
 import { logger } from '../services/LoggerService';
+import { getUserRole } from '../utils/roles';
 import https from 'https';
 import http from 'http';
 import axios from 'axios';
@@ -32,18 +33,7 @@ passport.use(new DiscordStrategy({
   httpsAgent: httpsAgent
 } as any, async (accessToken: string, refreshToken: string, profile: any, done: (error: any, user?: any) => void) => {
   try {
-    // Check if user is in allowed admins list
-    const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
-    
-    if (!allowedAdmins.includes(profile.id)) {
-      logger.warn('Unauthorized Discord OAuth attempt', {
-        action: 'oauth_unauthorized',
-        discordId: profile.id,
-        username: profile.username
-      });
-      return done(null, false);
-    }
-
+    // Allow all Discord users (guild membership check happens in callback)
     logger.info('Discord OAuth successful', {
       action: 'oauth_success',
       discordId: profile.id,
@@ -91,7 +81,8 @@ router.get('/discord/callback',
         error: req.query.error,
         errorDescription: req.query.error_description
       });
-      return res.redirect('/8bp-rewards/?error=oauth_failed');
+      const publicUrl = process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk';
+      return res.redirect(`${publicUrl}/8bp-rewards/?error=oauth_failed`);
     }
     
     // If no code, redirect to failure
@@ -99,7 +90,7 @@ router.get('/discord/callback',
       logger.warn('Discord OAuth callback missing code', {
         action: 'oauth_missing_code'
       });
-      return res.redirect('/8bp-rewards/?error=oauth_failed');
+      return res.redirect(`${process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk'}/8bp-rewards/?error=oauth_failed`);
     }
     
     // Manual token exchange (workaround for Docker network issues)
@@ -146,18 +137,49 @@ router.get('/discord/callback',
       
       const profile = userResponse.data;
       
-      // Check if user is allowed admin
-      const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
-      const isAdmin = allowedAdmins.includes(profile.id);
+      // Check if user is in Discord server (for user dashboard access)
+      const guildId = process.env.DISCORD_GUILD_ID;
+      const botToken = process.env.DISCORD_TOKEN;
+      let isInServer = false;
       
-      if (!isAdmin) {
-        logger.warn('Unauthorized Discord OAuth attempt', {
-          action: 'oauth_unauthorized',
+      if (guildId && botToken) {
+        try {
+          const memberResponse = await axios.get(
+            `https://discord.com/api/v10/guilds/${guildId}/members/${profile.id}`,
+            {
+              headers: {
+                'Authorization': `Bot ${botToken}`
+              },
+              validateStatus: (status) => status < 500
+            }
+          );
+          isInServer = memberResponse.status === 200;
+        } catch (error) {
+          logger.warn('Failed to check Discord guild membership during OAuth', {
+            action: 'oauth_guild_check_failed',
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+          // Allow login even if guild check fails (fallback)
+          isInServer = true;
+        }
+      } else {
+        // If no guild ID set, allow all users
+        isInServer = true;
+      }
+      
+      if (!isInServer) {
+        logger.warn('User not in Discord server during OAuth', {
+          action: 'oauth_user_not_in_guild',
           discordId: profile.id,
           username: profile.username
         });
-        return res.redirect('/8bp-rewards/home?error=oauth_unauthorized');
+        const homeUrl = process.env.HOME_URL || '/8bp-rewards/home';
+        return res.redirect(`${homeUrl}?error=not_in_server`);
       }
+      
+      // Check if user is admin
+      const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
+      const isAdmin = allowedAdmins.includes(profile.id);
       
       // Set user in session manually
       (req as any).user = profile;
@@ -167,23 +189,50 @@ router.get('/discord/callback',
             action: 'oauth_session_error',
             error: err.message
           });
-          return res.redirect('/8bp-rewards/home?error=oauth_session_failed');
+          const baseUrl = process.env.PUBLIC_URL || process.env.HOME_URL || 'https://8ballpool.website';
+          const homeUrl = `${baseUrl}/8bp-rewards/home`;
+          return res.redirect(`${homeUrl}?error=oauth_session_failed`);
         }
         
-        logger.info('Discord OAuth successful (manual)', {
-          action: 'oauth_callback_success_manual',
-          userId: profile.id,
-          username: profile.username,
-          isAdmin
+        // Save session before redirecting
+        req.session.save((saveErr: any) => {
+          if (saveErr) {
+            logger.error('Session save error', {
+              action: 'oauth_session_save_error',
+              error: saveErr.message
+            });
+          }
+          
+          logger.info('Discord OAuth successful (manual)', {
+            action: 'oauth_callback_success_manual',
+            userId: profile.id,
+            username: profile.username,
+            isAdmin,
+            isInServer
+          });
+          
+          // Redirect based on user type
+          // Use full URL to ensure proper redirect
+          const baseUrl = process.env.PUBLIC_URL || process.env.HOME_URL || 'https://8ballpool.website';
+          const redirectPath = isAdmin 
+            ? (process.env.DASHBOARD_SELECTION_URL || '/8bp-rewards/dashboard-selection')
+            : (process.env.USER_DASHBOARD_URL || '/8bp-rewards/user-dashboard');
+          
+          // Ensure redirectPath is a full URL or starts with /
+          const redirectUrl = redirectPath.startsWith('http') 
+            ? redirectPath 
+            : `${baseUrl}${redirectPath}`;
+          
+          logger.info('Redirecting user after login', {
+            action: 'oauth_redirect',
+            userId: profile.id,
+            isAdmin,
+            redirectUrl,
+            sessionId: req.sessionID
+          });
+          
+          return res.redirect(redirectUrl);
         });
-        
-        // If user is admin, redirect to admin dashboard
-        // If not admin, redirect to home (shouldn't happen due to check above)
-        const redirectUrl = isAdmin 
-          ? '/8bp-rewards/admin-dashboard'
-          : '/8bp-rewards/home';
-        
-        return res.redirect(redirectUrl);
       });
       
     } catch (error: any) {
@@ -196,7 +245,8 @@ router.get('/discord/callback',
       });
       
       // Redirect to error page
-      return res.redirect('/8bp-rewards/?error=oauth_failed');
+      const publicUrl = process.env.PUBLIC_URL || 'https://8bp.epildevconnect.uk';
+      return res.redirect(`${publicUrl}/8bp-rewards/?error=oauth_failed`);
     }
   }
 );
@@ -262,10 +312,12 @@ router.post('/logout', (req, res): void => {
     if (process.env.NODE_ENV === 'development') {
       const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
       const devAdminId = allowedAdmins[0] || '850726663289700373'; // Use first admin or your ID
+      const role = getUserRole(devAdminId);
       
       res.json({
         authenticated: true,
         isAdmin: true,
+        role,
         user: {
           id: devAdminId,
           username: 'epildev',
@@ -280,12 +332,14 @@ router.post('/logout', (req, res): void => {
   
   if (isAuthenticated) {
     const user = req.user as any;
+    const role = getUserRole(user.id);
     const allowedAdmins = process.env.ALLOWED_ADMINS?.split(',') || [];
-    const isAdmin = allowedAdmins.includes(user.id);
+    const isAdmin = allowedAdmins.includes(user.id) || role === 'Owner' || role === 'Admin';
     
     res.json({
       authenticated: true,
       isAdmin,
+      role,
       user: {
         id: user.id,
         username: user.username,
@@ -297,6 +351,7 @@ router.post('/logout', (req, res): void => {
     res.json({
       authenticated: false,
       isAdmin: false,
+      role: 'Member',
       user: null
     });
   }
