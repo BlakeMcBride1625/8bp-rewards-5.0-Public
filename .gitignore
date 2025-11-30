@@ -75,12 +75,38 @@ downloads/
 # Docker
 .docker/
 
-# Screenshots and images (keep templates, ignore generated ones)
-*.png
-*.jpg
-*.jpeg
-!*template*
-!*example*
+# Screenshots and images (exclude generated content, keep assets)
+# Exclude screenshot directories (generated during claims)
+screenshots/*
+backend/screenshots/*
+logs/*.png
+logs/*.jpg
+
+# Exclude user-uploaded content
+uploads/*.png
+uploads/*.jpg
+uploads/*.jpeg
+!uploads/.gitkeep
+
+# Exclude verification bot generated screenshots
+services/verification-bot/screenshots/*
+assets/images/*.png
+assets/images/*.jpg
+!assets/images/*example*
+!assets/images/*template*
+
+# Keep all frontend assets (logos, avatars, icons, etc.)
+!frontend/**/*.png
+!frontend/**/*.jpg
+!frontend/**/*.jpeg
+!frontend/**/*.svg
+!frontend/**/*.webp
+!frontend/**/*.ico
+
+# Keep discord bot emoji assets
+!discord-status-bot/assets/**/*.png
+!discord-status-bot/assets/**/*.jpg
+!discord-status-bot/assets/**/*.webp
 
 # Test files
 test-*.js
