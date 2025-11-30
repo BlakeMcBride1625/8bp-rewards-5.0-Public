@@ -101,12 +101,12 @@ router.get('/scheduler', async (req, res): Promise<void> => {
       return;
     } catch (importError) {
       // If import fails, return basic status
-    res.json({
+      res.json({
         status: 'unknown',
         message: 'Scheduler service unavailable',
-      schedule: '00:00, 06:00, 12:00, 18:00 UTC',
-      timezone: 'UTC'
-    });
+        schedule: '00:00, 06:00, 12:00, 18:00 UTC',
+        timezone: 'UTC'
+      });
       return;
     }
 
@@ -226,7 +226,13 @@ router.get('/claimers', async (req, res) => {
       { name: 'first-time-claim', file: 'first-time-claim.js' }
     ];
     
-    const status = [];
+    const status: Array<{
+      name: string;
+      file: string;
+      exists: boolean;
+      running: boolean;
+      pid: number | null;
+    }> = [];
     
     for (const claimer of claimers) {
       const filePath = path.join(process.cwd(), claimer.file);
@@ -234,7 +240,7 @@ router.get('/claimers', async (req, res) => {
       
       // Check if process is running
       let isRunning = false;
-      let pid = null;
+      let pid: string | null = null;
       try {
         const { stdout } = await execAsync(`pgrep -f "${claimer.file}" || echo ""`);
         if (stdout.trim().length > 0) {

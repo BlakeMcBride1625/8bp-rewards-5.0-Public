@@ -1,17 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { Trophy, Medal, TrendingUp, Clock, Filter, Search, AlertTriangle } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 import Skeleton from '../components/Skeleton';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 interface LeaderboardEntry {
   rank: number;
   user_id: string; // username from registration or verification
-  username: string;
+  username: string; // Computed username (respects Discord toggle)
   eightBallPoolId: string;
   account_level?: number | null;
   account_rank?: string | null;
+  discord_id?: string | null;
+  avatarUrl?: string | null; // Computed avatar URL (respects priority)
   totalClaims: number;
   successfulClaims: number;
   failedClaims: number;
@@ -36,6 +39,47 @@ const LeaderboardPage: React.FC = () => {
   const [limit, setLimit] = useState(10);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const [avatarRefreshKey, setAvatarRefreshKey] = useState<number>(Date.now());
+  const { socket } = useWebSocket({ autoConnect: true });
+
+  // Get avatar display - use avatarUrl from API if available, otherwise fallback
+  const getAvatarDisplay = (entry: LeaderboardEntry) => {
+    if (entry.avatarUrl) {
+      // Use the computed avatarUrl from the backend (respects priority)
+      return (
+        <img
+          key={`leaderboard-avatar-${entry.eightBallPoolId}-${avatarRefreshKey}-${Date.now()}`}
+          src={`${entry.avatarUrl}?v=${avatarRefreshKey}&t=${Date.now()}&cb=${Math.random()}`}
+          alt={entry.username || entry.user_id}
+          className="w-8 h-8 rounded-full object-cover border-2 border-white dark:border-background-dark-secondary"
+          onLoad={() => {
+            console.log('Leaderboard avatar loaded:', entry.avatarUrl);
+          }}
+          onError={(e) => {
+            console.error('Leaderboard avatar failed to load:', entry.avatarUrl);
+            // Fallback to initial if image fails to load
+            const target = e.target as HTMLImageElement;
+            target.style.display = 'none';
+            const parent = target.parentElement;
+            if (parent) {
+              const fallback = document.createElement('div');
+              fallback.className = `w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                entry.rank === 1 ? 'bg-yellow-500' :
+                entry.rank === 2 ? 'bg-gray-400' :
+                entry.rank === 3 ? 'bg-orange-500' :
+                'bg-primary-500'
+              }`;
+              fallback.textContent = (entry.username || entry.user_id || 'U').charAt(0).toUpperCase();
+              parent.appendChild(fallback);
+            }
+          }}
+        />
+      );
+    }
+    // No avatar URL - show nothing
+    return null;
+  };
+
   const timeframes = [
     { value: '1d', label: 'Last 24 Hours' },
     { value: '7d', label: 'Last 7 Days' },
@@ -46,20 +90,23 @@ const LeaderboardPage: React.FC = () => {
     { value: '1y', label: 'Last Year' },
   ];
 
-  useEffect(() => {
-    fetchLeaderboard();
-  }, [timeframe, limit]);
-
-  const fetchLeaderboard = async () => {
+  const fetchLeaderboard = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Add cache-busting timestamp to force fresh data
+      const timestamp = Date.now();
       // Fetch filtered leaderboard data
-      const response = await axios.get(`${API_ENDPOINTS.LEADERBOARD}?timeframe=${timeframe}&limit=${limit}`, { withCredentials: true });
+      const response = await axios.get(`${API_ENDPOINTS.LEADERBOARD}?timeframe=${timeframe}&limit=${limit}&_t=${timestamp}`, { withCredentials: true });
       setLeaderboardData(response.data);
       
       // Fetch complete stats (no limit) for totals
-      const totalResponse = await axios.get(`${API_ENDPOINTS.LEADERBOARD}?timeframe=${timeframe}&limit=1000`, { withCredentials: true });
+      const totalResponse = await axios.get(`${API_ENDPOINTS.LEADERBOARD}?timeframe=${timeframe}&limit=1000&_t=${timestamp}`, { withCredentials: true });
       setTotalStats(totalResponse.data);
+      
+      console.log('📊 Leaderboard: Data refreshed', {
+        entries: response.data?.leaderboard?.length || 0,
+        timestamp
+      });
       
       setError(null);
     } catch (err: any) {
@@ -70,7 +117,50 @@ const LeaderboardPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [timeframe, limit]);
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
+
+  // Listen for avatar updates and refresh leaderboard
+  useEffect(() => {
+    const handleAvatarUpdate = (data?: any) => {
+      console.log('🔄 Leaderboard: Avatar update received', data);
+      // Update refresh key to force image reload
+      setAvatarRefreshKey(Date.now());
+      // Refresh leaderboard when avatar is updated
+      fetchLeaderboard();
+    };
+
+    // Listen for custom event (from user dashboard)
+    window.addEventListener('avatar-updated', handleAvatarUpdate);
+    
+    // Listen for WebSocket events (global broadcast for all users)
+    if (socket) {
+      console.log('🔌 Leaderboard: Setting up WebSocket listener');
+      socket.on('leaderboard-avatar-update', (data) => {
+        console.log('🔌 Leaderboard: WebSocket event received', data);
+        handleAvatarUpdate(data);
+      });
+    } else {
+      console.warn('⚠️ Leaderboard: WebSocket not available');
+    }
+    
+    // Also set up a periodic refresh every 10 seconds to catch any updates (more frequent)
+    const interval = setInterval(() => {
+      setAvatarRefreshKey(Date.now());
+      fetchLeaderboard();
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('avatar-updated', handleAvatarUpdate);
+      if (socket) {
+        socket.off('leaderboard-avatar-update', handleAvatarUpdate);
+      }
+      clearInterval(interval);
+    };
+  }, [fetchLeaderboard, socket]);
 
   const getRankIcon = (rank: number) => {
     switch (rank) {
@@ -115,8 +205,8 @@ const LeaderboardPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen pt-8 pb-16 sm:pb-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
+      <div className="min-h-screen pt-8 pb-16 sm:pb-20 px-4 sm:px-6 lg:px-8 overflow-x-hidden w-full">
+        <div className="max-w-7xl mx-auto w-full">
           <div className="text-center mb-12 space-y-4">
             <div className="inline-block">
               <Skeleton className="w-20 h-20 rounded-2xl mx-auto" />
@@ -258,12 +348,23 @@ const LeaderboardPage: React.FC = () => {
               <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
                 <div className="relative">
                   <div className="absolute inset-0 bg-gray-400/30 blur-xl rounded-full" />
-                  <img 
-                    src="/8bp-rewards/assets/logos/8logo.png" 
-                    alt="2nd Place" 
-                    className="relative w-16 h-16 rounded-full border-4 border-gray-300 shadow-lg z-10"
-                    onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
-                  />
+                  {leaderboardData.leaderboard[1].avatarUrl ? (
+                    <img 
+                      src={leaderboardData.leaderboard[1].avatarUrl} 
+                      alt="2nd Place" 
+                      className="relative w-16 h-16 rounded-full border-4 border-gray-300 shadow-lg z-10 object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/8bp-rewards/assets/logos/8logo.png";
+                      }}
+                    />
+                  ) : (
+                    <img 
+                      src="/8bp-rewards/assets/logos/8logo.png" 
+                      alt="2nd Place" 
+                      className="relative w-16 h-16 rounded-full border-4 border-gray-300 shadow-lg z-10"
+                      onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                    />
+                  )}
                   <div className="absolute -bottom-2 -right-2 bg-gray-500 text-white w-8 h-8 flex items-center justify-center rounded-full font-bold border-2 border-white shadow-md z-20">2</div>
                 </div>
                 <div className="mt-2 text-center">
@@ -282,12 +383,23 @@ const LeaderboardPage: React.FC = () => {
               <div className="absolute -top-14 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
                 <div className="relative">
                   <div className="absolute inset-0 bg-yellow-500/40 blur-xl rounded-full animate-pulse" />
-                  <img 
-                    src="/8bp-rewards/assets/logos/8logo.png" 
-                    alt="1st Place" 
-                    className="relative w-20 h-20 rounded-full border-4 border-yellow-400 shadow-xl z-10"
-                    onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
-                  />
+                  {leaderboardData.leaderboard[0].avatarUrl ? (
+                    <img 
+                      src={leaderboardData.leaderboard[0].avatarUrl} 
+                      alt="1st Place" 
+                      className="relative w-20 h-20 rounded-full border-4 border-yellow-400 shadow-xl z-10 object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/8bp-rewards/assets/logos/8logo.png";
+                      }}
+                    />
+                  ) : (
+                    <img 
+                      src="/8bp-rewards/assets/logos/8logo.png" 
+                      alt="1st Place" 
+                      className="relative w-20 h-20 rounded-full border-4 border-yellow-400 shadow-xl z-10"
+                      onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                    />
+                  )}
                   <div className="absolute -top-6 left-1/2 transform -translate-x-1/2">
                     <Trophy className="w-8 h-8 text-yellow-500 drop-shadow-md" />
                   </div>
@@ -309,12 +421,23 @@ const LeaderboardPage: React.FC = () => {
               <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 flex flex-col items-center">
                 <div className="relative">
                   <div className="absolute inset-0 bg-orange-500/30 blur-xl rounded-full" />
-                  <img 
-                    src="/8bp-rewards/assets/logos/8logo.png" 
-                    alt="3rd Place" 
-                    className="relative w-16 h-16 rounded-full border-4 border-orange-400 shadow-lg z-10"
-                    onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
-                  />
+                  {leaderboardData.leaderboard[2].avatarUrl ? (
+                    <img 
+                      src={leaderboardData.leaderboard[2].avatarUrl} 
+                      alt="3rd Place" 
+                      className="relative w-16 h-16 rounded-full border-4 border-orange-400 shadow-lg z-10 object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/8bp-rewards/assets/logos/8logo.png";
+                      }}
+                    />
+                  ) : (
+                    <img 
+                      src="/8bp-rewards/assets/logos/8logo.png" 
+                      alt="3rd Place" 
+                      className="relative w-16 h-16 rounded-full border-4 border-orange-400 shadow-lg z-10"
+                      onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                    />
+                  )}
                   <div className="absolute -bottom-2 -right-2 bg-orange-500 text-white w-8 h-8 flex items-center justify-center rounded-full font-bold border-2 border-white shadow-md z-20">3</div>
                 </div>
                 <div className="mt-2 text-center">
@@ -508,14 +631,7 @@ const LeaderboardPage: React.FC = () => {
                         </div>
                         <div className="col-span-3">
                           <div className="flex items-center space-x-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                              entry.rank === 1 ? 'bg-yellow-500' :
-                              entry.rank === 2 ? 'bg-gray-400' :
-                              entry.rank === 3 ? 'bg-orange-500' :
-                              'bg-primary-500'
-                            }`}>
-                              {(entry.username || entry.user_id || 'U').charAt(0).toUpperCase()}
-                            </div>
+                            {getAvatarDisplay(entry)}
                             <div>
                               <p className="font-bold text-text-primary dark:text-white text-sm">{entry.username || entry.user_id}</p>
                               <p className="text-xs text-text-secondary dark:text-gray-400 font-mono">ID: {entry.eightBallPoolId}</p>
@@ -589,6 +705,7 @@ const LeaderboardPage: React.FC = () => {
 };
 
 export default LeaderboardPage;
+
 
 
 

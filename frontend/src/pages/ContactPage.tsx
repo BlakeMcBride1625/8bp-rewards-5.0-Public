@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
-import { Mail, Send, CheckCircle, AlertCircle } from 'lucide-react';
+import { Mail, Send, CheckCircle, AlertCircle, X, Paperclip } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 
 interface ContactForm {
@@ -13,9 +13,15 @@ interface ContactForm {
   message: string;
 }
 
+interface FileWithPreview extends File {
+  preview?: string;
+}
+
 const ContactPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<FileWithPreview[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
   
   const {
     register,
@@ -24,19 +30,108 @@ const ContactPage: React.FC = () => {
     reset,
   } = useForm<ContactForm>();
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setFileError(null);
+    
+    // Validate files
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    const allowedTypes = [
+      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf',
+      'text/plain', 'text/csv',
+      'application/zip', 'application/x-zip-compressed',
+      'application/x-rar-compressed', 'application/vnd.rar'
+    ];
+    
+    const validFiles: FileWithPreview[] = [];
+    const errors: string[] = [];
+    
+    files.forEach((file) => {
+      if (file.size > maxSize) {
+        errors.push(`${file.name} exceeds 10MB limit`);
+        return;
+      }
+      if (!allowedTypes.includes(file.type)) {
+        errors.push(`${file.name} is not an allowed file type`);
+        return;
+      }
+      validFiles.push(file);
+    });
+    
+    if (errors.length > 0) {
+      setFileError(errors.join(', '));
+      return;
+    }
+    
+    if (selectedFiles.length + validFiles.length > 5) {
+      setFileError('Maximum 5 files allowed');
+      return;
+    }
+    
+    setSelectedFiles([...selectedFiles, ...validFiles]);
+  };
+  
+  const removeFile = (index: number) => {
+    setSelectedFiles(selectedFiles.filter((_, i) => i !== index));
+  };
+  
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  };
+
   const onSubmit = async (data: ContactForm) => {
     setIsSubmitting(true);
+    setFileError(null);
     
     try {
-      const response = await axios.post(API_ENDPOINTS.CONTACT, data, { withCredentials: true });
+      const formData = new FormData();
+      formData.append('name', data.name);
+      formData.append('email', data.email);
+      formData.append('subject', data.subject);
+      formData.append('message', data.message);
+      
+      // Append files
+      selectedFiles.forEach((file) => {
+        formData.append('attachments', file);
+      });
+      
+      const response = await axios.post(API_ENDPOINTS.CONTACT, formData, {
+        withCredentials: true,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
       
       if (response.status === 200) {
         setIsSuccess(true);
-        toast.success('Message sent successfully! We\'ll get back to you soon.');
+        const ticketNumber = response.data.ticketNumber;
+        toast.success(
+          ticketNumber 
+            ? `Message sent successfully! Ticket: ${ticketNumber}`
+            : 'Message sent successfully! We\'ll get back to you soon.'
+        );
         reset();
+        setSelectedFiles([]);
       }
     } catch (error: any) {
-      toast.error('Failed to send message. Please try again.');
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to send message. Please try again.';
+      console.error('Contact form error:', error.response?.data || error);
+      toast.error(errorMessage, { duration: 5000 });
+      if (errorMessage.includes('file type') || errorMessage.includes('file size')) {
+        setFileError(errorMessage);
+      }
+      // Set form errors if validation failed
+      if (error.response?.data?.error) {
+        if (error.response.data.error.includes('Message must be between')) {
+          // This will be caught by react-hook-form validation, but we show toast too
+        }
+        if (error.response.data.error.includes('Missing required fields')) {
+          toast.error('Please fill in all required fields', { duration: 5000 });
+        }
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -213,6 +308,67 @@ const ContactPage: React.FC = () => {
                     <span>{errors.message.message}</span>
                   </div>
                 )}
+              </div>
+
+              <div>
+                <label htmlFor="attachments" className="label">
+                  Attachments (Optional)
+                </label>
+                <div className="mt-1">
+                  <label
+                    htmlFor="attachments"
+                    className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-primary-500 dark:hover:border-primary-400 transition-colors"
+                  >
+                    <Paperclip className="w-5 h-5 mr-2 text-gray-400" />
+                    <span className="text-sm text-text-secondary">
+                      Click to upload files (Max 10MB each, up to 5 files)
+                    </span>
+                    <input
+                      id="attachments"
+                      type="file"
+                      multiple
+                      accept="image/*,.pdf,.txt,.csv,.zip,.rar"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+                {fileError && (
+                  <div className="flex items-center space-x-1 mt-2 text-red-600 text-sm">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>{fileError}</span>
+                  </div>
+                )}
+                {selectedFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {selectedFiles.map((file, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-2 bg-gray-50 dark:bg-white/5 rounded-lg"
+                      >
+                        <div className="flex items-center space-x-2 flex-1 min-w-0">
+                          <Paperclip className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          <span className="text-sm text-text-secondary truncate">{file.name}</span>
+                          <span className="text-xs text-gray-400 flex-shrink-0">
+                            ({formatFileSize(file.size)})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(index)}
+                          className="ml-2 p-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          disabled={isSubmitting}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-2 text-xs text-text-secondary">
+                  Allowed: Images, PDFs, text files, ZIP/RAR archives
+                </p>
               </div>
 
               <button

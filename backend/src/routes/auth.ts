@@ -3,11 +3,13 @@ import passport from 'passport';
 import { Strategy as DiscordStrategy } from 'passport-discord';
 import { logger } from '../services/LoggerService';
 import { getUserRole } from '../utils/roles';
+import { DatabaseService } from '../services/DatabaseService';
 import https from 'https';
 import http from 'http';
 import axios from 'axios';
 
 const router = express.Router();
+const dbService = DatabaseService.getInstance();
 
 // Create HTTP agents with timeout for Discord API calls
 const httpAgent = new http.Agent({
@@ -210,6 +212,71 @@ router.get('/discord/callback',
             isAdmin,
             isInServer
           });
+          
+          // Update Discord avatar hash for all registrations linked to this Discord ID
+          // Note: profile.avatar can be null for users with default Discord avatars
+          logger.info('Checking Discord avatar hash from OAuth profile', {
+            action: 'oauth_avatar_check',
+            discordId: profile.id,
+            has_avatar_hash: !!profile.avatar,
+            avatar_hash_value: profile.avatar || 'null (default avatar)'
+          });
+          
+          // Update avatar hash even if null (to indicate default avatar)
+          // This ensures we track the current state of the user's Discord avatar
+          dbService.findRegistrations({ discordId: profile.id })
+            .then(registrations => {
+              if (registrations.length === 0) {
+                logger.info('No registrations found for Discord ID during OAuth', {
+                  action: 'oauth_no_registrations',
+                  discordId: profile.id
+                });
+                return;
+              }
+              
+              logger.info('Found registrations to update with Discord avatar hash', {
+                action: 'oauth_registrations_found',
+                discordId: profile.id,
+                registration_count: registrations.length,
+                avatar_hash: profile.avatar || null
+              });
+              
+              return Promise.all(
+                registrations.map(reg => {
+                  const updateData: any = {
+                    discord_avatar_hash: profile.avatar || null, // Save null if default avatar
+                    use_discord_avatar: reg.use_discord_avatar ?? (reg.discordId ? true : false)
+                  };
+                  
+                  logger.debug('Updating registration with Discord avatar hash', {
+                    action: 'oauth_update_registration',
+                    discordId: profile.id,
+                    eightBallPoolId: reg.eightBallPoolId,
+                    avatar_hash: profile.avatar || null,
+                    previous_hash: reg.discord_avatar_hash || null
+                  });
+                  
+                  return dbService.updateRegistration(reg.eightBallPoolId, updateData);
+                })
+              );
+            })
+            .then(() => {
+              logger.info('Discord avatar hash updated for linked accounts', {
+                action: 'update_discord_avatar_hash',
+                discordId: profile.id,
+                avatarHash: profile.avatar || null,
+                hash_status: profile.avatar ? 'custom_avatar' : 'default_avatar'
+              });
+            })
+            .catch(error => {
+              logger.error('Failed to update Discord avatar hash', {
+                action: 'update_discord_avatar_hash_error',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                error_stack: error instanceof Error ? error.stack : undefined,
+                discordId: profile.id,
+                avatarHash: profile.avatar || null
+              });
+            });
           
           // Redirect based on user type
           // Use full URL to ensure proper redirect

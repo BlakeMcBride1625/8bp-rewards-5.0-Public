@@ -66,10 +66,7 @@ const SocialSidebar: React.FC = () => {
       transition={{ duration: 0.5, ease: 'easeOut' }}
       className="hidden md:block fixed left-0 top-[30%] z-40"
     >
-      <div className="relative flex flex-col gap-4 p-4 bg-gray-900 dark:bg-gray-950 rounded-3xl border border-dark-accent-blue/50 dark:border-dark-accent-blue/60 shadow-2xl shadow-dark-accent-blue/20 dark:shadow-dark-accent-navy/40">
-        {/* Blue glow effect around the entire bar */}
-        <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-dark-accent-blue/10 via-dark-accent-navy/5 to-dark-accent-ocean/10 pointer-events-none"></div>
-        <div className="absolute -inset-0.5 rounded-3xl bg-gradient-to-br from-dark-accent-blue/30 via-dark-accent-navy/20 to-dark-accent-ocean/30 blur-sm opacity-50 pointer-events-none"></div>
+      <div className="relative flex flex-col gap-4 p-4 bg-white/70 dark:bg-background-dark-secondary/70 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-white/5 shadow-lg shadow-black/5 dark:shadow-dark-accent-navy/10 transition-all duration-300">
         
         {socials.map((social, index) => (
           <motion.a
@@ -82,12 +79,12 @@ const SocialSidebar: React.FC = () => {
             transition={{ duration: 0.4, delay: index * 0.1, ease: 'easeOut' }}
             whileHover={{ scale: 1.1, y: -2 }}
             whileTap={{ scale: 0.95 }}
-            className="relative w-10 h-10 flex items-center justify-center text-gray-300 dark:text-gray-400 hover:text-dark-accent-blue dark:hover:text-dark-accent-ocean transition-all duration-200 group"
+            className="relative w-10 h-10 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-dark-accent-blue transition-all duration-200 group"
             title={social.name}
           >
             {social.icon}
             {/* Hover glow effect */}
-            <div className="absolute inset-0 rounded-lg bg-dark-accent-blue/0 group-hover:bg-dark-accent-blue/10 transition-all duration-200 blur-sm"></div>
+            <div className="absolute inset-0 rounded-lg bg-primary-500/0 dark:bg-dark-accent-blue/0 group-hover:bg-primary-500/10 dark:group-hover:bg-dark-accent-blue/10 transition-all duration-200 blur-sm"></div>
           </motion.a>
         ))}
       </div>

@@ -2,15 +2,31 @@
 
 Complete technical documentation for the 8BP Rewards System architecture, implementation, and operations.
 
-## 📋 Documentation Structure
+## 📋 Documentation Index
 
-This documentation is organized into 5 main files:
-
-1. **[README.md](./README.md)** (this file) - System architecture and technical overview
+### Getting Started
+1. **[START_HERE.md](./START_HERE.md)** - Complete setup guide for new installations
 2. **[SETUP.md](./SETUP.md)** - Installation, deployment, and server setup
 3. **[CONFIGURATION.md](./CONFIGURATION.md)** - Environment variables, database, and port configuration
-4. **[INTEGRATION.md](./INTEGRATION.md)** - Discord, Telegram, Cloudflare, and authentication setup
-5. **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues, solutions, and advanced topics
+
+### Bot Management & Scripts
+4. **[SCRIPTS.md](./SCRIPTS.md)** - Script utilities for bot deployment and validation
+5. **[STATUS_BOT.md](./STATUS_BOT.md)** - Status monitoring bot documentation
+6. **[../SLASH_COMMANDS_FIX_SUMMARY.md](../SLASH_COMMANDS_FIX_SUMMARY.md)** - Recent slash command fixes
+
+### Integration & Advanced Topics
+7. **[INTEGRATION.md](./INTEGRATION.md)** - Discord, Telegram, Cloudflare, and authentication setup
+8. **[VERIFICATION_INTEGRATION.md](./VERIFICATION_INTEGRATION.md)** - Verification bot integration guide
+9. **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues, solutions, and advanced topics
+
+### Migration & Updates
+10. **[MIGRATION_COMPLETE.md](./MIGRATION_COMPLETE.md)** - Database migration guide
+11. **[DATABASE_CONSOLIDATION_COMPLETE.md](./DATABASE_CONSOLIDATION_COMPLETE.md)** - Database consolidation details
+12. **[CHANGES_COMPLETE.md](./CHANGES_COMPLETE.md)** - Recent changes and updates
+
+### Deployment
+13. **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
+14. **[OLD_SYSTEM_SHUTDOWN.md](./OLD_SYSTEM_SHUTDOWN.md)** - Legacy system migration
 
 ---
 
@@ -37,11 +53,13 @@ The 8BP Rewards System is a full-stack application that automates daily reward c
 |-----------|------------|---------|
 | **Frontend** | React 18 + TypeScript | User dashboard and admin interface |
 | **Backend API** | Node.js + Express + TypeScript | REST API and data management |
-| **Database** | PostgreSQL 16 | User data and claim records |
+| **Database** | PostgreSQL 14+ | User data and claim records |
 | **Automation** | Playwright | Browser automation for claiming |
-| **Discord Bot** | Discord.js | User notifications and management |
+| **Discord Bot** | Discord.js 14 | User notifications and management |
+| **Verification Bot** | Discord.js 14 + OpenAI Vision | Rank verification from screenshots |
+| **Status Bot** | Discord.js 14 | Service health monitoring |
 | **Scheduler** | node-cron | Automated daily claiming |
-| **Deployment** | Docker Compose | Containerized services |
+| **Deployment** | Docker Compose | Containerised services |
 
 ---
 
@@ -54,7 +72,7 @@ The 8BP Rewards System is a full-stack application that automates daily reward c
 │   │   ├── routes/        # Express API routes
 │   │   ├── services/      # Business logic (DatabaseService, SchedulerService)
 │   │   ├── middleware/   # Authentication, error handling
-│   │   └── server.ts      # Express app initialization
+│   │   └── server.ts      # Express app initialisation
 │   ├── logs/              # Backend application logs
 │   └── screenshots/       # Claim screenshots
 │
@@ -75,7 +93,7 @@ The 8BP Rewards System is a full-stack application that automates daily reward c
 ├── services/              # Service files (discord-service.js, etc.)
 ├── models/                # Data models
 ├── migrations/            # Database migrations
-├── screenshots/           # Claim screenshots (organized by stage)
+├── screenshots/           # Claim screenshots (organised by stage)
 ├── logs/                  # Application logs
 │
 ├── docker-compose.yml     # Docker orchestration
@@ -150,7 +168,7 @@ The 8BP Rewards System is a full-stack application that automates daily reward c
 
 ---
 
-## 🔐 Authentication & Authorization
+## 🔐 Authentication & Authorisation
 
 ### Discord OAuth2
 
@@ -208,7 +226,7 @@ Configuration:
 - Configurable in `browser-pool.js`
 - Balance between speed and stability
 
-### Database Optimization
+### Database Optimisation
 
 - Connection pooling enabled
 - Indexed queries for common operations
@@ -290,11 +308,15 @@ Configuration:
 
 For specific topics, see:
 
+- **[START_HERE.md](./START_HERE.md)** - Complete setup guide for new installations
 - **[SETUP.md](./SETUP.md)** - Installation and deployment
 - **[CONFIGURATION.md](./CONFIGURATION.md)** - Environment variables and configuration
+- **[SCRIPTS.md](./SCRIPTS.md)** - Script utilities for bot management
+- **[STATUS_BOT.md](./STATUS_BOT.md)** - Status monitoring bot setup
 - **[INTEGRATION.md](./INTEGRATION.md)** - External service integration
+- **[VERIFICATION_INTEGRATION.md](./VERIFICATION_INTEGRATION.md)** - Verification bot setup
 - **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
 
 ---
 
-*Last Updated: November 3, 2025*
+*Last Updated: November 30, 2025*

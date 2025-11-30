@@ -80,17 +80,18 @@ export async function registerSlashCommands(clientId: string, token: string, gui
   const body = COMMAND_DEFINITIONS.map((command) => command.toJSON());
 
   try {
-    logger.info('Started refreshing application (/) commands.');
-
     if (guildId) {
+      logger.info(`Started refreshing ${body.length} application (/) commands for guild ${guildId}...`);
       await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body });
       logger.info(`Successfully reloaded ${body.length} application (/) commands for guild ${guildId}.`);
     } else {
+      logger.info(`Started refreshing ${body.length} application (/) commands globally...`);
       await rest.put(Routes.applicationCommands(clientId), { body });
       logger.info(`Successfully reloaded ${body.length} application (/) commands globally.`);
     }
   } catch (error) {
-    logger.error('Error registering slash commands', { error });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Error registering slash commands', { error: errorMessage, guildId });
     throw error;
   }
 }
@@ -105,14 +106,52 @@ export async function handleSlashCommand(interaction: ChatInputCommandInteractio
 
   const handler = COMMAND_HANDLERS[interaction.commandName];
   if (!handler) {
+    if (!interaction.replied && !interaction.deferred) {
     await interaction.reply({
       content: '❌ Unknown command.',
       ephemeral: true,
     });
+    }
     return;
   }
 
-  await handler(interaction);
+  try {
+    // Set a timeout for command execution (30 seconds for verification commands which may take longer)
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Command execution timeout')), 30000);
+    });
+
+    await Promise.race([
+      handler(interaction),
+      timeoutPromise
+    ]);
+  } catch (error) {
+    logger.error('Error executing slash command', {
+      command: interaction.commandName,
+      userId: interaction.user.id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+
+    // Try to send error response if interaction hasn't been handled
+    if (!interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({
+          content: '❌ An error occurred while executing this command. Please try again.',
+          ephemeral: true,
+        });
+      } catch (replyError) {
+        logger.error('Failed to send error reply', { error: replyError });
+      }
+    } else if (interaction.deferred && !interaction.replied) {
+      try {
+        await interaction.editReply({
+          content: '❌ An error occurred while executing this command. Please try again.',
+        });
+      } catch (editError) {
+        logger.error('Failed to edit error reply', { error: editError });
+      }
+    }
+  }
 }
 
 type CommandHandler = (interaction: ChatInputCommandInteraction) => Promise<void>;

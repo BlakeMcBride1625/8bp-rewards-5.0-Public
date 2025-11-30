@@ -3,9 +3,26 @@
  * Automatically uses the correct API URL based on environment
  */
 
-// API Configuration - use REACT_APP_API_URL if set, otherwise localhost
-const backendPort = process.env.REACT_APP_BACKEND_PORT || '2600';
-export const API_BASE_URL = process.env.REACT_APP_API_URL || `http://localhost:${backendPort}/api`;
+// API Configuration - use REACT_APP_API_URL if set, otherwise detect from current location
+function getApiBaseUrl(): string {
+  // If REACT_APP_API_URL is set at build time, use it
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // In browser, use current window location
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol;
+    const host = window.location.host;
+    return `${protocol}//${host}/8bp-rewards/api`;
+  }
+  
+  // Fallback for SSR/build time
+  const backendPort = process.env.REACT_APP_BACKEND_PORT || '2600';
+  return `http://localhost:${backendPort}/api`;
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 // WebSocket URL - use same origin as the current page
 export const getWebSocketURL = (): string => {
@@ -91,10 +108,37 @@ export const API_ENDPOINTS = {
   // User Dashboard
   USER_LINKED_ACCOUNTS: `${API_BASE_URL}/user-dashboard/linked-accounts`,
   USER_SCREENSHOTS: `${API_BASE_URL}/user-dashboard/screenshots`,
+  USER_VERIFICATION_IMAGES: `${API_BASE_URL}/user-dashboard/verification-images`,
+  USER_VERIFICATION_IMAGE_VIEW: (filename: string) => `${API_BASE_URL}/user-dashboard/verification-images/view/${filename}`,
   USER_DEREGISTRATION_REQUEST: `${API_BASE_URL}/user-dashboard/deregistration-request`,
   USER_DEREGISTRATION_REQUESTS: `${API_BASE_URL}/user-dashboard/deregistration-requests`,
   USER_INFO: `${API_BASE_URL}/user-dashboard/info`,
   USER_UPDATE_USERNAME: `${API_BASE_URL}/user-dashboard/update-username`,
+  USER_UPLOAD_PROFILE_IMAGE: `${API_BASE_URL}/user-dashboard/profile-image`,
+  USER_UPLOAD_LEADERBOARD_IMAGE: `${API_BASE_URL}/user-dashboard/leaderboard-image`,
+  USER_DELETE_PROFILE_IMAGE: `${API_BASE_URL}/user-dashboard/profile-image`,
+  USER_DELETE_LEADERBOARD_IMAGE: `${API_BASE_URL}/user-dashboard/leaderboard-image`,
+  USER_SELECT_8BP_AVATAR: `${API_BASE_URL}/user-dashboard/eight-ball-pool-avatar`,
+  USER_REMOVE_8BP_AVATAR: `${API_BASE_URL}/user-dashboard/eight-ball-pool-avatar`,
+  USER_TOGGLE_DISCORD_AVATAR: `${API_BASE_URL}/user-dashboard/profile-image/discord-toggle`,
+  USER_TOGGLE_DISCORD_USERNAME: `${API_BASE_URL}/user-dashboard/username/discord-toggle`,
+  USER_LIST_8BP_AVATARS: `${API_BASE_URL}/user-dashboard/8bp-avatars/list`,
+  
+  // User Support
+  USER_SUPPORT_CREATE: `${API_BASE_URL}/user-dashboard/support/create`,
+  USER_SUPPORT_TICKETS: `${API_BASE_URL}/user-dashboard/support/tickets`,
+  USER_SUPPORT_TICKET_MESSAGES: (ticketId: string) => `${API_BASE_URL}/user-dashboard/support/tickets/${ticketId}/messages`,
+  
+  // Admin Support Tickets
+  ADMIN_TICKETS: `${API_BASE_URL}/admin/tickets`,
+  ADMIN_TICKET_CLOSE: (ticketId: string) => `${API_BASE_URL}/admin/tickets/${ticketId}/close`,
+  ADMIN_TICKET_DELETE: (ticketId: string) => `${API_BASE_URL}/admin/tickets/${ticketId}`,
+  ADMIN_TICKET_ATTACHMENT_DOWNLOAD: (ticketId: string, attachmentId: string) => `${API_BASE_URL}/admin/tickets/${ticketId}/attachments/${attachmentId}/download`,
+  
+  // Admin Verification Images
+  ADMIN_VERIFICATION_IMAGES: `${API_BASE_URL}/admin/verification-images`,
+  ADMIN_VERIFICATION_IMAGE_VIEW: (filename: string) => `${API_BASE_URL}/admin/verification-images/view/${filename}`,
+  ADMIN_ASSIGN_AVATARS: `${API_BASE_URL}/admin/assign-avatars`,
 };
 
 // Helper function to build admin user block endpoint

@@ -1,6 +1,7 @@
 import express from 'express';
 import { DatabaseService } from '../services/DatabaseService';
 import { logger } from '../services/LoggerService';
+import { getDiscordAvatarUrl } from '../utils/avatarUtils';
 
 const router = express.Router();
 const dbService = DatabaseService.getInstance();
@@ -16,10 +17,10 @@ router.get('/', async (req, res): Promise<void> => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Use optimized SQL aggregation instead of fetching all records
+    // Use optimised SQL aggregation instead of fetching all records
     let leaderboardData: any[] = [];
     try {
-      // Optimized SQL query that aggregates in the database
+      // Optimised SQL query that aggregates in the database
       // Exclude failed claims where user has successful claim on same day (duplicate attempts, not real failures)
       // user_id = username (8BP account username from registration or verification image)
       const leaderboardQuery = `
@@ -29,6 +30,13 @@ router.get('/', async (req, res): Promise<void> => {
           r.eight_ball_pool_id,
           r.account_level,
           r.account_rank,
+          r.discord_id,
+          r.use_discord_username,
+          r.use_discord_avatar,
+          r.leaderboard_image_url,
+          r.eight_ball_pool_avatar_filename,
+          r.profile_image_url,
+          r.discord_avatar_hash,
           COUNT(*) FILTER (
             WHERE cr.status = 'success' 
             OR (cr.status = 'failed' AND NOT EXISTS (
@@ -53,7 +61,9 @@ router.get('/', async (req, res): Promise<void> => {
         INNER JOIN registrations r ON cr.eight_ball_pool_id = r.eight_ball_pool_id
         WHERE cr.claimed_at >= $1
           AND r.username IS NOT NULL
-        GROUP BY r.eight_ball_pool_id, r.username, r.account_level, r.account_rank
+        GROUP BY r.eight_ball_pool_id, r.username, r.account_level, r.account_rank, r.discord_id,
+                 r.use_discord_username, r.use_discord_avatar, r.leaderboard_image_url,
+                 r.eight_ball_pool_avatar_filename, r.profile_image_url, r.discord_avatar_hash
         ORDER BY total_items_claimed DESC
         LIMIT $2
       `;
@@ -83,12 +93,49 @@ router.get('/', async (req, res): Promise<void> => {
           });
         }
         
+        // Compute username based on toggle
+        // NOTE: Leaderboard is public and doesn't have access to Discord session data
+        // When use_discord_username is true, we should show Discord username, but we don't have it here
+        // Current limitation: We use registration username in both cases until Discord username is stored in registration
+        // TODO: Store Discord username in registration table during OAuth to support this feature
+        const computedUsername = row.use_discord_username && row.discord_id 
+          ? row.username // Fallback to registration username (Discord username not available in leaderboard context)
+          : row.username;
+
+        // Compute avatarUrl based on priority (matches user-dashboard.ts logic)
+        let avatarUrl: string | null = null;
+        if (row.leaderboard_image_url) {
+          avatarUrl = row.leaderboard_image_url;
+        } else if (row.use_discord_avatar && row.discord_id) {
+          // Use utility function to handle both custom and default Discord avatars
+          avatarUrl = getDiscordAvatarUrl(row.discord_id, row.discord_avatar_hash);
+        } else if (row.eight_ball_pool_avatar_filename) {
+          avatarUrl = `/8bp-rewards/avatars/${row.eight_ball_pool_avatar_filename}`;
+        } else if (row.profile_image_url) {
+          avatarUrl = row.profile_image_url;
+        }
+        
+        // Debug logging for specific user
+        if (row.eight_ball_pool_id === '1826254746') {
+          logger.info('Leaderboard avatar computation for GamingWithBlake', {
+            action: 'leaderboard_avatar_debug',
+            eightBallPoolId: row.eight_ball_pool_id,
+            leaderboard_image_url: row.leaderboard_image_url,
+            eight_ball_pool_avatar_filename: row.eight_ball_pool_avatar_filename,
+            profile_image_url: row.profile_image_url,
+            use_discord_avatar: row.use_discord_avatar,
+            computed_avatarUrl: avatarUrl
+          });
+        }
+
         return {
           user_id: row.user_id, // username from registration or verification
-          username: row.username,
+          username: computedUsername,
           eightBallPoolId: row.eight_ball_pool_id,
           account_level: row.account_level || null,
           account_rank: row.account_rank || null,
+          discord_id: row.discord_id || null,
+          avatarUrl: avatarUrl,
           totalClaims: totalClaims, // Use SQL-calculated total (already excludes duplicates)
           successfulClaims: successfulClaims,
           failedClaims: failedClaims,
@@ -117,10 +164,12 @@ router.get('/', async (req, res): Promise<void> => {
       const leaderboard = leaderboardData.map((entry: any, index: number) => ({
         rank: index + 1,
         user_id: entry.user_id, // username from registration or verification
-        username: entry.username,
+        username: entry.username, // Already computed with Discord toggle
         eightBallPoolId: entry.eightBallPoolId,
         account_level: entry.account_level || null,
         account_rank: entry.account_rank || null,
+        discord_id: entry.discord_id || null,
+        avatarUrl: entry.avatarUrl || null, // Already computed with priority
         totalClaims: entry.totalClaims,
         successfulClaims: entry.successfulClaims,
         failedClaims: entry.failedClaims,

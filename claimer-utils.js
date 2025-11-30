@@ -1,5 +1,5 @@
-// LAYER 2: Standardized claim validation logic for all claimer files
-// This ensures consistent behavior across all claimer implementations
+// LAYER 2: Standardised claim validation logic for all claimer files
+// This ensures consistent behaviour across all claimer implementations
 
 // Helper function to check if button indicates already claimed
 function isButtonAlreadyClaimed(buttonText) {

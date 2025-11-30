@@ -55,7 +55,7 @@ export class DatabaseService {
     });
     
     // Connect to host PostgreSQL (no Docker-specific logic)
-    // Optimized pool configuration based on typical web application patterns
+    // Optimised pool configuration based on typical web application patterns
     this.postgresPool = new Pool({
       host: process.env.POSTGRES_HOST || 'localhost',
       port: parseInt(process.env.POSTGRES_PORT || '5432'),
@@ -207,7 +207,45 @@ export class DatabaseService {
       }
     });
     
-    return await registration.save();
+    // Log what we're about to save for debugging
+    logger.info('Updating registration', {
+      action: 'update_registration',
+      eightBallPoolId,
+      account_level: registration.account_level,
+      account_rank: registration.account_rank,
+      data_account_level: data.account_level,
+      data_eight_ball_pool_avatar_filename: data.eight_ball_pool_avatar_filename,
+      current_eight_ball_pool_avatar_filename: (registration as any).eight_ball_pool_avatar_filename,
+      registration_object_avatar_after_set: (registration as any).eight_ball_pool_avatar_filename
+    });
+    
+    // Verify the property was set correctly before save
+    if (data.eight_ball_pool_avatar_filename !== undefined) {
+      const actualValue = (registration as any).eight_ball_pool_avatar_filename;
+      if (actualValue !== data.eight_ball_pool_avatar_filename) {
+        logger.error('CRITICAL: Property not set correctly before save!', {
+          action: 'property_set_failed',
+          eightBallPoolId,
+          requested: data.eight_ball_pool_avatar_filename,
+          actual: actualValue
+        });
+      }
+    }
+    
+    const saved = await registration.save();
+    
+    // Verify the save worked - check all updated fields
+    logger.info('Registration saved', {
+      action: 'registration_saved',
+      eightBallPoolId,
+      saved_account_level: saved.account_level,
+      saved_account_rank: saved.account_rank,
+      saved_eight_ball_pool_avatar_filename: (saved as any).eight_ball_pool_avatar_filename,
+      requested_eight_ball_pool_avatar_filename: data.eight_ball_pool_avatar_filename,
+      save_matches: (saved as any).eight_ball_pool_avatar_filename === data.eight_ball_pool_avatar_filename
+    });
+    
+    return saved;
   }
 
   public async deleteRegistration(eightBallPoolId: string): Promise<void> {
@@ -277,6 +315,13 @@ export class DatabaseService {
     } finally {
       client.release();
     }
+  }
+
+  public async getClient(): Promise<any> {
+    if (!this.postgresPool) {
+      throw new Error('PostgreSQL is not active');
+    }
+    return await this.postgresPool.connect();
   }
 
   public isUsingPostgreSQL(): boolean {

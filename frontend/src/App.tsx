@@ -19,7 +19,7 @@ function App() {
   return (
     <AuthProvider>
       <Router basename="/8bp-rewards">
-        <div className="min-h-screen bg-gradient-subtle dark:bg-background-dark-primary">
+        <div className="min-h-screen bg-gradient-subtle dark:bg-background-dark-primary overflow-x-hidden w-full">
           <DarkModeToggle />
           <Layout>
             <Routes>

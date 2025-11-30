@@ -462,7 +462,7 @@ VPS Monitor provides real-time system metrics:
 
 ### Screenshot Management
 
-Screenshots organized by stage:
+Screenshots organised by stage:
 - `confirmation/` - Final confirmation images
 - `shop-page/` - Shop page screenshots
 - `id-entry/` - ID entry screenshots
@@ -482,7 +482,7 @@ chmod -R 775 screenshots/
 
 ## Performance Tuning
 
-### Database Optimization
+### Database Optimisation
 
 ```sql
 -- Add indexes if missing

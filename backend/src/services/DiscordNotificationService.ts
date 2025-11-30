@@ -267,6 +267,100 @@ class DiscordNotificationService {
   }
 
   /**
+   * Send a notification to Discord when an account is verified via verification bot
+   */
+  async sendVerificationConfirmation(
+    eightBallPoolId: string,
+    username: string,
+    level: number,
+    rankName: string,
+    discordId: string,
+    discordUsername: string
+  ): Promise<void> {
+    if (!this.botToken || !this.registrationChannelId) {
+      logger.warn('Discord verification notification skipped - missing DISCORD_TOKEN or REGISTRATION_CHANNEL_ID', {
+        action: 'discord_verification_notification_skipped'
+      });
+      return;
+    }
+
+    try {
+      const embed = {
+        title: '✅ Account Verified via Discord',
+        description: `An account has been verified through the Discord verification bot`,
+        color: 0x00ff00, // Green color
+        fields: [
+          {
+            name: '👤 Account Username',
+            value: username,
+            inline: true
+          },
+          {
+            name: '🎱 8BP Account ID',
+            value: eightBallPoolId,
+            inline: true
+          },
+          {
+            name: '👤 Discord User',
+            value: `<@${discordId}> (${discordUsername})`,
+            inline: true
+          },
+          {
+            name: '📊 Level',
+            value: String(level),
+            inline: true
+          },
+          {
+            name: '🏆 Rank',
+            value: rankName,
+            inline: true
+          },
+          {
+            name: '📅 Verified At',
+            value: new Date().toLocaleString(),
+            inline: false
+          }
+        ],
+        footer: {
+          text: '8 Ball Pool Rewards System - Verification Bot'
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      await axios.post(
+        `https://discord.com/api/v10/channels/${this.registrationChannelId}/messages`,
+        {
+          embeds: [embed]
+        },
+        {
+          headers: {
+            'Authorization': `Bot ${this.botToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      logger.info('Discord verification confirmation notification sent', {
+        action: 'discord_verification_notification',
+        username,
+        eightBallPoolId,
+        level,
+        rankName,
+        discordId,
+        channelId: this.registrationChannelId
+      });
+    } catch (error) {
+      logger.error('Failed to send Discord verification confirmation notification', {
+        action: 'discord_verification_notification_error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        username,
+        eightBallPoolId,
+        discordId
+      });
+    }
+  }
+
+  /**
    * Send an embed message to a Discord channel
    */
   async sendEmbed(channelId: string, embed: any): Promise<any> {
@@ -471,6 +565,118 @@ class DiscordNotificationService {
       logger.error('Failed to send deregistration review embed', {
         action: 'deregistration_review_embed_error',
         error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Send a notification to Discord when a new support ticket is created
+   */
+  async sendTicketNotification(
+    ticketNumber: string,
+    ticketType: 'email' | 'website',
+    subject: string,
+    category?: string,
+    userName?: string,
+    userEmail?: string,
+    discordId?: string,
+    hasAttachments: boolean = false
+  ): Promise<void> {
+    const channelId = process.env.SUPPORT_CHANNEL_ID;
+    
+    if (!this.botToken || !channelId) {
+      logger.warn('Discord ticket notification skipped - missing DISCORD_TOKEN or SUPPORT_CHANNEL_ID', {
+        action: 'discord_ticket_notification_skipped',
+        hasToken: !!this.botToken,
+        hasChannel: !!channelId,
+        supportChannelId: process.env.SUPPORT_CHANNEL_ID,
+        registrationChannelId: process.env.REGISTRATION_CHANNEL_ID
+      });
+      return;
+    }
+
+    try {
+      const embed = {
+        title: `🎫 New Support Ticket: ${ticketNumber}`,
+        description: `A new ${ticketType === 'email' ? 'email' : 'website'} support ticket has been created.`,
+        color: ticketType === 'email' ? 0x3498db : 0xf97316, // Blue for email, orange for website
+        fields: [
+          {
+            name: '🎫 Ticket Number',
+            value: `\`${ticketNumber}\``,
+            inline: true
+          },
+          {
+            name: '📋 Type',
+            value: ticketType === 'email' ? '📧 Email' : '🌐 Website',
+            inline: true
+          },
+          {
+            name: '📝 Subject',
+            value: subject || 'No subject',
+            inline: false
+          }
+        ],
+        footer: {
+          text: '8 Ball Pool Rewards System'
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      if (category) {
+        embed.fields.push({
+          name: '🏷️ Category',
+          value: category,
+          inline: true
+        });
+      }
+
+      if (userName) {
+        embed.fields.push({
+          name: '👤 User',
+          value: userName,
+          inline: true
+        });
+      }
+
+      if (userEmail) {
+        embed.fields.push({
+          name: '📧 Email',
+          value: userEmail,
+          inline: true
+        });
+      }
+
+      if (discordId) {
+        embed.fields.push({
+          name: '🆔 Discord ID',
+          value: `<@${discordId}>`,
+          inline: true
+        });
+      }
+
+      if (hasAttachments) {
+        embed.fields.push({
+          name: '📎 Attachments',
+          value: 'Yes',
+          inline: true
+        });
+      }
+
+      await this.sendEmbed(channelId, embed);
+
+      logger.info('Discord ticket notification sent', {
+        action: 'discord_ticket_notification',
+        ticketNumber,
+        ticketType,
+        channelId
+      });
+    } catch (error) {
+      logger.error('Failed to send Discord ticket notification', {
+        action: 'discord_ticket_notification_error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        ticketNumber,
+        ticketType
       });
     }
   }

@@ -9,7 +9,7 @@ export interface ApiError extends Error {
 }
 
 /**
- * Create a standardized API error
+ * Create a standardised API error
  */
 export function createApiError(
   message: string,
@@ -24,7 +24,7 @@ export function createApiError(
 }
 
 /**
- * Standardized error response handler
+ * Standardised error response handler
  */
 export function sendErrorResponse(
   res: Response,
@@ -46,7 +46,7 @@ export function sendErrorResponse(
     context: apiError.context
   });
   
-  // Send standardized error response
+  // Send standardised error response
   res.status(statusCode).json({
     error: error.message || 'Internal server error',
     correlationId: errorCorrelationId,
@@ -60,7 +60,7 @@ export function sendErrorResponse(
 
 /**
  * Async route error handler wrapper
- * Catches errors and sends standardized responses
+ * Catches errors and sends standardised responses
  */
 export function asyncHandler(
   fn: (req: Request, res: Response, next: (error?: Error) => void) => Promise<void>

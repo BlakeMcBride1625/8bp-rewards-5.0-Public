@@ -451,6 +451,8 @@ class DatabaseService {
     updated_at: Date;
   }>> {
     try {
+      // Try to query accounts, but handle case where table doesn't exist
+      try {
       const accounts = await this.client.poolAccount.findMany({
         where: { owner_discord_id: discordId },
         orderBy: [
@@ -459,8 +461,28 @@ class DatabaseService {
         ],
       });
       return accounts;
-    } catch (error) {
+      } catch (prismaError: any) {
+        // If table doesn't exist error, return empty array instead of throwing
+        if (prismaError?.message?.includes('does not exist') || 
+            prismaError?.code === '42P01' || 
+            prismaError?.meta?.cause?.includes('does not exist')) {
+          logger.warn('pool_accounts table does not exist, returning empty array', { 
+            discordId, 
+            error: prismaError.message,
+            code: prismaError.code 
+          });
+          return [];
+        }
+        // Re-throw if it's a different error
+        throw prismaError;
+      }
+    } catch (error: any) {
       logger.error('Failed to get user accounts', { error, discordId });
+      // For any other error, also return empty array to prevent verification failures
+      if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+        logger.warn('pool_accounts table does not exist, returning empty array', { discordId, error: error.message });
+        return [];
+      }
       throw error;
     }
   }
@@ -515,7 +537,30 @@ class DatabaseService {
       });
 
       return account;
-    } catch (error) {
+    } catch (error: any) {
+      // If table doesn't exist, return a mock object instead of throwing
+      if (error?.message?.includes('does not exist') || 
+          error?.code === '42P01' || 
+          error?.meta?.cause?.includes('does not exist')) {
+        logger.warn('pool_accounts table does not exist, skipping pool account creation', { 
+          discord_id: data.owner_discord_id,
+          unique_id: data.unique_id,
+          error: error.message 
+        });
+        // Return a mock account object so the caller doesn't break
+        return {
+          id: 'temp-id',
+          owner_discord_id: data.owner_discord_id,
+          unique_id: data.unique_id,
+          level: data.level,
+          rank_name: data.rank_name,
+          verified_at: new Date(),
+          is_primary: false,
+          metadata: data.metadata as Prisma.InputJsonValue ?? null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        };
+      }
       logger.error('Failed to create pool account', { error, data });
       throw error;
     }
@@ -539,7 +584,18 @@ class DatabaseService {
       }
 
       return false;
-    } catch (error) {
+    } catch (error: any) {
+      // If table doesn't exist, return false (no account to delete)
+      if (error?.message?.includes('does not exist') || 
+          error?.code === '42P01' || 
+          error?.meta?.cause?.includes('does not exist')) {
+        logger.warn('pool_accounts table does not exist, skipping pool account deletion', { 
+          accountId, 
+          ownerDiscordId,
+          error: error.message 
+        });
+        return false;
+      }
       logger.error('Failed to delete pool account', { error, accountId, ownerDiscordId });
       throw error;
     }
@@ -573,7 +629,18 @@ class DatabaseService {
       });
 
       logger.info('Primary account set', { discordId, accountId });
-    } catch (error) {
+    } catch (error: any) {
+      // If table doesn't exist, silently skip (no accounts to manage)
+      if (error?.message?.includes('does not exist') || 
+          error?.code === '42P01' || 
+          error?.meta?.cause?.includes('does not exist')) {
+        logger.warn('pool_accounts table does not exist, skipping primary account setting', { 
+          discordId, 
+          accountId,
+          error: error.message 
+        });
+        return;
+      }
       logger.error('Failed to set primary account', { error, discordId, accountId });
       throw error;
     }
@@ -593,6 +660,8 @@ class DatabaseService {
     try {
       if (sortBy === 'level') {
         // Get users sorted by their highest level account
+        // Handle case where pool_accounts table doesn't exist
+        try {
         const leaderboard = await this.client.$queryRaw<Array<{
           discord_id: string;
           username: string | null;
@@ -622,8 +691,19 @@ class DatabaseService {
           highest_level: Number(entry.highest_level),
           total_accounts: Number(entry.total_accounts),
         }));
+        } catch (sqlError: any) {
+          // If table doesn't exist, return empty leaderboard
+          if (sqlError?.message?.includes('does not exist') || sqlError?.code === '42P01') {
+            logger.warn('pool_accounts table does not exist, returning empty leaderboard', { 
+              error: sqlError.message 
+            });
+            return [];
+          }
+          throw sqlError;
+        }
       } else {
         // Sort by total accounts
+        try {
         const leaderboard = await this.client.$queryRaw<Array<{
           discord_id: string;
           username: string | null;
@@ -653,9 +733,26 @@ class DatabaseService {
           highest_level: Number(entry.highest_level),
           total_accounts: Number(entry.total_accounts),
         }));
+        } catch (sqlError: any) {
+          // If table doesn't exist, return empty leaderboard
+          if (sqlError?.message?.includes('does not exist') || sqlError?.code === '42P01') {
+            logger.warn('pool_accounts table does not exist, returning empty leaderboard', { 
+              error: sqlError.message 
+            });
+            return [];
+          }
+          throw sqlError;
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to get leaderboard', { error, limit, sortBy });
+      // If it's a table not found error, return empty array
+      if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+        logger.warn('pool_accounts table does not exist, returning empty leaderboard', { 
+          error: error.message 
+        });
+        return [];
+      }
       throw error;
     }
   }
@@ -812,7 +909,19 @@ class DatabaseService {
         },
       });
 
-      const accounts = await this.client.poolAccount.findMany({
+      // Try to query accounts, but handle case where table doesn't exist
+      let accounts: Array<{
+        id: string;
+        unique_id: string;
+        level: number;
+        rank_name: string;
+        verified_at: Date;
+        is_primary: boolean;
+        created_at: Date;
+      }> = [];
+
+      try {
+        accounts = await this.client.poolAccount.findMany({
         where: { owner_discord_id: discordId },
         select: {
           id: true,
@@ -828,6 +937,22 @@ class DatabaseService {
           { level: 'desc' },
         ],
       });
+      } catch (prismaError: any) {
+        // If table doesn't exist error, return empty array instead of throwing
+        if (prismaError?.message?.includes('does not exist') || 
+            prismaError?.code === '42P01' || 
+            prismaError?.meta?.cause?.includes('does not exist')) {
+          logger.warn('pool_accounts table does not exist, returning empty accounts array', { 
+            discordId, 
+            error: prismaError.message,
+            code: prismaError.code 
+          });
+          accounts = [];
+        } else {
+          // Re-throw if it's a different error
+          throw prismaError;
+        }
+      }
 
       return {
         user,

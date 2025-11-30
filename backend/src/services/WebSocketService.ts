@@ -306,6 +306,63 @@ class WebSocketService {
           });
         }
       });
+
+      // Join ticket room
+      socket.on('join-ticket', (ticketId: string) => {
+        if (ticketId) {
+          socket.join(`ticket-${ticketId}`);
+          logger.info('Client joined ticket room', {
+            action: 'websocket_join_room',
+            socketId: socket.id,
+            userId: userId,
+            room: `ticket-${ticketId}`
+          });
+        }
+      });
+
+      // Leave ticket room
+      socket.on('leave-ticket', (ticketId: string) => {
+        if (ticketId) {
+          socket.leave(`ticket-${ticketId}`);
+          logger.info('Client left ticket room', {
+            action: 'websocket_leave_room',
+            socketId: socket.id,
+            userId: userId,
+            room: `ticket-${ticketId}`
+          });
+        }
+      });
+
+      // Join user-specific avatars room
+      socket.on('join-avatars', (targetUserId?: string) => {
+        // Use the authenticated user's ID or the provided targetUserId
+        const roomUserId = socketWithSession.userId || targetUserId;
+        if (roomUserId) {
+          const room = `avatars-${roomUserId}`;
+          socket.join(room);
+          logger.info('Client joined avatars room', {
+            action: 'websocket_join_room',
+            socketId: socket.id,
+            userId: userId,
+            room: room
+          });
+        }
+      });
+
+      // Leave user-specific avatars room
+      socket.on('leave-avatars', (targetUserId?: string) => {
+        const roomUserId = socketWithSession.userId || targetUserId;
+        if (roomUserId) {
+          const room = `avatars-${roomUserId}`;
+          socket.leave(room);
+          logger.info('Client left avatars room', {
+            action: 'websocket_leave_room',
+            socketId: socket.id,
+            userId: userId,
+            room: room
+          });
+        }
+      });
     });
 
     logger.info('WebSocket service initialized');
@@ -373,6 +430,80 @@ class WebSocketService {
     
     logger.debug('Emitted screenshots refresh event', {
       action: 'websocket_emit_screenshots_refresh',
+      userId: userId
+    });
+  }
+
+  public emitTicketMessage(ticketId: string, message: {
+    id: string;
+    sender_type: 'user' | 'admin' | 'system';
+    sender_discord_id?: string;
+    message: string;
+    created_at: string;
+  }): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized, cannot emit ticket message');
+      return;
+    }
+
+    this.io.to(`ticket-${ticketId}`).emit('ticket-message', {
+      ticketId,
+      message
+    });
+    
+    logger.debug('Emitted ticket message event', {
+      action: 'websocket_emit_ticket_message',
+      ticketId: ticketId,
+      messageId: message.id
+    });
+  }
+
+  public emitAvatarUpdate(userId: string, avatarData: {
+    eightBallPoolId: string;
+    activeAvatarUrl: string | null;
+    activeUsername: string;
+    profile_image_url?: string | null;
+    leaderboard_image_url?: string | null;
+    eight_ball_pool_avatar_filename?: string | null;
+    use_discord_avatar?: boolean;
+    use_discord_username?: boolean;
+    discord_avatar_hash?: string | null;
+  }): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized, cannot emit avatar update');
+      return;
+    }
+
+    // Send to specific user's room for dashboard updates
+    this.io.to(`avatars-${userId}`).emit('avatar-update', avatarData);
+    
+    // Broadcast globally for leaderboard updates (all users need to see the change)
+    const leaderboardUpdate = {
+      eightBallPoolId: avatarData.eightBallPoolId,
+      avatarUrl: avatarData.activeAvatarUrl
+    };
+    this.io.emit('leaderboard-avatar-update', leaderboardUpdate);
+    
+    logger.info('Emitted avatar update event', {
+      action: 'websocket_emit_avatar_update',
+      userId: userId,
+      eightBallPoolId: avatarData.eightBallPoolId,
+      activeAvatarUrl: avatarData.activeAvatarUrl,
+      connectedClients: this.io.sockets.sockets.size,
+      broadcastSent: true
+    });
+  }
+
+  public emitAvatarsRefresh(userId: string): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized, cannot emit avatars refresh');
+      return;
+    }
+
+    this.io.to(`avatars-${userId}`).emit('avatars-refresh');
+    
+    logger.debug('Emitted avatars refresh event', {
+      action: 'websocket_emit_avatars_refresh',
       userId: userId
     });
   }

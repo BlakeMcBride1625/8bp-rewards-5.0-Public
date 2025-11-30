@@ -39,18 +39,27 @@ class AccountPortalSyncService {
    * Sync account data to rewards system after verification
    */
   async syncAccount(data: SyncAccountData): Promise<void> {
+    // Normalize unique_id - remove dashes for rewards database (stores without dashes)
+    const normalizedUniqueId = data.unique_id.replace(/-/g, '');
+    
+    // Update/create user in verification database (non-blocking)
     try {
-      // Normalize unique_id - remove dashes for rewards database (stores without dashes)
-      const normalizedUniqueId = data.unique_id.replace(/-/g, '');
-      
-      // Update/create user in verification database
       await databaseService.upsertUser({
         discord_id: data.discord_id,
         username: data.username,
         avatar_url: data.avatar_url,
       });
+    } catch (dbError: any) {
+      // Log but don't fail - Prisma database errors shouldn't block rewards sync
+      logger.warn('Failed to upsert user in verification database (non-blocking)', {
+        error: dbError.message,
+        discord_id: data.discord_id,
+        code: dbError.code
+      });
+    }
 
-      // Create/update pool account in verification database (keep original format with dashes for verification DB)
+    // Create/update pool account in verification database (keep original format with dashes for verification DB) (non-blocking)
+    try {
       await databaseService.createPoolAccount({
         owner_discord_id: data.discord_id,
         unique_id: data.unique_id,
@@ -58,58 +67,96 @@ class AccountPortalSyncService {
         rank_name: data.rank_name,
         metadata: data.metadata,
       });
-
-      // Create/update unique link in verification database (keep original format)
-      await databaseService.upsertUniqueLink(data.discord_id, data.unique_id);
-
-      // Sync to rewards system via API - use normalized ID (no dashes)
-      try {
-        const response = await axios.post(
-          `${this.rewardsApiUrl}/api/internal/verification/sync`,
-          {
-            discord_id: data.discord_id,
-            username: data.username,
-            unique_id: normalizedUniqueId, // Send normalized ID (no dashes) to rewards API
-            level: data.level,
-            rank_name: data.rank_name,
-            avatar_url: data.avatar_url
-          },
-          {
-            timeout: 10000,
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        logger.info('Account synced to rewards system via API', {
-          discord_id: data.discord_id,
-          unique_id: data.unique_id,
-          level: data.level,
-          response_status: response.status
-        });
-      } catch (apiError: any) {
-        // Log error but don't fail verification
-        logger.warn('Failed to sync to rewards API (non-blocking)', {
-          error: apiError.message,
-          discord_id: data.discord_id,
-          unique_id: data.unique_id
-        });
-      }
-
-      logger.info('Account synced to portal', {
+    } catch (dbError: any) {
+      logger.warn('Failed to create pool account in verification database (non-blocking)', {
+        error: dbError.message,
         discord_id: data.discord_id,
-        unique_id: data.unique_id,
-        level: data.level,
+        code: dbError.code
       });
-    } catch (error) {
-      logger.error('Failed to sync account to portal', {
-        error,
-        discord_id: data.discord_id,
-        unique_id: data.unique_id,
-      });
-      // Don't throw - we don't want to break verification if portal sync fails
     }
+
+    // Create/update unique link in verification database (keep original format) (non-blocking)
+    try {
+      await databaseService.upsertUniqueLink(data.discord_id, data.unique_id);
+    } catch (dbError: any) {
+      logger.warn('Failed to upsert unique link in verification database (non-blocking)', {
+        error: dbError.message,
+        discord_id: data.discord_id,
+        code: dbError.code
+      });
+    }
+
+    // Sync to rewards system via API - use normalized ID (no dashes)
+    // This is the critical sync that updates the website, so it must happen even if Prisma DB fails
+    const apiUrl = `${this.rewardsApiUrl}/api/internal/verification/sync`;
+    const requestBody = {
+      discord_id: data.discord_id,
+      username: data.username,
+      unique_id: normalizedUniqueId, // Send normalized ID (no dashes) to rewards API
+      level: data.level,
+      rank_name: data.rank_name,
+      avatar_url: data.avatar_url
+    };
+
+    logger.info('🔄 Preparing API sync request to rewards system', {
+      discord_id: data.discord_id,
+      unique_id: data.unique_id,
+      normalized_unique_id: normalizedUniqueId,
+      level: data.level,
+      rank_name: data.rank_name,
+      api_url: apiUrl,
+      request_body: requestBody,
+    });
+
+    try {
+      logger.debug('📤 Sending POST request to rewards API', {
+        url: apiUrl,
+        body: requestBody,
+      });
+
+      const response = await axios.post(
+        apiUrl,
+        requestBody,
+        {
+          timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      logger.info('✅ Account synced to rewards system via API - SUCCESS', {
+        discord_id: data.discord_id,
+        unique_id: data.unique_id,
+        normalized_unique_id: normalizedUniqueId,
+        level: data.level,
+        rank_name: data.rank_name,
+        response_status: response.status,
+        response_data: response.data,
+        api_url: apiUrl,
+      });
+    } catch (apiError: any) {
+      // Log error but don't fail verification
+      logger.error('❌ Failed to sync to rewards API - this will prevent website updates!', {
+        error: apiError.message,
+        error_code: apiError.code,
+        discord_id: data.discord_id,
+        unique_id: data.unique_id,
+        normalized_unique_id: normalizedUniqueId,
+        url: apiUrl,
+        request_body: requestBody,
+        response_status: apiError.response?.status,
+        response_data: apiError.response?.data,
+        response_headers: apiError.response?.headers,
+        stack: apiError.stack,
+      });
+    }
+
+    logger.info('Account sync process completed', {
+      discord_id: data.discord_id,
+      unique_id: data.unique_id,
+      level: data.level,
+    });
   }
 
   /**

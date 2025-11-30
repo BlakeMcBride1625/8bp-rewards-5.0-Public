@@ -8,6 +8,7 @@ import { exec } from 'child_process';
 import * as path from 'path';
 import { DeviceDetectionService } from '../services/DeviceDetectionService';
 import { checkDeviceBlocking, logDeviceInfo } from '../middleware/deviceBlocking';
+import { getRandom8BPAvatar } from '../utils/avatarUtils';
 
 const router = express.Router();
 const dbService = DatabaseService.getInstance();
@@ -99,7 +100,25 @@ router.post('/', checkDeviceBlocking, logDeviceInfo, validateRegistration, async
       browser: deviceInfo.browser
     });
 
-    // Create new registration with device information
+    // Get a random 8 Ball Pool avatar for the new user
+    const randomAvatar = getRandom8BPAvatar();
+    
+    if (randomAvatar) {
+      logger.info('Random avatar assigned during registration', {
+        action: 'random_avatar_assigned',
+        eightBallPoolId,
+        username,
+        avatarFilename: randomAvatar
+      });
+    } else {
+      logger.warn('Could not assign random avatar during registration (will be null)', {
+        action: 'random_avatar_failed',
+        eightBallPoolId,
+        username
+      });
+    }
+
+    // Create new registration with device information and random avatar assignment
     const registration = await dbService.createRegistration({
       eightBallPoolId,
       username,
@@ -108,7 +127,8 @@ router.post('/', checkDeviceBlocking, logDeviceInfo, validateRegistration, async
       deviceType: deviceInfo.deviceType,
       userAgent: deviceInfo.userAgent,
       lastLoginAt: new Date(),
-      isBlocked: false
+      isBlocked: false,
+      eight_ball_pool_avatar_filename: randomAvatar || null
     });
 
     logger.logRegistration(eightBallPoolId, username, clientIP);

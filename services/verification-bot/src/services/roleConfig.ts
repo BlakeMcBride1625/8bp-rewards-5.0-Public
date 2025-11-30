@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { existsSync } from 'fs';
 import { RankConfig } from '../types';
 import { logger } from './logger';
 
@@ -15,7 +16,28 @@ class RoleConfigService {
   private readonly configPath: string;
 
   constructor() {
-    this.configPath = path.join(process.cwd(), 'src', 'config', 'ranks.json');
+    // Try multiple possible paths for ranks.json
+    const possiblePaths = [
+      path.join(process.cwd(), 'services', 'verification-bot', 'src', 'config', 'ranks.json'), // Docker container path
+      path.join(process.cwd(), 'src', 'config', 'ranks.json'), // Local development path
+      path.join(__dirname, '..', 'config', 'ranks.json'), // Relative to this file
+    ];
+    
+    // Find the first path that exists
+    let foundPath: string | null = null;
+    for (const testPath of possiblePaths) {
+      try {
+        if (existsSync(testPath)) {
+          foundPath = testPath;
+          break;
+        }
+      } catch {
+        // Continue searching
+      }
+    }
+    
+    this.configPath = foundPath || possiblePaths[0]; // Fallback to first path
+    logger.info('Using rank config path', { path: this.configPath });
   }
 
   /**

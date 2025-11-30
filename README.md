@@ -63,7 +63,7 @@ The **8 Ball Pool Rewards System** is a comprehensive, production-ready automati
 - **Manual Trigger Support** - Admin can trigger claims on-demand
 - **Browser Pool Management** - Concurrent browser automation with Playwright
 - **Smart Retry Logic** - Automatic retry for failed claims
-- **Resource Optimization** - Efficient browser pool management
+- **Resource Optimisation** - Efficient browser pool management
 
 ### 📊 Dashboard & Analytics
 - **Public Leaderboard** - Real-time rankings and statistics
@@ -86,7 +86,7 @@ The **8 Ball Pool Rewards System** is a comprehensive, production-ready automati
 - **Role-Based Access Control** - Admin, VPS Owner, and user roles
 - **Session Management** - Secure JWT-based sessions
 - **Rate Limiting** - API protection against abuse
-- **Input Validation** - Comprehensive sanitization and validation
+- **Input Validation** - Comprehensive sanitisation and validation
 
 ### 🔧 Advanced Features
 - **Verification Bot Integration** - Optional integration with verification system
@@ -149,12 +149,12 @@ graph TB
 |-----------|------------|-------------|
 | **Frontend** | React 18 + TypeScript | Modern, responsive web interface with Tailwind CSS |
 | **Backend API** | Node.js + Express + TypeScript | RESTful API with comprehensive routing |
-| **Database** | PostgreSQL 14+ | Primary data store with optimized indexes |
+| **Database** | PostgreSQL 14+ | Primary data store with optimised indexes |
 | **Automation** | Playwright | Headless browser automation for claims |
 | **Discord Bot** | Discord.js | User management and notifications |
 | **Status Monitor** | Discord.js | System health monitoring and alerts |
 | **Scheduler** | node-cron | Automated task scheduling |
-| **Containerization** | Docker + Docker Compose | Complete containerized deployment |
+| **Containerisation** | Docker + Docker Compose | Complete containerised deployment |
 
 ---
 
@@ -328,6 +328,11 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 - **[SETUP.md](./docs/SETUP.md)** - Detailed setup instructions (Docker & Host)
 - **[CONFIGURATION.md](./docs/CONFIGURATION.md)** - Complete configuration reference
 
+### Bot Management
+- **[SCRIPTS.md](./docs/SCRIPTS.md)** - Script utilities for bot deployment and validation
+- **[STATUS_BOT.md](./docs/STATUS_BOT.md)** - Status monitoring bot documentation
+- **[SLASH_COMMANDS_FIX_SUMMARY.md](./docs/SLASH_COMMANDS_FIX_SUMMARY.md)** - Recent slash command fixes and updates
+
 ### Advanced Topics
 - **[INTEGRATION.md](./docs/INTEGRATION.md)** - Discord, Telegram, Cloudflare, VPS auth
 - **[VERIFICATION_INTEGRATION.md](./docs/VERIFICATION_INTEGRATION.md)** - Verification bot integration
@@ -338,8 +343,10 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 - **[DATABASE_CONSOLIDATION_COMPLETE.md](./docs/DATABASE_CONSOLIDATION_COMPLETE.md)** - Database consolidation details
 - **[CHANGES_COMPLETE.md](./docs/CHANGES_COMPLETE.md)** - Recent changes and updates
 
-### Deployment
+### Deployment & Status
 - **[DEPLOYMENT_CHECKLIST.md](./docs/DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
+- **[REMAINING_FIXES.md](./docs/REMAINING_FIXES.md)** - Known issues and planned fixes
+- **[VERIFICATION_BOT_FIXES.md](./docs/VERIFICATION_BOT_FIXES.md)** - Verification bot updates
 - **[OLD_SYSTEM_SHUTDOWN.md](./docs/OLD_SYSTEM_SHUTDOWN.md)** - Legacy system migration
 
 ---
@@ -375,7 +382,7 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
 - **WebSocket** - Real-time communication
 
 ### DevOps
-- **Docker** - Containerization
+- **Docker** - Containerisation
 - **Docker Compose** - Multi-container orchestration
 - **PM2** - Process management (optional)
 
@@ -436,15 +443,15 @@ POSTGRES_HOST=localhost
 
 ## 🛡️ Security
 
-### Authentication & Authorization
+### Authentication & Authorisation
 - **Discord OAuth 2.0** - Secure user authentication
 - **JWT Tokens** - Secure session management
 - **Role-Based Access Control** - Admin, VPS Owner, and User roles
 - **Session Expiration** - Automatic session timeout
 
 ### Data Protection
-- **Input Validation** - Comprehensive sanitization
-- **SQL Injection Prevention** - Parameterized queries
+- **Input Validation** - Comprehensive sanitisation
+- **SQL Injection Prevention** - Parameterised queries
 - **XSS Protection** - Content Security Policy
 - **Rate Limiting** - API abuse prevention
 
@@ -458,25 +465,65 @@ POSTGRES_HOST=localhost
 
 ## 📱 Discord Bot Commands
 
-### User Commands
+### Main Bot Commands
+
+**User Commands:**
 
 | Command | Description | Usage |
 |---------|-------------|-------|
-| `/register` | Register for automated claims | `/register <8bp_id>` |
-| `/status` | Check your claim status | `/status` |
-| `/leaderboard` | View current leaderboard | `/leaderboard` |
-| `/help` | Get help and information | `/help` |
+| `/register` | Register for automated claims | `/register id:<8bp_id> username:<name>` |
+| `/link-account` | Link Discord to existing account | `/link-account id:<8bp_id>` |
+| `/my-accounts` | View linked accounts | `/my-accounts` |
+| `/help` | Show help information | `/help` |
 
-### Admin Commands
+**Admin Commands:**
 
-Admin commands are available through the web dashboard and Discord bot:
+| Command | Description | Usage |
+|---------|-------------|-------|
+| `/list-accounts` | List all registered accounts | `/list-accounts` |
+| `/check-accounts` | Check account statuses | `/check-accounts` |
+| `/deregister` | Remove an account | `/deregister id:<8bp_id>` |
+| `/clear` | Delete bot messages | `/clear [amount] [user]` |
+| `/dm-rm-rf` | Delete all bot DMs | `/dm-rm-rf` |
+| `/server-status` | Check bot server status | `/server-status` |
+| `/website-status` | Check website status | `/website-status` |
 
-- **Manual Claim All** - Trigger claims for all users
-- **Manual Claim Single User** - Claim for specific user ID
-- **Manual Claim Test Users** - Quick claims for test users
-- **User Management** - View and manage registered users
-- **System Status** - Check service health and status
-- **VPS Terminal** - Server access (VPS Owners only)
+### Verification Bot Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/recheck` | Re-run verification on screenshot | Manage Messages |
+| `/cleanup-dms` | Clean up bot DM messages | Manage Guild |
+| `/unlink-screenshot` | Remove screenshot lock | Administrator |
+| `/status` | Show verification metrics | Manage Guild |
+
+### Status Bot Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/status` | Check service status | Everyone |
+| `/uptime` | Display uptime statistics | Everyone |
+| `/botuptime` | Display bot system info | Everyone |
+| `/dailyreport` | Trigger daily report | Administrator |
+
+**Note:** All slash commands have been recently updated and fixed. See [docs/SLASH_COMMANDS_FIX_SUMMARY.md](./docs/SLASH_COMMANDS_FIX_SUMMARY.md) for details.
+
+### Command Deployment
+
+To deploy or refresh bot commands:
+
+```bash
+# Validate environment first
+node scripts/validate-bot-env.js
+
+# Deploy all bot commands
+node scripts/deploy-commands.js
+
+# Force refresh (deletes old commands first)
+node scripts/deploy-commands.js --force
+```
+
+See [docs/SCRIPTS.md](./docs/SCRIPTS.md) for detailed script documentation.
 
 ---
 

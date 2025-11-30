@@ -17,6 +17,7 @@ import axios from 'axios';
 import WebSocketService from '../services/WebSocketService';
 import { isAllowedForVPS, isAllowedForTelegram, isAllowedForEmail } from '../utils/permissions';
 import { AdminRequest } from '../types/auth';
+import { getRandom8BPAvatar } from '../utils/avatarUtils';
 
 // VPS codes and access are now stored in the database (see DatabaseService methods)
 // Removed global in-memory storage declarations
@@ -576,6 +577,7 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
       browser: deviceInfo.browser
     });
 
+    // Create new registration (no random avatar assignment)
     const registration = await dbService.createRegistration({
       eightBallPoolId,
       username,
@@ -583,7 +585,8 @@ router.post('/registrations', checkDeviceBlocking, logDeviceInfo, async (req, re
       deviceId: deviceInfo.deviceId,
       deviceType: deviceInfo.deviceType,
       userAgent: deviceInfo.userAgent,
-      lastLoginAt: new Date()
+      lastLoginAt: new Date(),
+      eight_ball_pool_avatar_filename: null
     });
 
     logger.logAdminAction((req as AdminRequest).user?.id || 'unknown', 'add_registration', {
@@ -1035,7 +1038,6 @@ router.get('/logs', throttleAdminRequest, async (req, res) => {
         action: 'database_query_error',
         error: dbError instanceof Error ? dbError.message : 'Unknown error'
       });
-      await pool.end();
       
       // Fallback to reading from log files
       const fs = require('fs');
@@ -1977,7 +1979,7 @@ router.post('/vps/request-access', async (req, res) => {
     // Check if user is allowed VPS access
     if (!isAllowedForVPS(userId)) {
       return res.status(403).json({
-        error: 'Access denied. You are not authorized to access VPS Monitor.'
+        error: 'Access denied. You are not authorised to access VPS Monitor.'
       });
     }
 
@@ -2261,7 +2263,7 @@ router.post('/vps/request-access', async (req, res) => {
         
         if (channel === 'email') {
           return res.status(403).json({
-            error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
+            error: 'Your email is not authorised for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
           });
         }
         emailSent = false;
@@ -2381,7 +2383,7 @@ router.post('/vps/request-access', async (req, res) => {
       if (!vpsUserEmail) {
         errorMessage = 'Email address is required but not found. Please provide your email.';
       } else if (!isAllowedForEmail(vpsUserEmail)) {
-        errorMessage = 'Your email is not authorized for email authentication.';
+        errorMessage = 'Your email is not authorised for email authentication.';
       } else {
         errorMessage = 'Failed to send email access code. Please check your email configuration and try again.';
       }
@@ -2504,7 +2506,7 @@ router.post('/vps/verify-access', async (req, res) => {
         if (telegramCode && telegramCode.trim()) {
           await dbService.incrementVPSCodeAttempts(userId);
           return res.status(400).json({
-            error: 'You are not authorized to use Telegram authentication.'
+            error: 'You are not authorised to use Telegram authentication.'
           });
         }
         verificationMethod = 'discord';
@@ -2696,7 +2698,7 @@ router.post('/vps/test-discord', async (req, res) => {
 
     if (!isAllowedForVPS(userId)) {
       return res.status(403).json({
-        error: 'Access denied. You are not authorized to access VPS Monitor.'
+        error: 'Access denied. You are not authorised to access VPS Monitor.'
       });
     }
 
@@ -2732,7 +2734,7 @@ router.post('/vps/test-telegram', async (req, res) => {
 
     if (!isAllowedForVPS(userId)) {
       return res.status(403).json({
-        error: 'Access denied. You are not authorized to access VPS Monitor.'
+        error: 'Access denied. You are not authorised to access VPS Monitor.'
       });
     }
 
@@ -2768,7 +2770,7 @@ router.post('/vps/test-email', async (req, res) => {
 
     if (!isAllowedForVPS(userId)) {
       return res.status(403).json({
-        error: 'Access denied. You are not authorized to access VPS Monitor.'
+        error: 'Access denied. You are not authorised to access VPS Monitor.'
       });
     }
 
@@ -2983,7 +2985,7 @@ router.post('/reset-leaderboard/request-access', async (req, res) => {
         
         if (channel === 'email') {
           return res.status(403).json({
-            error: 'Your email is not authorized for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
+            error: 'Your email is not authorised for email authentication. Please contact an administrator or use Discord/Telegram authentication.'
           });
         }
       } else {
@@ -3815,6 +3817,353 @@ router.post('/deregistration-requests/:id/deny', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to deny deregistration request'
+    });
+  }
+});
+
+// Get all verification images (admin only)
+router.get('/verification-images', async (req, res): Promise<void> => {
+  try {
+    const verificationsDir = process.env.VERIFICATIONS_DIR || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/services/verification-bot/verifications'
+        : path.join(__dirname, '../../../../services/verification-bot/verifications'));
+
+    if (!fs.existsSync(verificationsDir)) {
+      logger.info('Verifications directory does not exist', {
+        action: 'verifications_dir_missing',
+        path: verificationsDir
+      });
+      res.json({
+        success: true,
+        verificationImages: []
+      });
+      return;
+    }
+
+    const files = fs.readdirSync(verificationsDir);
+    const verificationImages: Array<{
+      filename: string;
+      imageUrl: string;
+      discordId: string | null;
+      uniqueId: string | null;
+      level: number | null;
+      rankName: string | null;
+      timestamp: string | null;
+      capturedAt: string | null;
+    }> = [];
+
+    // Parse verification image filenames: verification-{discordId}-{uniqueId}-{level}-{rankName}-{timestamp}.{ext}
+    for (const filename of files) {
+      if (!filename.startsWith('verification-')) {
+        continue;
+      }
+
+      // Parse filename to extract metadata
+      // Format: verification-{discordId}-{uniqueId}-{level}-{rankName}-{timestamp}.{ext}
+      // Rank name may contain underscores, so we need to match everything between level and timestamp
+      const match = filename.match(/^verification-(\d+)-([^-]+)-(\d+)-(.+)-(.+)\.(jpg|jpeg|png)$/i);
+      if (match) {
+        const [, discordId, uniqueId, level, rankNameWithUnderscores, timestamp] = match;
+        const rankName = rankNameWithUnderscores.replace(/_/g, ' '); // Convert underscores back to spaces
+        
+        // Parse timestamp from filename
+        let capturedAt: string | null = null;
+        try {
+          const timestampParts = timestamp.split('-');
+          if (timestampParts.length >= 6) {
+            const dateStr = `${timestampParts[0]}-${timestampParts[1]}-${timestampParts[2]}T${timestampParts[3]}:${timestampParts[4]}:${timestampParts[5]}.${timestampParts[6] || '000'}Z`;
+            capturedAt = new Date(dateStr).toISOString();
+          }
+        } catch (e) {
+          // If timestamp parsing fails, use file stats
+          const filePath = path.join(verificationsDir, filename);
+          try {
+            const stats = fs.statSync(filePath);
+            capturedAt = stats.birthtime.toISOString();
+          } catch (statError) {
+            logger.warn('Failed to get file stats', { filename, error: statError });
+          }
+        }
+
+        verificationImages.push({
+          filename,
+          imageUrl: `/8bp-rewards/api/admin/verification-images/view/${filename}`,
+          discordId,
+          uniqueId: uniqueId !== 'unknown' ? uniqueId : null,
+          level: parseInt(level, 10) || null,
+          rankName: rankName.replace(/_/g, ' ') || null,
+          timestamp,
+          capturedAt
+        });
+      } else {
+        // Fallback: if filename doesn't match pattern, still include it
+        const filePath = path.join(verificationsDir, filename);
+        try {
+          const stats = fs.statSync(filePath);
+          // Try to extract Discord ID from filename
+          const discordIdMatch = filename.match(/^verification-(\d+)-/);
+          verificationImages.push({
+            filename,
+            imageUrl: `/8bp-rewards/api/admin/verification-images/view/${filename}`,
+            discordId: discordIdMatch ? discordIdMatch[1] : null,
+            uniqueId: null,
+            level: null,
+            rankName: null,
+            timestamp: null,
+            capturedAt: stats.birthtime.toISOString()
+          });
+        } catch (statError) {
+          logger.warn('Failed to process verification image', { filename, error: statError });
+        }
+      }
+    }
+
+    // Sort by capturedAt descending (newest first)
+    verificationImages.sort((a, b) => {
+      const timeA = a.capturedAt ? new Date(a.capturedAt).getTime() : 0;
+      const timeB = b.capturedAt ? new Date(b.capturedAt).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    logger.info('Fetched all verification images', {
+      action: 'get_all_verification_images',
+      count: verificationImages.length
+    });
+
+    res.json({
+      success: true,
+      verificationImages
+    });
+    return;
+  } catch (error) {
+    logger.error('Error fetching verification images', {
+      action: 'get_all_verification_images_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch verification images'
+    });
+  }
+});
+
+// Assign avatars to users
+router.post('/assign-avatars', authenticateAdmin, async (req, res): Promise<void> => {
+  try {
+    const { userIds, avatarType } = req.body;
+    const adminId = (req as AdminRequest).user?.id;
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'userIds array is required and must not be empty'
+      });
+      return;
+    }
+
+    if (!avatarType) {
+      res.status(400).json({
+        success: false,
+        error: 'avatarType is required (either "random" or a specific avatar filename)'
+      });
+      return;
+    }
+
+    logger.info('Admin avatar assignment request', {
+      action: 'admin_assign_avatars',
+      adminId,
+      userIdCount: userIds.length,
+      avatarType
+    });
+
+    const avatarsDir = path.join(process.cwd(), 'frontend', '8 Ball Pool Avatars');
+    let selectedAvatarFilename: string | null = null;
+
+    // Determine which avatar to assign
+    if (avatarType === 'random') {
+      selectedAvatarFilename = getRandom8BPAvatar();
+      if (!selectedAvatarFilename) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get random avatar'
+        });
+        return;
+      }
+    } else {
+      // Validate that the specific avatar exists
+      const avatarPath = path.join(avatarsDir, avatarType);
+      if (!fs.existsSync(avatarPath)) {
+        res.status(400).json({
+          success: false,
+          error: `Avatar file not found: ${avatarType}`
+        });
+        return;
+      }
+      selectedAvatarFilename = avatarType;
+    }
+
+    const results: Array<{ userId: string; success: boolean; error?: string }> = [];
+    let assigned = 0;
+    let failed = 0;
+
+    // Process each user
+    for (const userId of userIds) {
+      try {
+        // Find registration by eightBallPoolId
+        const registration = await dbService.findRegistration({ eightBallPoolId: userId });
+        
+        if (!registration) {
+          results.push({
+            userId,
+            success: false,
+            error: 'User not found'
+          });
+          failed++;
+          continue;
+        }
+
+        // Update registration with avatar
+        await dbService.updateRegistration(userId, {
+          eight_ball_pool_avatar_filename: selectedAvatarFilename
+        });
+
+        // Emit WebSocket event for avatar update
+        if (registration.discordId) {
+          // Compute active avatar URL
+          let activeAvatarUrl: string | null = null;
+          if (registration.leaderboard_image_url) {
+            activeAvatarUrl = registration.leaderboard_image_url;
+          } else if (selectedAvatarFilename) {
+            activeAvatarUrl = `/8bp-rewards/avatars/${selectedAvatarFilename}`;
+          } else if (registration.use_discord_avatar && registration.discordId && registration.discord_avatar_hash) {
+            activeAvatarUrl = `https://cdn.discordapp.com/avatars/${registration.discordId}/${registration.discord_avatar_hash}.png`;
+          } else if (registration.profile_image_url) {
+            activeAvatarUrl = registration.profile_image_url;
+          }
+
+          WebSocketService.emitAvatarUpdate(registration.discordId, {
+            eightBallPoolId: userId,
+            activeAvatarUrl,
+            activeUsername: registration.username,
+            profile_image_url: registration.profile_image_url || null,
+            leaderboard_image_url: registration.leaderboard_image_url || null,
+            eight_ball_pool_avatar_filename: selectedAvatarFilename,
+            use_discord_avatar: registration.use_discord_avatar ?? (registration.discordId ? true : false),
+            use_discord_username: registration.use_discord_username ?? false,
+            discord_avatar_hash: registration.discord_avatar_hash || null
+          });
+          WebSocketService.emitAvatarsRefresh(registration.discordId);
+        }
+
+        results.push({
+          userId,
+          success: true
+        });
+        assigned++;
+
+        logger.info('Avatar assigned to user', {
+          action: 'avatar_assigned',
+          adminId,
+          userId,
+          avatarFilename: selectedAvatarFilename
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        results.push({
+          userId,
+          success: false,
+          error: errorMessage
+        });
+        failed++;
+
+        logger.error('Failed to assign avatar to user', {
+          action: 'avatar_assignment_failed',
+          adminId,
+          userId,
+          error: errorMessage
+        });
+      }
+    }
+
+    logger.info('Avatar assignment completed', {
+      action: 'admin_assign_avatars_complete',
+      adminId,
+      total: userIds.length,
+      assigned,
+      failed,
+      avatarFilename: selectedAvatarFilename
+    });
+
+    res.json({
+      success: true,
+      assigned,
+      failed,
+      results,
+      avatarFilename: selectedAvatarFilename
+    });
+  } catch (error) {
+    logger.error('Error assigning avatars', {
+      action: 'admin_assign_avatars_error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      adminId: (req as AdminRequest).user?.id
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to assign avatars'
+    });
+  }
+});
+
+// Serve verification image (admin only)
+router.get('/verification-images/view/:filename', async (req, res): Promise<void> => {
+  try {
+    const { filename } = req.params;
+
+    // Validate filename to prevent directory traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid filename'
+      });
+      return;
+    }
+
+    const verificationsDir = process.env.VERIFICATIONS_DIR || 
+      (process.env.NODE_ENV === 'production' 
+        ? '/app/services/verification-bot/verifications'
+        : path.join(__dirname, '../../../../services/verification-bot/verifications'));
+    const imagePath = path.join(verificationsDir, filename);
+
+    if (!fs.existsSync(imagePath)) {
+      res.status(404).json({
+        success: false,
+        message: 'Verification image not found'
+      });
+      return;
+    }
+
+    // Determine content type from extension
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+
+    // Set appropriate headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    // Stream the image file
+    const fileStream = fs.createReadStream(imagePath);
+    fileStream.pipe(res);
+  } catch (error) {
+    logger.error('Error serving verification image', {
+      action: 'serve_verification_image_error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to serve verification image'
     });
   }
 });

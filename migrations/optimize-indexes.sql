@@ -1,4 +1,4 @@
--- PostgreSQL Index Optimization
+-- PostgreSQL Index Optimisation
 -- Run this script to add performance indexes for common queries
 
 -- Composite indexes for leaderboard queries (most common query pattern)
@@ -25,7 +25,7 @@ WHERE status = 'active' OR status IS NULL;
 CREATE INDEX IF NOT EXISTS idx_invalid_users_eight_ball_pool_id_deregistered_at 
 ON invalid_users(eight_ball_pool_id, deregistered_at DESC);
 
--- Analyze tables to update query planner statistics
+-- Analyse tables to update query planner statistics
 ANALYZE registrations;
 ANALYZE claim_records;
 ANALYZE invalid_users;

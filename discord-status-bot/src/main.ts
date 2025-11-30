@@ -41,17 +41,6 @@ async function main(): Promise<void> {
 		bot = new DiscordBot();
 		await bot.start();
 		
-		// Register slash commands after bot is ready
-		setTimeout(async () => {
-			try {
-				if (bot) {
-					await bot.registerSlashCommands();
-				}
-			} catch (error) {
-				logger.error("Failed to register slash commands:", error);
-			}
-		}, 5000); // Wait 5 seconds for bot to be ready
-		
 		logger.info("Discord Status Bot started successfully");
 		
 	} catch (error) {

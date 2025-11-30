@@ -1,9 +1,12 @@
 import express from 'express';
 import { DatabaseService } from '../services/DatabaseService';
 import { logger } from '../services/LoggerService';
+import DiscordNotificationService from '../services/DiscordNotificationService';
+import { getRandom8BPAvatar } from '../utils/avatarUtils';
 
 const router = express.Router();
 const dbService = DatabaseService.getInstance();
+const discordNotificationService = new DiscordNotificationService();
 
 /**
  * Internal API endpoint for verification bot to sync verification data
@@ -48,31 +51,73 @@ router.post('/sync', async (req, res): Promise<void> => {
 
 		if (existingRegistration) {
 			// Update existing registration with verification data
-			// Always update username when verification bot detects it (username from image takes precedence)
+			// Preserve existing username - do not overwrite it
+			// Only update level/rank if new values are higher
+			const currentLevel = existingRegistration.account_level || 0;
+			const shouldUpdateLevel = level > currentLevel;
+			const shouldUpdateRank = shouldUpdateLevel; // If level is higher, rank should also be higher
+			
 			logger.info('Updating existing rewards registration with verification data', {
 				eightBallPoolId: existingRegistration.eightBallPoolId,
 				normalizedUniqueId,
 				originalUniqueId: unique_id,
 				discord_id,
-				username,
+				username_from_image: username,
 				current_username: existingRegistration.username,
-				level,
-				rank_name
+				current_level: currentLevel,
+				new_level: level,
+				should_update_level: shouldUpdateLevel,
+				current_rank: existingRegistration.account_rank,
+				new_rank: rank_name,
+				should_update_rank: shouldUpdateRank,
 			});
 
-			await dbService.updateRegistration(existingRegistration.eightBallPoolId, {
-				username: username, // Update username from verification image if different
+			// Update registration data - preserve username, only update level/rank if higher
+			const updateData: any = {
+				// Do NOT update username - preserve existing username from original account
 				discordId: discord_id,
-				account_level: level,
-				account_rank: rank_name,
 				verified_at: new Date()
-			});
+			};
+			
+			// Only update level and rank if new values are higher
+			if (shouldUpdateLevel) {
+				updateData.account_level = level;
+				updateData.account_rank = rank_name;
+			}
+
+			await dbService.updateRegistration(existingRegistration.eightBallPoolId, updateData);
+			
+			const finalLevel = shouldUpdateLevel ? level : existingRegistration.account_level;
+			const finalRank = shouldUpdateRank ? rank_name : existingRegistration.account_rank;
 			
 			logger.info('Registration updated successfully with verification data', {
 				eightBallPoolId: existingRegistration.eightBallPoolId,
-				account_level: level,
-				account_rank: rank_name
+				username_preserved: existingRegistration.username,
+				account_level_updated: shouldUpdateLevel,
+				final_account_level: finalLevel,
+				account_rank_updated: shouldUpdateRank,
+				final_account_rank: finalRank,
 			});
+
+			// Send Discord notification to registration channel
+			// Use existing username (preserved) for display, not the username from the image
+			try {
+				await discordNotificationService.sendVerificationConfirmation(
+					normalizedUniqueId,
+					existingRegistration.username, // Use preserved username, not username from image
+					finalLevel || level, // Use updated level if changed, otherwise current
+					finalRank || rank_name, // Use updated rank if changed, otherwise current
+					discord_id,
+					existingRegistration.username // Use preserved username for Discord notification
+				);
+			} catch (notifError) {
+				logger.warn('Failed to send verification confirmation notification', {
+					error: notifError instanceof Error ? notifError.message : 'Unknown error',
+					discord_id,
+					unique_id: normalizedUniqueId
+				});
+				// Don't fail the sync if notification fails
+			}
 
 			res.json({
 				success: true,
@@ -85,9 +130,13 @@ router.post('/sync', async (req, res): Promise<void> => {
 		// Create new registration
 		logger.info('Creating new rewards registration from verification', {
 			eightBallPoolId: unique_id,
-			discord_id
+			discord_id,
+			username_from_image: username,
+			level,
+			rank_name
 		});
 
+		// Create new registration (no random avatar assignment)
 		const newRegistration = await dbService.createRegistration({
 			eightBallPoolId: normalizedUniqueId, // Use normalized ID (no dashes)
 			username: username,
@@ -100,8 +149,28 @@ router.post('/sync', async (req, res): Promise<void> => {
 			deviceType: 'bot',
 			userAgent: 'verification-bot',
 			lastLoginAt: new Date(),
-			isActive: true
+			isActive: true,
+			eight_ball_pool_avatar_filename: null
 		});
+
+		// Send Discord notification to registration channel
+		try {
+			await discordNotificationService.sendVerificationConfirmation(
+				normalizedUniqueId,
+				username,
+				level,
+				rank_name,
+				discord_id,
+				username // Discord username (using account username as fallback)
+			);
+		} catch (notifError) {
+			logger.warn('Failed to send verification confirmation notification', {
+				error: notifError instanceof Error ? notifError.message : 'Unknown error',
+				discord_id,
+				unique_id: normalizedUniqueId
+			});
+			// Don't fail the sync if notification fails
+		}
 
 		res.json({
 			success: true,

@@ -16,6 +16,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, role, login, logout } = useAuth();
 
+  // Get Discord avatar URL or return null for default
+  const getDiscordAvatarUrl = (userId: string | undefined, avatar: string | null | undefined): string | null => {
+    if (userId && avatar) {
+      return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png`;
+    }
+    return null;
+  };
+
+  const avatarUrl = getDiscordAvatarUrl(user?.id, user?.avatar || null);
+
   const navigation: Array<{
     name: string;
     href: string;
@@ -195,9 +205,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">{user?.username}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">{role}</p>
                     </div>
-                    <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 dark:from-dark-accent-navy dark:to-dark-accent-blue flex items-center justify-center text-white shadow-lg shadow-primary-500/20">
-                      <User className="w-5 h-5" />
-                    </div>
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={user?.username || 'User'}
+                        className="h-9 w-9 rounded-full object-cover shadow-lg shadow-primary-500/20 border-2 border-white dark:border-background-dark-secondary"
+                      />
+                    ) : (
+                      <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 dark:from-dark-accent-navy dark:to-dark-accent-blue flex items-center justify-center text-white shadow-lg shadow-primary-500/20">
+                        <User className="w-5 h-5" />
+                      </div>
+                    )}
                   </div>
 
                   <button
@@ -213,9 +231,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Mobile menu button */}
               <div className="lg:hidden flex items-center space-x-4">
                 {isAuthenticated && (
-                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 dark:from-dark-accent-navy dark:to-dark-accent-blue flex items-center justify-center text-white">
-                    <User className="w-4 h-4" />
-                  </div>
+                  avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={user?.username || 'User'}
+                      className="h-8 w-8 rounded-full object-cover border-2 border-white dark:border-background-dark-secondary"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 dark:from-dark-accent-navy dark:to-dark-accent-blue flex items-center justify-center text-white">
+                      <User className="w-4 h-4" />
+                    </div>
+                  )
                 )}
                 <button
                   onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}

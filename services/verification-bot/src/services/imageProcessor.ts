@@ -11,6 +11,11 @@ import { MatchedRank } from '../types';
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20 MB
 const DOWNLOAD_TIMEOUT_MS = 10_000;
 const TEMP_DIR = path.join(process.cwd(), 'tmp');
+// Use environment variable or default to mounted volume path
+const VERIFICATIONS_DIR = process.env.VERIFICATIONS_DIR || 
+  (process.env.NODE_ENV === 'production' 
+    ? '/app/services/verification-bot/verifications'
+    : path.join(process.cwd(), 'services', 'verification-bot', 'verifications'));
 
 export type ImageSource = {
   url: string;
@@ -27,6 +32,10 @@ type ProcessedAttachment = {
 
 if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(VERIFICATIONS_DIR)) {
+  fs.mkdirSync(VERIFICATIONS_DIR, { recursive: true });
 }
 
 /**
@@ -180,6 +189,100 @@ function resolveContentType(input: string | null | undefined, extension: string)
 }
 
 /**
+ * Save verification image to dedicated folder
+ */
+export async function saveVerificationImage(
+  imageBuffer: Buffer,
+  discordId: string,
+  uniqueId: string | null,
+  level: number,
+  rankName: string,
+  fileExtension: string
+): Promise<string | null> {
+  try {
+    logger.debug('💾 saveVerificationImage called', {
+      discord_id: discordId,
+      unique_id: uniqueId,
+      level,
+      rank_name: rankName,
+      file_extension: fileExtension,
+      buffer_size: imageBuffer.length,
+      verifications_dir: VERIFICATIONS_DIR,
+    });
+
+    // Ensure directory exists
+    if (!fs.existsSync(VERIFICATIONS_DIR)) {
+      logger.info('Creating verifications directory', { path: VERIFICATIONS_DIR });
+      fs.mkdirSync(VERIFICATIONS_DIR, { recursive: true });
+      logger.info('✅ Verifications directory created', { path: VERIFICATIONS_DIR });
+    }
+
+    // Verify directory is writable
+    try {
+      await fs.promises.access(VERIFICATIONS_DIR, fs.constants.W_OK);
+      logger.debug('✅ Verifications directory is writable', { path: VERIFICATIONS_DIR });
+    } catch (accessError) {
+      logger.error('❌ Verifications directory is not writable!', {
+        path: VERIFICATIONS_DIR,
+        error: accessError instanceof Error ? accessError.message : String(accessError),
+      });
+      return null;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const uniqueIdPart = uniqueId ? uniqueId.replace(/-/g, '') : 'unknown';
+    const sanitizedRankName = rankName.replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_');
+    const filename = `verification-${discordId}-${uniqueIdPart}-${level}-${sanitizedRankName}-${timestamp}${fileExtension}`;
+    const filePath = path.join(VERIFICATIONS_DIR, filename);
+    
+    logger.debug('Writing verification image to disk', {
+      filename,
+      file_path: filePath,
+      buffer_size: imageBuffer.length,
+    });
+    
+    await fs.promises.writeFile(filePath, imageBuffer);
+    
+    // Verify file was written
+    const stats = await fs.promises.stat(filePath);
+    if (stats.size !== imageBuffer.length) {
+      logger.error('❌ File size mismatch after write!', {
+        expected_size: imageBuffer.length,
+        actual_size: stats.size,
+        file_path: filePath,
+      });
+      return null;
+    }
+
+    logger.info('✅ Verification image saved successfully', {
+      file_path: filePath,
+      filename,
+      discord_id: discordId,
+      unique_id: uniqueId,
+      level,
+      rank_name: rankName,
+      file_size: imageBuffer.length,
+      file_size_on_disk: stats.size,
+      file_exists: fs.existsSync(filePath),
+    });
+    
+    return filename; // Return filename instead of full path for API use
+  } catch (error) {
+    logger.error('❌ Failed to save verification image - exception thrown', {
+      error: error instanceof Error ? error.message : String(error),
+      error_stack: error instanceof Error ? error.stack : undefined,
+      discord_id: discordId,
+      unique_id: uniqueId,
+      level,
+      rank_name: rankName,
+      verifications_dir: VERIFICATIONS_DIR,
+      dir_exists: fs.existsSync(VERIFICATIONS_DIR),
+    });
+    return null;
+  }
+}
+
+/**
  * Process image using OpenAI Vision API to extract profile data
  * Maintains compatibility with existing code structure
  */
@@ -191,9 +294,12 @@ export async function processImage(source: ImageSource): Promise<{
   ocrText?: string;
   screenshotHash?: string;
   uniqueId?: string | null;
+  accountUsername?: string | null;
   attachmentUrl: string;
   attachmentFile?: ProcessedAttachment;
   ocrArtifacts?: never; // No longer used, but kept for type compatibility
+  savedVerificationPath?: string | null;
+  profileData?: ProfileData;
 }> {
   const urlWithoutQuery = source.url.split('?')[0];
   const fileExtension = path.extname(urlWithoutQuery).toLowerCase();
@@ -245,10 +351,22 @@ export async function processImage(source: ImageSource): Promise<{
     logger.debug('Extracting profile data with Vision API...');
     const profileData = await extractProfileData(attachmentBuffer);
 
-    logger.info('Profile data extracted via Vision API', {
+    logger.info('✅ Profile data extracted via Vision API', {
       level: profileData.level,
+      level_type: typeof profileData.level,
       rank: profileData.rank,
+      rank_type: typeof profileData.rank,
       uniqueId: profileData.uniqueId,
+      uniqueId_type: typeof profileData.uniqueId,
+      username: profileData.username,
+      username_type: typeof profileData.username,
+      usernameIsUnknown: profileData.username === 'UNKNOWN',
+      all_fields_extracted: {
+        has_level: profileData.level !== 'UNKNOWN',
+        has_rank: profileData.rank !== 'UNKNOWN',
+        has_uniqueId: profileData.uniqueId !== 'UNKNOWN',
+        has_username: profileData.username !== 'UNKNOWN' && profileData.username !== undefined,
+      },
     });
 
     // Validate if this is a profile screenshot
@@ -265,11 +383,13 @@ export async function processImage(source: ImageSource): Promise<{
         screenshotHash,
         attachmentUrl: source.url,
         uniqueId: profileData.uniqueId !== 'UNKNOWN' ? profileData.uniqueId : null,
+        accountUsername: profileData.username && profileData.username !== 'UNKNOWN' && profileData.username.trim() !== '' ? profileData.username.trim() : null,
         attachmentFile: {
           data: attachmentBuffer,
           name: attachmentFilename,
           contentType: attachmentContentType,
         },
+        profileData,
       };
     }
 
@@ -314,6 +434,7 @@ export async function processImage(source: ImageSource): Promise<{
         isProfile: true,
         screenshotHash,
         uniqueId: profileData.uniqueId !== 'UNKNOWN' ? profileData.uniqueId : null,
+        accountUsername: profileData.username && profileData.username !== 'UNKNOWN' && profileData.username.trim() !== '' ? profileData.username.trim() : null,
         attachmentUrl: source.url,
         ocrText: '', // Empty for Vision API, kept for compatibility
         attachmentFile: {
@@ -321,6 +442,7 @@ export async function processImage(source: ImageSource): Promise<{
           name: attachmentFilename,
           contentType: attachmentContentType,
         },
+        profileData,
       };
     }
 
@@ -335,11 +457,17 @@ export async function processImage(source: ImageSource): Promise<{
       finalLevel = matchedRank.level_detected ?? matchedRank.level_min;
     }
 
-    logger.info('Rank matched successfully', {
+    logger.info('✅ Rank matched successfully', {
       rank_name: matchedRank.rank_name,
       level: finalLevel,
+      level_type: typeof finalLevel,
       confidence: matchedRank.confidence,
+      uniqueId: profileData.uniqueId !== 'UNKNOWN' ? profileData.uniqueId : null,
+      accountUsername: profileData.username && profileData.username !== 'UNKNOWN' && profileData.username.trim() !== '' ? profileData.username.trim() : null,
     });
+
+    // Note: Verification image will be saved in messageCreate.ts after successful verification
+    // We return the buffer here so it can be saved with user context
 
     return {
       success: true,
@@ -351,12 +479,15 @@ export async function processImage(source: ImageSource): Promise<{
       ocrText: '', // Empty for Vision API, kept for compatibility
       screenshotHash,
       uniqueId: profileData.uniqueId !== 'UNKNOWN' ? profileData.uniqueId : null,
+      accountUsername: profileData.username && profileData.username !== 'UNKNOWN' && profileData.username.trim() !== '' ? profileData.username.trim() : null,
       attachmentUrl: source.url,
       attachmentFile: {
         data: attachmentBuffer,
         name: attachmentFilename,
         contentType: attachmentContentType,
       },
+      savedVerificationPath: null, // Will be set in messageCreate.ts
+      profileData,
     };
   } catch (error) {
     logger.error('Error processing image', {

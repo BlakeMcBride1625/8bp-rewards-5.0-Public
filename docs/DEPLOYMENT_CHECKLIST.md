@@ -1,169 +1,139 @@
-# Deployment Checklist
+# Pre-Deployment Checklist
 
-## Pre-Deployment Verification
+## ✅ Required Steps Before Deploying New Features
 
-### ✅ Code Changes Complete
-- [x] `user_id = username` implemented (8BP account username from registration or verification)
-- [x] Role detection (Owner/Admin/Member) working
-- [x] All fallback usernames removed
-- [x] Leaderboard uses INNER JOIN, filters non-null usernames
-- [x] User dashboard returns `user_id` correctly
-- [x] Verification always updates username when detected
-- [x] TypeScript compiles successfully
+### 1. Database Migration - **REQUIRED**
+Run the support tickets migration to create the necessary tables:
 
-### ✅ Files Modified
-**Backend:**
-- `backend/src/utils/roles.ts` (NEW)
-- `backend/src/routes/auth.ts`
-- `backend/src/routes/leaderboard.ts`
-- `backend/src/routes/user-dashboard.ts`
-- `backend/src/routes/verification.ts`
-- `backend/src/services/VerificationSyncService.ts`
-
-**Frontend:**
-- `frontend/src/hooks/useAuth.tsx`
-- `frontend/src/components/Layout.tsx`
-- `frontend/src/pages/LeaderboardPage.tsx`
-- `frontend/src/pages/UserDashboardPage.tsx`
-
-**Migration:**
-- `migrations/unified_database_migration.sql` (NEW)
-- `migrations/copy_verification_data.sql` (NEW)
-- `migrations/README_DATABASE_CONSOLIDATION.md` (NEW)
-
-## Testing Checklist
-
-### Manual Testing
-- [ ] Test leaderboard displays correct usernames (not Discord names, not IDs)
-- [ ] Test user dashboard shows correct username and `user_id` for logged-in user
-- [ ] Test role display in navbar (Owner/Admin/Member)
-- [ ] Test search functionality with username and `user_id`
-- [ ] Test verification bot updates username when image is processed
-- [ ] Verify no fallback usernames ("User 123", "Unknown") appear anywhere
-
-### API Testing
-- [ ] GET `/api/leaderboard` returns `user_id`, `username`, `eight_ball_pool_id`
-- [ ] GET `/api/user-dashboard/linked-accounts` returns `user_id` correctly
-- [ ] GET `/api/auth/status` returns `role` field
-- [ ] POST `/api/internal/verification/sync` updates username correctly
-
-## Database Migration (Optional)
-
-### Before Migration
-- [ ] Backup `8bp_rewards` database
-- [ ] Backup `accountchecker` database (verification DB)
-- [ ] Test migration in staging environment first
-
-### Migration Steps
-1. Run `migrations/unified_database_migration.sql` in rewards DB
-2. Run `migrations/copy_verification_data.sql` to copy data
-3. Verify data integrity with validation queries
-4. (Optional) Switch verification bot to use unified database
-
-See `migrations/README_DATABASE_CONSOLIDATION.md` for detailed instructions.
-
-## Deployment Steps
-
-### 1. Build Services
 ```bash
 cd /home/blake/8bp-rewards
 
-# Build backend
-cd backend && npm run build
+# Copy migration file to container
+docker cp migrations/add_support_tickets.sql 8bp-postgres:/tmp/
 
-# Build frontend
-cd ../frontend && npm run build
+# Run migration
+docker-compose exec postgres psql -U ${POSTGRES_USER:-8bp_user} -d ${POSTGRES_DB:-8bp_rewards} -f /tmp/add_support_tickets.sql
+
+# Verify tables were created
+docker-compose exec postgres psql -U ${POSTGRES_USER:-8bp_user} -d ${POSTGRES_DB:-8bp_rewards} -c "\dt" | grep -E "support_tickets|ticket_"
 ```
 
-### 2. Restart Services
+**Expected output:** Should show:
+- `support_tickets`
+- `ticket_attachments`
+- `ticket_messages`
+- `ticket_sequences`
+
+### 2. Create Verifications Folder (Optional - will auto-create)
+The verifications folder will be created automatically when the first image is saved, but you can create it manually:
+
 ```bash
-docker-compose restart backend
-# Or rebuild if needed:
-docker-compose up -d --build backend
+mkdir -p /home/blake/8bp-rewards/services/verification-bot/verifications
+chmod 755 /home/blake/8bp-rewards/services/verification-bot/verifications
 ```
 
-### 3. Verify Services
+### 3. Verify Docker Compose Configuration
+Check that volume mounts are correct:
+
 ```bash
-# Check services are running
-docker ps | grep 8bp
-
-# Check backend logs
-docker logs 8bp-backend --tail 50
-
-# Check verification bot logs
-docker logs 8bp-verification-bot --tail 50
+docker-compose config | grep -A 5 "verification-bot:" | grep volumes
 ```
 
-### 4. Test Endpoints
+Should show:
+- `./services/verification-bot/verifications:/app/services/verification-bot/verifications`
+
+### 4. Rebuild and Restart Services
+After migration, rebuild and restart affected services:
+
 ```bash
-# Test auth status
-curl http://localhost:2600/api/auth/status
+# Rebuild services with new code
+docker-compose build backend verification-bot
 
-# Test leaderboard
-curl http://localhost:2600/api/leaderboard?timeframe=7d&limit=10
+# Restart services gracefully
+docker-compose restart backend verification-bot
+
+# Or full restart (if needed)
+docker-compose down
+docker-compose up -d
 ```
 
-## Post-Deployment Verification
+### 5. Verify Services Are Running
+Check all services are healthy:
 
-- [ ] Verify leaderboard shows correct usernames
-- [ ] Verify user dashboard displays `user_id` correctly
-- [ ] Verify role displays correctly in navbar
-- [ ] Check logs for any errors
-- [ ] Verify verification bot sync still works
+```bash
+docker-compose ps
+```
 
-## Rollback Plan
+All services should show `Up` status.
 
-If issues occur:
+### 6. Test New Features
+After deployment, test:
 
-1. **Code Rollback:**
+- [ ] Contact form with file upload
+- [ ] User dashboard support chat (create ticket)
+- [ ] Admin dashboard support tickets view
+- [ ] Verification images display (user and admin)
+- [ ] Screenshots organized by account ID
+- [ ] Discord bot `/clear` command with "all" option
+- [ ] All bots show DND status
+
+### 7. Check Logs
+Monitor logs for any errors:
+
+```bash
+# Backend logs
+docker-compose logs -f backend
+
+# Verification bot logs
+docker-compose logs -f verification-bot
+
+# Discord API logs
+docker-compose logs -f discord-api
+```
+
+## 🚨 Important Notes
+
+1. **Database Migration is CRITICAL** - The support ticket system will not work without running the migration first.
+
+2. **No .env Changes Needed** - All paths are configured with sensible defaults.
+
+3. **Verifications Folder** - Will be created automatically on first save, but creating it manually ensures proper permissions.
+
+4. **Backup First** (Recommended):
    ```bash
-   git checkout <previous-commit>
-   docker-compose restart backend
+   # Backup database before migration
+   docker-compose exec postgres pg_dump -U ${POSTGRES_USER:-8bp_user} ${POSTGRES_DB:-8bp_rewards} > backup_$(date +%Y%m%d_%H%M%S).sql
    ```
 
-2. **Database Rollback:**
-   - Restore from backup if migration was run
-   - Verification bot can still use separate database
+## ✅ Quick Deploy Script
 
-3. **No Breaking Changes:**
-   - All changes are backward compatible
-   - Existing functionality preserved
+```bash
+#!/bin/bash
+cd /home/blake/8bp-rewards
 
-## Environment Variables
+# 1. Run migration
+echo "Running database migration..."
+docker cp migrations/add_support_tickets.sql 8bp-postgres:/tmp/
+docker-compose exec -T postgres psql -U ${POSTGRES_USER:-8bp_user} -d ${POSTGRES_DB:-8bp_rewards} -f /tmp/add_support_tickets.sql
 
-Ensure these are set correctly:
+# 2. Create verifications folder
+echo "Creating verifications folder..."
+mkdir -p services/verification-bot/verifications
+chmod 755 services/verification-bot/verifications
 
-```env
-# Role Detection
-VPS_OWNERS=discord_id1,discord_id2
-ALLOWED_ADMINS=discord_id1,discord_id2
+# 3. Rebuild and restart
+echo "Rebuilding services..."
+docker-compose build backend verification-bot
 
-# Verification
-VERIFICATION_BOT_TOKEN=...
-VERIFICATION_DATABASE_URL=...
-OPENAI_API_KEY=...
+echo "Restarting services..."
+docker-compose restart backend verification-bot
 
-# Database
-POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
-POSTGRES_DB=8bp_rewards
-POSTGRES_USER=admin
-POSTGRES_PASSWORD=...
+# 4. Verify
+echo "Checking service status..."
+docker-compose ps
+
+echo "✅ Deployment complete!"
 ```
 
-## Monitoring
 
-After deployment, monitor:
-- [ ] Error logs for any username-related issues
-- [ ] Leaderboard query performance
-- [ ] User dashboard loading times
-- [ ] Verification sync success rate
-
-## Support
-
-If issues arise:
-1. Check logs: `docker logs 8bp-backend`
-2. Review `./CHANGES_COMPLETE.md` for details
-3. Verify environment variables are set correctly
-4. Check database connectivity
 

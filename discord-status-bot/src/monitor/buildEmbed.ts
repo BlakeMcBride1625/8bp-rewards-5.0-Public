@@ -12,7 +12,7 @@ export class EmbedBuilder {
 	public buildDailyReportEmbed(data: DailyReportData): DiscordEmbedBuilder {
 		const { services } = data;
 		
-		// Organize services into specific groups with custom ordering
+		// Organise services into specific groups with custom ordering
 		const serviceGroups = this.organizeServicesIntoGroups(services);
 		
 		// Build description with grouped service statuses

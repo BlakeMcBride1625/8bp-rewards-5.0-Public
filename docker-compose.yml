@@ -60,6 +60,7 @@ services:
       - SCHEDULER_CHANNEL_ID=${SCHEDULER_CHANNEL_ID}
       - REWARDS_CHANNEL_ID=${REWARDS_CHANNEL_ID}
       - REGISTRATION_CHANNEL_ID=${REGISTRATION_CHANNEL_ID}
+      - SUPPORT_CHANNEL_ID=${SUPPORT_CHANNEL_ID}
       - DISCORD_BOT_STATUS=${DISCORD_BOT_STATUS:-dnd}
       - ADMIN_EMAILS=${ADMIN_EMAILS}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -116,6 +117,9 @@ services:
       - ./backend/logs:/app/backend/logs
       - ./screenshots:/app/screenshots
       - ./backend/screenshots:/app/backend/screenshots
+      - ./uploads:/app/uploads
+      - ./services/verification-bot/verifications:/app/services/verification-bot/verifications
+      - ./frontend/8 Ball Pool Avatars:/app/frontend/8 Ball Pool Avatars
     depends_on:
       postgres:
         condition: service_healthy
@@ -307,7 +311,7 @@ services:
   verification-bot:
     build:
       context: .
-      dockerfile: Dockerfile.verification-bot
+      dockerfile: Dockerfile
     container_name: 8bp-verification-bot
     environment:
       - NODE_ENV=${NODE_ENV:-production}
@@ -329,10 +333,12 @@ services:
       - PUBLIC_URL=${PUBLIC_URL}
       - LOG_PATH=${LOG_PATH:-./logs/assignments.log}
       - EXAMPLE_IMAGE_URL=${EXAMPLE_IMAGE_URL:-}
+      - VERIFICATION_MOCK_MODE=${VERIFICATION_MOCK_MODE:-false}
     volumes:
       - ./logs:/app/logs
       - ./assets:/app/assets
       - ./services/verification-bot/src/config:/app/services/verification-bot/src/config
+      - ./services/verification-bot/verifications:/app/services/verification-bot/verifications
     depends_on:
       backend:
         condition: service_healthy
@@ -341,7 +347,7 @@ services:
     networks:
       - 8bp-network
     restart: unless-stopped
-    command: ["node", "dist/bot.js"]
+    command: ["node", "services/verification-bot/dist/bot.js"]
 
 volumes:
   postgres_data:

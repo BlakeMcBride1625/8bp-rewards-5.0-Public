@@ -99,18 +99,41 @@ class DiscordService {
       }
 
       try {
-        await command.execute(interaction, this);
+        // Set a timeout for command execution (30 seconds for long-running commands)
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Command execution timeout')), 30000);
+        });
+
+        await Promise.race([
+          command.execute(interaction, this),
+          timeoutPromise
+        ]);
       } catch (error) {
         console.error(`❌ Error executing command ${interaction.commandName}:`, error);
-        const errorMessage = '❌ There was an error while executing this command!';
+        console.error(`   User: ${interaction.user.tag} (${interaction.user.id})`);
+        console.error(`   Guild: ${interaction.guild?.name || 'DM'} (${interaction.guildId || 'N/A'})`);
+        console.error(`   Error details:`, error.stack || error.message);
         
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp({ content: errorMessage, ephemeral: interaction.inGuild() });
-        } else {
-          await interaction.reply({ 
-            content: errorMessage, 
-            ephemeral: interaction.inGuild()
-          });
+        // Check interaction state and respond appropriately
+        try {
+          if (interaction.replied) {
+            // Already replied, cannot send another message
+            console.error('   Interaction already replied to, cannot send error message');
+          } else if (interaction.deferred) {
+            // Deferred but not replied, use editReply or followUp
+            await interaction.followUp({ 
+              content: '❌ There was an error while executing this command!', 
+              ephemeral: true
+            });
+          } else {
+            // Not yet replied or deferred, send initial reply
+            await interaction.reply({ 
+              content: '❌ There was an error while executing this command!', 
+              ephemeral: true
+            });
+          }
+        } catch (replyError) {
+          console.error('Failed to send error response:', replyError.message);
         }
       }
     });
@@ -838,19 +861,34 @@ class DiscordService {
         .setName('clear')
         .setDescription('Delete bot messages from current channel or specified user\'s DMs (Admin only)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // Admin only
-        .addIntegerOption(option =>
+        .addStringOption(option =>
           option.setName('amount')
-            .setDescription('Number of messages to delete (1-100)')
-            .setRequired(true)
-            .setMinValue(1)
-            .setMaxValue(100))
+            .setDescription('Messages to delete (1-100) or "all"/"ALL" for all. Default: 100.')
+            .setRequired(false))
         .addUserOption(option =>
           option.setName('user')
             .setDescription('User whose DMs to clear (optional - if not specified, clears current channel)')
             .setRequired(false)),
       async execute(interaction, service) {
-        const amount = interaction.options.getInteger('amount');
+        const amountInput = interaction.options.getString('amount');
         const targetUser = interaction.options.getUser('user');
+        
+        // Parse amount - support "all", "ALL", or numeric values
+        let amount = 100; // Default to 100 if not specified
+        let clearAll = false;
+        
+        if (amountInput) {
+          const lowerInput = amountInput.toLowerCase();
+          if (lowerInput === 'all') {
+            clearAll = true;
+            amount = 100; // Start with 100, will loop if needed
+          } else {
+            const parsed = parseInt(amountInput, 10);
+            if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
+              amount = parsed;
+            }
+          }
+        }
         
         try {
           console.log(`🗑️ /clear command executed by ${interaction.user.tag} in ${interaction.inGuild() ? 'guild' : 'DM'}`);
@@ -901,7 +939,7 @@ class DiscordService {
           if (targetUser) {
             // Clear specified user's DMs
             try {
-              console.log(`🗑️ Clearing DMs for user: ${targetUser.tag}`);
+              console.log(`🗑️ Clearing DMs for user: ${targetUser.tag}${clearAll ? ' (ALL messages)' : ` (${amount} messages)`}`);
               
               // Get the target user's DM channel
               const dmChannel = await targetUser.createDM();
@@ -913,31 +951,64 @@ class DiscordService {
                 });
               }
               
-              // Fetch messages from the target user's DM channel
-              const messages = await dmChannel.messages.fetch({ limit: amount });
-              const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+              let totalDeleted = 0;
+              let hasMore = true;
+              let lastMessageId = null;
               
-              if (botMessages.size === 0) {
+              // Loop to delete all messages if clearAll is true
+              while (hasMore) {
+                const fetchOptions = { limit: Math.min(amount, 100) };
+                if (lastMessageId) {
+                  fetchOptions.before = lastMessageId;
+                }
+                
+                const messages = await dmChannel.messages.fetch(fetchOptions);
+                const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+                
+                if (botMessages.size === 0) {
+                  hasMore = false;
+                  break;
+                }
+                
+                // Store last message ID for next iteration
+                const sortedMessages = Array.from(botMessages.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+                if (sortedMessages.length > 0) {
+                  lastMessageId = sortedMessages[0].id;
+                }
+                
+                let batchDeleted = 0;
+                for (const [id, message] of botMessages) {
+                  try {
+                    await message.delete();
+                    batchDeleted++;
+                    totalDeleted++;
+                    // Small delay to avoid rate limits
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                  } catch (error) {
+                    console.error(`Failed to delete message ${id}:`, error);
+                  }
+                }
+                
+                // If not clearing all, or if we got fewer messages than requested, we're done
+                if (!clearAll || messages.size < amount || batchDeleted === 0) {
+                  hasMore = false;
+                }
+                
+                // Rate limit protection - small delay between batches
+                if (hasMore) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
+              }
+              
+              if (totalDeleted === 0) {
                 return interaction.followUp({
                   content: `❌ No bot messages found in ${targetUser.tag}'s DMs.`,
                   flags: 64 // EPHEMERAL
                 });
               }
               
-              let deletedCount = 0;
-              for (const [id, message] of botMessages) {
-                try {
-                  await message.delete();
-                  deletedCount++;
-                  // Small delay to avoid rate limits
-                  await new Promise(resolve => setTimeout(resolve, 100));
-                } catch (error) {
-                  console.error(`Failed to delete message ${id}:`, error);
-                }
-              }
-              
               await interaction.followUp({
-                content: `✅ Deleted ${deletedCount} bot messages from ${targetUser.tag}'s DMs.`,
+                content: `✅ Deleted ${totalDeleted} bot message${totalDeleted !== 1 ? 's' : ''} from ${targetUser.tag}'s DMs.`,
                 flags: 64 // EPHEMERAL
               });
               
@@ -950,32 +1021,66 @@ class DiscordService {
             }
           } else {
             // Clear current channel
-            console.log(`🗑️ Clearing current channel: ${channel.name}`);
+            console.log(`🗑️ Clearing current channel: ${channel.name}${clearAll ? ' (ALL messages)' : ` (${amount} messages)`}`);
             
-            const messages = await channel.messages.fetch({ limit: amount });
-            const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+            let totalDeleted = 0;
+            let hasMore = true;
+            let lastMessageId = null;
             
-            if (botMessages.size === 0) {
+            // Loop to delete all messages if clearAll is true
+            while (hasMore) {
+              const fetchOptions = { limit: Math.min(amount, 100) };
+              if (lastMessageId) {
+                fetchOptions.before = lastMessageId;
+              }
+              
+              const messages = await channel.messages.fetch(fetchOptions);
+              const botMessages = messages.filter(msg => msg.author.id === service.client.user.id);
+              
+              if (botMessages.size === 0) {
+                hasMore = false;
+                break;
+              }
+              
+              // Store last message ID for next iteration
+              const sortedMessages = Array.from(botMessages.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+              if (sortedMessages.length > 0) {
+                lastMessageId = sortedMessages[0].id;
+              }
+              
+              let batchDeleted = 0;
+              for (const [id, message] of botMessages) {
+                try {
+                  await message.delete();
+                  batchDeleted++;
+                  totalDeleted++;
+                  // Small delay to avoid rate limits
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (error) {
+                  console.error(`Failed to delete message ${id}:`, error);
+                }
+              }
+              
+              // If not clearing all, or if we got fewer messages than requested, we're done
+              if (!clearAll || messages.size < amount || batchDeleted === 0) {
+                hasMore = false;
+              }
+              
+              // Rate limit protection - small delay between batches
+              if (hasMore) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            }
+            
+            if (totalDeleted === 0) {
               return interaction.followUp({
                 content: '❌ No bot messages found to delete in this channel.',
                 flags: 64 // EPHEMERAL
               });
             }
             
-            let deletedCount = 0;
-            for (const [id, message] of botMessages) {
-              try {
-                await message.delete();
-                deletedCount++;
-                // Small delay to avoid rate limits
-                await new Promise(resolve => setTimeout(resolve, 100));
-              } catch (error) {
-                console.error(`Failed to delete message ${id}:`, error);
-              }
-            }
-            
             await interaction.followUp({
-              content: `✅ Deleted ${deletedCount} bot messages in this channel.`,
+              content: `✅ Deleted ${totalDeleted} bot message${totalDeleted !== 1 ? 's' : ''} in this channel.`,
               flags: 64 // EPHEMERAL
             });
           }
@@ -1152,21 +1257,15 @@ class DiscordService {
     try {
       const commands = Array.from(this.commands.values()).map(cmd => cmd.data.toJSON());
       
-      // Log the register command to verify the description
-      const registerCmd = commands.find(cmd => cmd.name === 'register');
-      if (registerCmd) {
-        const idOption = registerCmd.options?.find(opt => opt.name === 'id');
-        if (idOption) {
-          console.log(`📝 Register command - ID field description: "${idOption.description}"`);
-        }
-      }
+      console.log(`📝 Registering ${commands.length} slash commands...`);
+      console.log(`   Commands: ${commands.map(c => c.name).join(', ')}`);
       
-      // Also register to specific guild if DISCORD_GUILD_ID is set (appears immediately)
+      // Register to specific guild if DISCORD_GUILD_ID is set (appears immediately)
       const guildId = process.env.DISCORD_GUILD_ID;
       if (guildId) {
         try {
           // Wait a bit for guilds to be available
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 2000));
           
           // Try to get guild from cache first
           let guild = this.client.guilds.cache.get(guildId);
@@ -1183,24 +1282,10 @@ class DiscordService {
           }
           
           if (guild) {
-            // Delete all existing commands first to force refresh
-            console.log(`🗑️ Deleting existing guild commands to force refresh...`);
-            const existingCommands = await guild.commands.fetch();
-            for (const [id, command] of existingCommands) {
-              try {
-                await command.delete();
-                console.log(`   Deleted: ${command.name}`);
-              } catch (err) {
-                console.log(`   Failed to delete ${command.name}: ${err.message}`);
-              }
-            }
-            
-            // Wait a moment before re-registering
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Register new commands
+            // Use set() which intelligently updates commands without full deletion
+            console.log(`🔄 Updating guild commands for: ${guild.name} (${guildId})`);
             await guild.commands.set(commands);
-            console.log(`✅ Registered ${commands.length} slash commands to guild: ${guild.name} (${guildId})`);
+            console.log(`✅ Registered ${commands.length} slash commands to guild instantly`);
           } else {
             console.log(`⚠️ Guild ${guildId} not found or bot is not a member`);
             const availableGuilds = Array.from(this.client.guilds.cache.values());
@@ -1215,7 +1300,7 @@ class DiscordService {
             console.log(`💡 Tip: Make sure the bot is invited to the guild with ID ${guildId}`);
           }
         } catch (guildError) {
-          console.log(`⚠️ Failed to register commands to guild: ${guildError.message}`);
+          console.error(`❌ Failed to register commands to guild: ${guildError.message}`);
           const availableGuilds = Array.from(this.client.guilds.cache.values());
           if (availableGuilds.length > 0) {
             console.log(`📋 Bot is a member of these guilds:`);
@@ -1227,14 +1312,19 @@ class DiscordService {
       }
       
       // Register commands globally (takes up to 1 hour to appear)
+      // Use set() which intelligently updates commands
+      console.log(`🌐 Registering commands globally (may take up to 1 hour to propagate)...`);
       await this.client.application.commands.set(commands);
       console.log(`✅ Registered ${commands.length} slash commands globally`);
       
       if (!guildId) {
         console.log(`⚠️ DISCORD_GUILD_ID not set, commands will only be registered globally (may take up to 1 hour to appear)`);
       }
+      
+      console.log(`✅ Command registration complete!`);
     } catch (error) {
       console.error('❌ Failed to register slash commands:', error);
+      throw error;
     }
   }
 

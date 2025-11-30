@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { Navigate, Link } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { API_ENDPOINTS, getAdminUserBlockEndpoint, getAdminRegistrationDeleteEnd
 import { useVPSStats } from '../hooks/useWebSocket';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import PostgreSQLDBManager from '../components/PostgreSQLDBManager';
+import SupportTicketsManager from '../components/SupportTicketsManager';
 import { 
   Shield, 
   Users, 
@@ -41,7 +42,9 @@ import {
   CircleDot,
   Pause,
   ChevronDown,
-  Network
+  Network,
+  MessageSquare,
+  X
 } from 'lucide-react';
 import ClaimProgressTracker from '../components/ClaimProgressTracker';
 import VPSAuthModal from '../components/VPSAuthModal';
@@ -198,8 +201,25 @@ const AdminDashboardPage: React.FC = () => {
   const [isLoadingScreenshots, setIsLoadingScreenshots] = useState(false);
   const [screenshotFetchTimeout, setScreenshotFetchTimeout] = useState<NodeJS.Timeout | null>(null);
   const [screenshotSearchQuery, setScreenshotSearchQuery] = useState('');
+  const [verificationImages, setVerificationImages] = useState<Array<{
+    filename: string;
+    imageUrl: string;
+    discordId: string | null;
+    uniqueId: string | null;
+    level: number | null;
+    rankName: string | null;
+    timestamp: string | null;
+    capturedAt: string | null;
+  }>>([]);
+  const [isLoadingVerificationImages, setIsLoadingVerificationImages] = useState(false);
+  const [verificationImageSearchQuery, setVerificationImageSearchQuery] = useState('');
   const [terminalAccess, setTerminalAccess] = useState<boolean | null>(null);
   const [terminalCommand, setTerminalCommand] = useState('');
+  const [avatarAssignmentSelectedUsers, setAvatarAssignmentSelectedUsers] = useState<string[]>([]);
+  const [avatarAssignmentSearchQuery, setAvatarAssignmentSearchQuery] = useState('');
+  const [avatarAssignmentSelectedAvatar, setAvatarAssignmentSelectedAvatar] = useState<string>('');
+  const [isAssigningAvatars, setIsAssigningAvatars] = useState(false);
+  const [available8BPAvatars, setAvailable8BPAvatars] = useState<string[]>([]);
   const [terminalOutput, setTerminalOutput] = useState('');
   const [isExecutingCommand, setIsExecutingCommand] = useState(false);
   const [mfaVerified, setMfaVerified] = useState(false);
@@ -490,6 +510,57 @@ const AdminDashboardPage: React.FC = () => {
       setSingleUserId(''); // Clear the input
     } catch (error: any) {
       toast.error('Failed to trigger single user claim');
+    }
+  };
+
+  const handleAssignAvatars = async () => {
+    if (avatarAssignmentSelectedUsers.length === 0 || !avatarAssignmentSelectedAvatar) {
+      toast.error('Please select users and an avatar');
+      return;
+    }
+
+    setIsAssigningAvatars(true);
+    try {
+      const response = await axios.post(API_ENDPOINTS.ADMIN_ASSIGN_AVATARS, {
+        userIds: avatarAssignmentSelectedUsers,
+        avatarType: avatarAssignmentSelectedAvatar
+      }, { withCredentials: true });
+
+      if (response.data.success) {
+        const { assigned, failed, results } = response.data;
+        toast.success(
+          `Avatar assignment completed: ${assigned} assigned, ${failed} failed`,
+          { duration: 5000 }
+        );
+        
+        // Clear selections
+        setAvatarAssignmentSelectedUsers([]);
+        setAvatarAssignmentSelectedAvatar('');
+        setAvatarAssignmentSearchQuery('');
+        
+        // Refresh registrations to show updated avatars
+        fetchAdminData();
+      } else {
+        toast.error('Failed to assign avatars');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to assign avatars');
+    } finally {
+      setIsAssigningAvatars(false);
+    }
+  };
+
+  const fetch8BPAvatars = async () => {
+    try {
+      const response = await axios.get(API_ENDPOINTS.USER_LIST_8BP_AVATARS, {
+        withCredentials: true
+      });
+      if (response.data.success) {
+        const avatars = response.data.avatars || [];
+        setAvailable8BPAvatars(avatars.map((a: { filename: string }) => a.filename));
+      }
+    } catch (error) {
+      console.error('Error fetching 8BP avatars:', error);
     }
   };
 
@@ -812,6 +883,36 @@ const AdminDashboardPage: React.FC = () => {
     filterScreenshotsByUser(allScreenshotFolders, query);
   };
 
+  const fetchVerificationImages = useCallback(async () => {
+    setIsLoadingVerificationImages(true);
+    try {
+      const response = await axios.get(API_ENDPOINTS.ADMIN_VERIFICATION_IMAGES, {
+        withCredentials: true
+      });
+      if (response.data.success) {
+        setVerificationImages(response.data.verificationImages || []);
+      }
+    } catch (error) {
+      console.error('Error fetching verification images:', error);
+      toast.error('Failed to load verification images');
+    } finally {
+      setIsLoadingVerificationImages(false);
+    }
+  }, []);
+
+  const filteredVerificationImages = useMemo(() => {
+    if (!verificationImageSearchQuery.trim()) {
+      return verificationImages;
+    }
+    const query = verificationImageSearchQuery.toLowerCase().trim();
+    return verificationImages.filter(img => 
+      img.discordId?.toLowerCase().includes(query) ||
+      img.uniqueId?.toLowerCase().includes(query) ||
+      img.rankName?.toLowerCase().includes(query) ||
+      img.level?.toString().includes(query)
+    );
+  }, [verificationImages, verificationImageSearchQuery]);
+
   // Fetch deregistration requests
   const fetchDeregistrationRequests = useCallback(async () => {
     setIsLoadingDeregistrationRequests(true);
@@ -1009,51 +1110,65 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, []);
 
+  // Fetch admin data once on mount/authentication
   useEffect(() => {
+    if (!isAuthenticated || !isAdmin) return;
+    fetchAdminData();
+    fetchUserIp();
+    fetchTestUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isAdmin]);
+
+  // Tab-specific data fetching
+  useEffect(() => {
+    if (!isAuthenticated || !isAdmin) return;
+    
     console.log('🔄 useEffect triggered:', { isAuthenticated, isAdmin, activeTab });
-    if (isAuthenticated && isAdmin) {
-      // Debounce rapid tab switches to prevent excessive API calls
-      const timeoutId = setTimeout(() => {
-        fetchAdminData();
-        fetchUserIp();
-        fetchTestUsers(); // Fetch test users on component mount
-        
-        // Only fetch bot status when on tools tab
-        if (activeTab === 'tools') {
+    
+    // Debounce rapid tab switches to prevent excessive API calls
+    const timeoutId = setTimeout(() => {
+      // Tab-specific data fetching
+      switch (activeTab) {
+        case 'tools':
           fetchBotStatus();
-        }
-        
-        if (activeTab === 'logs') {
+          fetch8BPAvatars();
+          break;
+        case 'logs':
           fetchLogs();
-        }
-        if (activeTab === 'vps') {
+          break;
+        case 'vps':
           fetchVpsStats();
-        }
-        if (activeTab === 'screenshots') {
+          break;
+        case 'screenshots':
           console.log('🔄 Calling fetchScreenshotFolders because activeTab is screenshots');
           fetchScreenshotFolders();
-        }
-        if (activeTab === 'terminal') {
+          break;
+        case 'verification-images':
+          fetchVerificationImages().catch(console.error);
+          break;
+        case 'terminal':
           checkTerminalAccess();
-        }
-        if (activeTab === 'deregistered-users') {
+          break;
+        case 'deregistered-users':
           fetchDeregisteredUsers();
-        }
-        if (activeTab === 'deregistration-requests') {
+          break;
+        case 'deregistration-requests':
           fetchDeregistrationRequests();
-        }
-        if (activeTab === 'system-integration') {
+          break;
+        case 'system-integration':
           fetchSystemIntegrationData();
-        }
-        if (activeTab === 'active-services' || activeTab === 'overview') {
+          break;
+        case 'active-services':
+        case 'overview':
           fetchActiveServices();
           fetchHeartbeatData();
-        }
-      }, 300); // 300ms debounce to prevent rapid-fire requests
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [isAuthenticated, isAdmin, activeTab, fetchAdminData, fetchUserIp, fetchTestUsers, fetchBotStatus, fetchLogs, fetchVpsStats, fetchScreenshotFolders, checkTerminalAccess, fetchDeregisteredUsers, fetchDeregistrationRequests, fetchSystemIntegrationData, fetchActiveServices, fetchHeartbeatData]);
+          break;
+      }
+    }, 300); // 300ms debounce to prevent rapid-fire requests
+    
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isAdmin, activeTab]); // Only depend on these values, not functions
 
   const verifyMFA = async () => {
     // Check if user is using email or Discord/Telegram
@@ -1272,8 +1387,8 @@ const AdminDashboardPage: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen py-16 sm:py-20 px-4 sm:px-6 lg:px-8 overflow-x-hidden w-full">
+      <div className="max-w-7xl mx-auto w-full">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -1334,10 +1449,12 @@ const AdminDashboardPage: React.FC = () => {
               { id: 'tools', label: 'Tools', icon: Settings },
               { id: 'progress', label: 'Progress', icon: Monitor },
               { id: 'screenshots', label: 'Screenshots', icon: Camera },
+              { id: 'verification-images', label: 'Verification Images', icon: Shield },
               { id: 'terminal', label: 'Terminal', icon: Terminal },
               { id: 'vps', label: 'VPS Monitor', icon: Server },
               { id: 'active-services', label: 'Active Services', icon: Server },
               { id: 'postgresql-db', label: 'PostgreSQL DB', icon: Database },
+              { id: 'support-tickets', label: 'Support Tickets', icon: MessageSquare },
             ].map((tab) => {
               const Icon = tab.icon;
               const handleTabClick = () => {
@@ -2644,6 +2761,121 @@ const AdminDashboardPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Avatar Assignment */}
+              <div className="card md:col-span-2">
+                <h3 className="text-lg font-semibold text-text-primary mb-4">
+                  Avatar Assignment
+                </h3>
+                <div className="space-y-4">
+                  {/* User Search and Selection */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-text-primary">
+                      Select Users
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Search by username or ID..."
+                      value={avatarAssignmentSearchQuery}
+                      onChange={(e) => setAvatarAssignmentSearchQuery(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text-primary dark:text-text-dark-primary focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <div className="max-h-48 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700">
+                      {registrations
+                        .filter((reg) => {
+                          const query = avatarAssignmentSearchQuery.toLowerCase();
+                          return (
+                            reg.username?.toLowerCase().includes(query) ||
+                            reg.eightBallPoolId?.toLowerCase().includes(query)
+                          );
+                        })
+                        .map((reg) => {
+                          const isSelected = avatarAssignmentSelectedUsers.includes(reg.eightBallPoolId);
+                          return (
+                            <div
+                              key={reg.eightBallPoolId}
+                              className="flex items-center space-x-2 p-2 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setAvatarAssignmentSelectedUsers(
+                                    avatarAssignmentSelectedUsers.filter((id) => id !== reg.eightBallPoolId)
+                                  );
+                                } else {
+                                  setAvatarAssignmentSelectedUsers([
+                                    ...avatarAssignmentSelectedUsers,
+                                    reg.eightBallPoolId
+                                  ]);
+                                }
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-text-primary">
+                                {reg.username} ({reg.eightBallPoolId})
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    {avatarAssignmentSelectedUsers.length > 0 && (
+                      <p className="text-xs text-text-secondary">
+                        {avatarAssignmentSelectedUsers.length} user(s) selected
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Avatar Selection */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-text-primary">
+                      Select Avatar
+                    </label>
+                    <select
+                      value={avatarAssignmentSelectedAvatar}
+                      onChange={(e) => setAvatarAssignmentSelectedAvatar(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-text-primary dark:text-text-dark-primary focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">-- Select Avatar --</option>
+                      <option value="random">Random</option>
+                      {available8BPAvatars.map((avatar) => (
+                        <option key={avatar} value={avatar}>
+                          {avatar}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={handleAssignAvatars}
+                      disabled={
+                        isAssigningAvatars ||
+                        avatarAssignmentSelectedUsers.length === 0 ||
+                        !avatarAssignmentSelectedAvatar
+                      }
+                      className="btn-primary inline-flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>{isAssigningAvatars ? 'Assigning...' : 'Assign'}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAvatarAssignmentSelectedUsers([]);
+                        setAvatarAssignmentSelectedAvatar('');
+                        setAvatarAssignmentSearchQuery('');
+                      }}
+                      className="btn-secondary inline-flex items-center space-x-2"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      <span>Clear</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
@@ -2765,6 +2997,157 @@ const AdminDashboardPage: React.FC = () => {
                   </div>
                 )}
               </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Verification Images Tab */}
+        {activeTab === 'verification-images' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+            className="space-y-6"
+          >
+            <div className="card">
+              <h2 className="text-xl font-semibold text-text-primary dark:text-text-dark-primary mb-6">
+                Verification Images Management
+              </h2>
+              <p className="text-text-secondary dark:text-text-dark-secondary mb-6">
+                View all verification images submitted by users. Search by Discord ID, Unique ID, level, or rank name.
+              </p>
+
+              {/* Search Bar */}
+              <div className="mb-6">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" />
+                  <input
+                    type="text"
+                    placeholder="Search by Discord ID, Unique ID, Level, or Rank..."
+                    value={verificationImageSearchQuery}
+                    onChange={(e) => setVerificationImageSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white dark:bg-background-dark-tertiary border border-gray-200 dark:border-white/10 text-text-primary dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-dark-accent-blue"
+                  />
+                  {verificationImageSearchQuery && (
+                    <button
+                      onClick={() => setVerificationImageSearchQuery('')}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Loading State */}
+              {isLoadingVerificationImages ? (
+                <div className="card p-12 text-center">
+                  <RefreshCw className="w-10 h-10 text-gray-400 dark:text-gray-500 mx-auto mb-4 animate-spin" />
+                  <p className="text-text-secondary dark:text-text-dark-secondary">Loading verification images...</p>
+                </div>
+              ) : filteredVerificationImages.length === 0 ? (
+                <div className="card p-12 text-center">
+                  <div className="w-20 h-20 bg-gray-100 dark:bg-background-dark-tertiary rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Shield className="w-10 h-10 text-gray-400 dark:text-gray-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-text-primary dark:text-white mb-2">
+                    {verificationImageSearchQuery ? 'No Matching Verification Images' : 'No Verification Images Yet'}
+                  </h3>
+                  <p className="text-text-secondary dark:text-text-dark-secondary max-w-md mx-auto">
+                    {verificationImageSearchQuery 
+                      ? 'Try adjusting your search criteria.'
+                      : 'Verification images will appear here after users submit verification screenshots via Discord.'}
+                  </p>
+                  {verificationImageSearchQuery && (
+                    <button
+                      onClick={() => setVerificationImageSearchQuery('')}
+                      className="mt-4 btn btn-primary"
+                    >
+                      Clear Search
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <p className="text-text-secondary dark:text-text-dark-secondary">
+                      Showing {filteredVerificationImages.length} of {verificationImages.length} verification images
+                    </p>
+                    <button
+                      onClick={fetchVerificationImages}
+                      disabled={isLoadingVerificationImages}
+                      className="btn btn-secondary flex items-center space-x-2"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isLoadingVerificationImages ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {filteredVerificationImages.map((image) => (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        key={image.filename}
+                        className="group relative aspect-[9/16] rounded-2xl overflow-hidden bg-gray-100 dark:bg-background-dark-tertiary shadow-lg border border-white/20 dark:border-white/5"
+                      >
+                        <img
+                          src={`${image.imageUrl}?t=${Date.now()}`}
+                          alt={`Verification for ${image.uniqueId || image.discordId || 'account'}`}
+                          className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                          loading="lazy"
+                          crossOrigin="anonymous"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const fallback = target.nextElementSibling as HTMLElement;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-gray-100 dark:bg-background-dark-tertiary" style={{ display: 'none' }}>
+                          <div className="text-center text-gray-500 dark:text-gray-400">
+                            <Shield className="w-8 h-8 mx-auto mb-2" />
+                            <p className="text-sm">Image not found</p>
+                          </div>
+                        </div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
+                          {image.discordId && (
+                            <p className="text-white text-xs font-medium mb-1">
+                              Discord ID: {image.discordId}
+                            </p>
+                          )}
+                          {image.uniqueId && (
+                            <p className="text-white text-xs font-medium mb-1">
+                              Unique ID: {image.uniqueId}
+                            </p>
+                          )}
+                          {image.level && (
+                            <p className="text-white text-xs font-medium mb-1">
+                              Level: {image.level}
+                            </p>
+                          )}
+                          {image.rankName && (
+                            <p className="text-white text-xs font-medium mb-1">
+                              Rank: {image.rankName}
+                            </p>
+                          )}
+                          {image.capturedAt && (
+                            <p className="text-white text-xs font-medium mb-1">
+                              {new Date(image.capturedAt).toLocaleDateString()}
+                            </p>
+                          )}
+                          <button 
+                            onClick={() => window.open(image.imageUrl, '_blank')}
+                            className="w-full btn bg-white/20 backdrop-blur-md text-white hover:bg-white/30 border-none text-xs py-2 mt-2"
+                          >
+                            View Full Size
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -4423,6 +4806,18 @@ const AdminDashboardPage: React.FC = () => {
             className="space-y-6"
           >
             <PostgreSQLDBManager />
+          </motion.div>
+        )}
+
+        {/* Support Tickets Tab */}
+        {activeTab === 'support-tickets' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="space-y-6"
+          >
+            <SupportTicketsManager />
           </motion.div>
         )}
     </div>

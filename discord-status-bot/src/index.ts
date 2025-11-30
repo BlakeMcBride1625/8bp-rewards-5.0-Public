@@ -4,7 +4,9 @@ import {
 	SlashCommandBuilder, 
 	CommandInteraction, 
 	EmbedBuilder as DiscordEmbedBuilder,
-	PermissionFlagsBits
+	PermissionFlagsBits,
+	Collection,
+	Message
 } from "discord.js";
 import { ServiceChecker } from "./monitor/checkService";
 import { EmbedBuilder } from "./monitor/buildEmbed";
@@ -43,10 +45,31 @@ export class DiscordBot {
 	}
 
 	private setupEventHandlers(): void {
-		this.client.once("ready", () => {
+		this.client.once("ready", async () => {
 			this.logger.info(`Bot logged in as ${this.client.user?.tag}`);
 			this.logger.info(`Monitoring ${this.config.services.length} services`);
 			this.logger.info(`Guild: ${this.config.guildId}, Channel: ${this.config.statusChannelId}`);
+			
+			// Set bot status to DND
+			if (this.client.user) {
+				this.client.user.setPresence({
+					status: 'dnd',
+					activities: [{
+						name: 'Monitoring Services',
+						type: 3 // Watching
+					}]
+				});
+				this.logger.info('Bot status set to DND');
+			}
+			
+			// Register slash commands after bot is ready
+			try {
+				this.logger.info('Registering slash commands...');
+				await this.registerSlashCommands();
+				this.logger.info('Slash commands registered successfully');
+			} catch (error) {
+				this.logger.error('Failed to register slash commands:', error);
+			}
 			
 			// Start the scheduler
 			this.scheduler.start();
@@ -237,43 +260,43 @@ export class DiscordBot {
 							fetchOptions.before = lastMessageId;
 						}
 
-						const messages = await channel.messages.fetch(fetchOptions);
+					const messages = await channel.messages.fetch(fetchOptions) as unknown as Collection<string, Message<boolean>>;
 
-						if (messages.size === 0) {
-							hasMore = false;
-							break;
+					if (messages.size === 0) {
+						hasMore = false;
+						break;
+					}
+
+					// Filter to only bot messages
+					const botMessages = messages.filter((msg: Message<boolean>) => msg.author.id === this.client.user?.id);
+
+					// Delete bot messages
+					for (const [msgId, message] of botMessages) {
+						try {
+							await message.delete();
+							totalDeleted++;
+							// Small delay to avoid rate limits
+							await new Promise(resolve => setTimeout(resolve, 100));
+						} catch (deleteError) {
+							this.logger.error("Failed to delete message", {
+								messageId: msgId,
+								error: deleteError instanceof Error ? deleteError.message : "Unknown error",
+							});
+							errors++;
 						}
+					}
 
-						// Filter to only bot messages
-						const botMessages = messages.filter(msg => msg.author.id === this.client.user?.id);
+					// Update lastMessageId for next iteration
+					if (messages.size > 0) {
+						lastMessageId = messages.last()?.id || null;
+					} else {
+						hasMore = false;
+					}
 
-						// Delete bot messages
-						for (const [msgId, message] of botMessages) {
-							try {
-								await message.delete();
-								totalDeleted++;
-								// Small delay to avoid rate limits
-								await new Promise(resolve => setTimeout(resolve, 100));
-							} catch (deleteError) {
-								this.logger.error("Failed to delete message", {
-									messageId: msgId,
-									error: deleteError instanceof Error ? deleteError.message : "Unknown error",
-								});
-								errors++;
-							}
-						}
-
-						// Update lastMessageId for next iteration
-						if (messages.size > 0) {
-							lastMessageId = messages.last()?.id || null;
-						} else {
-							hasMore = false;
-						}
-
-						// If we got less than 100 messages, we've reached the end
-						if (messages.size < 100) {
-							hasMore = false;
-						}
+					// If we got less than 100 messages, we've reached the end
+					if (messages.size < 100) {
+						hasMore = false;
+					}
 					}
 				} catch (channelError) {
 					this.logger.error("Error processing DM channel", {
@@ -425,10 +448,40 @@ export class DiscordBot {
 					.setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 			];
 
-			const guild = await this.client.guilds.fetch(this.config.guildId);
-			await guild.commands.set(commands);
-			
-			this.logger.info("Slash commands registered successfully");
+			this.logger.info(`Registering ${commands.length} slash commands...`);
+			this.logger.info(`Commands: ${commands.map(c => c.name).join(', ')}`);
+
+			// Try to register to specific guild first (faster, appears immediately)
+			if (this.config.guildId) {
+				try {
+					this.logger.info(`Registering commands to guild ${this.config.guildId}...`);
+					const guild = await this.client.guilds.fetch(this.config.guildId);
+					await guild.commands.set(commands);
+					this.logger.info(`Successfully registered ${commands.length} slash commands to guild: ${guild.name} (instant)`);
+				} catch (guildError) {
+					this.logger.warn(`Failed to register commands to guild ${this.config.guildId}:`, guildError);
+					// Fall through to global registration
+				}
+			}
+
+			// Also register globally (takes up to 1 hour but works everywhere)
+			try {
+				if (this.client.application) {
+					this.logger.info('Registering commands globally (may take up to 1 hour)...');
+					await this.client.application.commands.set(commands);
+					this.logger.info(`Successfully registered ${commands.length} slash commands globally`);
+				} else {
+					this.logger.warn("Client application not available, skipping global command registration");
+				}
+			} catch (globalError) {
+				this.logger.error("Failed to register slash commands globally:", globalError);
+				// Don't throw if guild registration succeeded
+				if (!this.config.guildId) {
+					throw globalError;
+				}
+			}
+
+			this.logger.info('Command registration complete');
 		} catch (error) {
 			this.logger.error("Failed to register slash commands:", error);
 			throw error;

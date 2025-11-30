@@ -1,13 +1,14 @@
-const express = require('express');
-const { logger } = require('./LoggerService');
+import express, { Request, Response } from 'express';
+import { logger } from './LoggerService';
+
 const app = express();
-const port = process.env.STATUS_PORT || 2750;
+const port = parseInt(process.env.STATUS_PORT || '2750', 10);
 
 // Middleware
 app.use(express.json());
 
 // Status endpoint
-app.get('/status', (req, res) => {
+app.get('/status', (req: Request, res: Response): void => {
   const frontendPort = process.env.FRONTEND_PORT || '2500';
   const backendPort = process.env.BACKEND_PORT || '2600';
   const discordPort = process.env.DISCORD_API_PORT || '2700';
@@ -26,12 +27,12 @@ app.get('/status', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response): void => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
 // Start server
-app.listen(port, () => {
+app.listen(port, (): void => {
   logger.info(`Status server running on port ${port}`);
   logger.info('Available endpoints:', {
     endpoints: [
@@ -42,12 +43,15 @@ app.listen(port, () => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', (): void => {
   logger.info('Shutting down status server...');
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', (): void => {
   logger.info('Shutting down status server...');
   process.exit(0);
 });
+
+
+

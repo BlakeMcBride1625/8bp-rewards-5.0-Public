@@ -39,6 +39,14 @@ export interface RegistrationData {
   updatedAt?: Date;
   isActive?: boolean;
   metadata?: any;
+  profile_image_url?: string;
+  profile_image_updated_at?: Date;
+  leaderboard_image_url?: string;
+  leaderboard_image_updated_at?: Date;
+  eight_ball_pool_avatar_filename?: string;
+  use_discord_avatar?: boolean;
+  use_discord_username?: boolean;
+  discord_avatar_hash?: string;
 }
 
 export class PostgresRegistration {
@@ -59,6 +67,14 @@ export class PostgresRegistration {
   public updatedAt?: Date;
   public isActive?: boolean;
   public metadata?: any;
+  public profile_image_url?: string;
+  public profile_image_updated_at?: Date;
+  public leaderboard_image_url?: string;
+  public leaderboard_image_updated_at?: Date;
+  public eight_ball_pool_avatar_filename?: string;
+  public use_discord_avatar?: boolean;
+  public use_discord_username?: boolean;
+  public discord_avatar_hash?: string;
 
   constructor(data: RegistrationData) {
     this.id = data.id;
@@ -78,6 +94,14 @@ export class PostgresRegistration {
     this.updatedAt = data.updatedAt;
     this.isActive = data.isActive ?? true;
     this.metadata = data.metadata || {};
+    this.profile_image_url = data.profile_image_url;
+    this.profile_image_updated_at = data.profile_image_updated_at;
+    this.leaderboard_image_url = data.leaderboard_image_url;
+    this.leaderboard_image_updated_at = data.leaderboard_image_updated_at;
+    this.eight_ball_pool_avatar_filename = data.eight_ball_pool_avatar_filename;
+    this.use_discord_avatar = data.use_discord_avatar;
+    this.use_discord_username = data.use_discord_username;
+    this.discord_avatar_hash = data.discord_avatar_hash;
   }
 
   static async find(query: any = {}): Promise<PostgresRegistration[]> {
@@ -126,7 +150,15 @@ export class PostgresRegistration {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       isActive: row.is_active,
-      metadata: row.metadata
+      metadata: row.metadata,
+      profile_image_url: row.profile_image_url,
+      profile_image_updated_at: row.profile_image_updated_at,
+      leaderboard_image_url: row.leaderboard_image_url,
+      leaderboard_image_updated_at: row.leaderboard_image_updated_at,
+      eight_ball_pool_avatar_filename: row.eight_ball_pool_avatar_filename,
+      use_discord_avatar: row.use_discord_avatar,
+      use_discord_username: row.use_discord_username,
+      discord_avatar_hash: row.discord_avatar_hash
     }));
   }
 
@@ -159,7 +191,15 @@ export class PostgresRegistration {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       isActive: row.is_active,
-      metadata: row.metadata
+      metadata: row.metadata,
+      profile_image_url: row.profile_image_url,
+      profile_image_updated_at: row.profile_image_updated_at,
+      leaderboard_image_url: row.leaderboard_image_url,
+      leaderboard_image_updated_at: row.leaderboard_image_updated_at,
+      eight_ball_pool_avatar_filename: row.eight_ball_pool_avatar_filename,
+      use_discord_avatar: row.use_discord_avatar,
+      use_discord_username: row.use_discord_username,
+      discord_avatar_hash: row.discord_avatar_hash
     });
   }
 
@@ -174,36 +214,80 @@ export class PostgresRegistration {
         SET username = $2, email = $3, discord_id = $4, account_level = $5, account_rank = $6, 
             verified_at = $7, registration_ip = $8, device_id = $9, device_type = $10, 
             user_agent = $11, last_login_at = $12, updated_at = CURRENT_TIMESTAMP, 
-            is_active = $13, metadata = $14
+            is_active = $13, metadata = $14,
+            profile_image_url = $15, profile_image_updated_at = $16,
+            leaderboard_image_url = $17, leaderboard_image_updated_at = $18,
+            eight_ball_pool_avatar_filename = $19, use_discord_avatar = $20,
+            use_discord_username = $21, discord_avatar_hash = $22
         WHERE id = $1
         RETURNING *
       `;
+      const avatarValue = this.eight_ball_pool_avatar_filename !== undefined && this.eight_ball_pool_avatar_filename !== null ? this.eight_ball_pool_avatar_filename : null;
+      
       const values = [
         this.id, this.username, this.email, this.discordId, this.account_level, 
         this.account_rank, this.verified_at, this.registrationIp, this.deviceId, 
         this.deviceType, this.userAgent, this.lastLoginAt, this.isActive, 
-        this.metadata ? JSON.stringify(this.metadata) : null
+        this.metadata ? JSON.stringify(this.metadata) : null,
+        this.profile_image_url || null,
+        this.profile_image_updated_at || null,
+        this.leaderboard_image_url || null,
+        this.leaderboard_image_updated_at || null,
+        avatarValue,
+        this.use_discord_avatar ?? (this.discordId ? true : false),
+        this.use_discord_username ?? false,
+        this.discord_avatar_hash || null
       ];
       
+      // Log the exact value being written to database
+      if (this.eightBallPoolId) {
+        console.log(`[Registration.save] UPDATE for ${this.eightBallPoolId}: eight_ball_pool_avatar_filename = "${avatarValue}" (this.eight_ball_pool_avatar_filename = "${this.eight_ball_pool_avatar_filename}")`);
+      }
+      
       const result = await pool.query(sql, values);
+      
+      // Log what the database actually returned
+      if (this.eightBallPoolId && result.rows[0]) {
+        console.log(`[Registration.save] RETURNING for ${this.eightBallPoolId}: eight_ball_pool_avatar_filename = "${result.rows[0].eight_ball_pool_avatar_filename}"`);
+      }
       const row = result.rows[0];
       
+      // Update all fields from the database result to ensure we have the actual saved values
       this.updatedAt = row.updated_at;
+      this.eight_ball_pool_avatar_filename = row.eight_ball_pool_avatar_filename;
+      this.profile_image_url = row.profile_image_url;
+      this.leaderboard_image_url = row.leaderboard_image_url;
+      this.use_discord_avatar = row.use_discord_avatar;
+      this.use_discord_username = row.use_discord_username;
+      this.discord_avatar_hash = row.discord_avatar_hash;
+      
       return this;
     } else {
       // Create new
       const sql = `
         INSERT INTO registrations (id, eight_ball_pool_id, username, email, discord_id, account_level, 
                                  account_rank, verified_at, registration_ip, device_id, device_type, 
-                                 user_agent, last_login_at, created_at, updated_at, is_active, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $14, $15)
+                                 user_agent, last_login_at, created_at, updated_at, is_active, metadata,
+                                 profile_image_url, profile_image_updated_at,
+                                 leaderboard_image_url, leaderboard_image_updated_at,
+                                 eight_ball_pool_avatar_filename, use_discord_avatar,
+                                 use_discord_username, discord_avatar_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
         RETURNING *
       `;
       const values = [
         uuidv4(), this.eightBallPoolId, this.username, this.email, this.discordId,
         this.account_level, this.account_rank, this.verified_at, this.registrationIp,
         this.deviceId, this.deviceType, this.userAgent, this.lastLoginAt, 
-        this.isActive, JSON.stringify(this.metadata)
+        this.isActive, JSON.stringify(this.metadata),
+        this.profile_image_url || null,
+        this.profile_image_updated_at || null,
+        this.leaderboard_image_url || null,
+        this.leaderboard_image_updated_at || null,
+        this.eight_ball_pool_avatar_filename !== undefined && this.eight_ball_pool_avatar_filename !== null ? this.eight_ball_pool_avatar_filename : null,
+        this.use_discord_avatar ?? (this.discordId ? true : false),
+        this.use_discord_username ?? false,
+        this.discord_avatar_hash || null
       ];
       
       const result = await pool.query(sql, values);
@@ -246,7 +330,15 @@ export class PostgresRegistration {
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
       isActive: this.isActive,
-      metadata: this.metadata
+      metadata: this.metadata,
+      profile_image_url: this.profile_image_url,
+      profile_image_updated_at: this.profile_image_updated_at,
+      leaderboard_image_url: this.leaderboard_image_url,
+      leaderboard_image_updated_at: this.leaderboard_image_updated_at,
+      eight_ball_pool_avatar_filename: this.eight_ball_pool_avatar_filename,
+      use_discord_avatar: this.use_discord_avatar,
+      use_discord_username: this.use_discord_username,
+      discord_avatar_hash: this.discord_avatar_hash
     };
   }
 }

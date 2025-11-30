@@ -278,7 +278,7 @@ See `CONFIGURATION.md` for complete environment variable reference.
 ### Post-Deployment
 - [ ] Website accessible at public URL
 - [ ] Discord OAuth login works
-- [ ] Admin dashboard accessible (authorized users only)
+- [ ] Admin dashboard accessible (authorised users only)
 - [ ] Database connection successful
 - [ ] Discord bot online and responding
 - [ ] Email system functional

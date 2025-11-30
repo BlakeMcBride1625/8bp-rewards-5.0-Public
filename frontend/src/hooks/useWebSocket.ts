@@ -247,3 +247,98 @@ export function useScreenshots(userId: string | null) {
   };
 }
 
+/**
+ * Hook specifically for listening to ticket message updates
+ */
+export function useTicketMessages(ticketId: string | null) {
+  const { socket, status, isConnected } = useWebSocket({ autoConnect: !!ticketId });
+  const [newMessage, setNewMessage] = useState<any>(null);
+
+  useEffect(() => {
+    if (!socket || !ticketId || !isConnected) {
+      return;
+    }
+
+    // Join the ticket room
+    socket.emit('join-ticket', ticketId);
+
+    // Listen for ticket message updates
+    const handleTicketMessage = (data: any) => {
+      if (data.ticketId === ticketId) {
+        setNewMessage(data.message);
+      }
+    };
+
+    socket.on('ticket-message', handleTicketMessage);
+
+    return () => {
+      socket.off('ticket-message', handleTicketMessage);
+      socket.emit('leave-ticket', ticketId);
+    };
+  }, [socket, ticketId, isConnected]);
+
+  // Reset new message after it's been consumed
+  const consumeNewMessage = useCallback(() => {
+    setNewMessage(null);
+  }, []);
+
+  return { 
+    newMessage, 
+    consumeNewMessage, 
+    status, 
+    isConnected 
+  };
+}
+
+/**
+ * Hook specifically for listening to avatar/leaderboard updates
+ */
+export function useAvatars(userId: string | null) {
+  const { socket, status, isConnected } = useWebSocket({ autoConnect: !!userId });
+  const [shouldRefresh, setShouldRefresh] = useState(false);
+  const [avatarUpdate, setAvatarUpdate] = useState<any>(null);
+
+  useEffect(() => {
+    if (!socket || !userId || !isConnected) {
+      return;
+    }
+
+    // Join the avatars room for this user
+    socket.emit('join-avatars');
+
+    // Listen for avatar refresh events
+    const handleRefresh = () => {
+      setShouldRefresh(true);
+    };
+
+    // Listen for individual avatar updates
+    const handleAvatarUpdate = (data: any) => {
+      setAvatarUpdate(data);
+      setShouldRefresh(true);
+    };
+
+    socket.on('avatars-refresh', handleRefresh);
+    socket.on('avatar-update', handleAvatarUpdate);
+
+    return () => {
+      socket.off('avatars-refresh', handleRefresh);
+      socket.off('avatar-update', handleAvatarUpdate);
+      socket.emit('leave-avatars');
+    };
+  }, [socket, userId, isConnected]);
+
+  // Reset refresh flag after it's been consumed
+  const consumeRefresh = useCallback(() => {
+    setShouldRefresh(false);
+    setAvatarUpdate(null);
+  }, []);
+
+  return { 
+    shouldRefresh, 
+    avatarUpdate, 
+    consumeRefresh, 
+    status, 
+    isConnected 
+  };
+}
+

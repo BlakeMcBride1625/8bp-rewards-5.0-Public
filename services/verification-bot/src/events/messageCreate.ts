@@ -1,5 +1,4 @@
 import { Message, EmbedBuilder, AttachmentBuilder } from 'discord.js';
-import { rankMatcher } from '../services/rankMatcher';
 import { roleManager } from '../services/roleManager';
 import { databaseService } from '../services/database';
 import { logger } from '../services/logger';
@@ -7,9 +6,11 @@ import { dmCleanupService } from '../services/dmCleanup';
 import path from 'path';
 import { VerificationStatus } from '@prisma/client';
 import { verificationAuditService } from '../services/verificationAudit';
-import { processImage } from '../services/imageProcessor';
+import { processImage, saveVerificationImage } from '../services/imageProcessor';
 import { screenshotLockService, ScreenshotLockConflictError } from '../services/screenshotLock';
 import { accountPortalSync } from '../services/accountPortalSync';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
 
 const envRankChannelId = process.env.VERIFICATION_RANK_CHANNEL_ID || process.env.RANK_CHANNEL_ID;
 if (!envRankChannelId) {
@@ -32,6 +33,7 @@ type VerificationDMOptions = {
     contentType: string;
   } | null;
   profileUrl?: string;
+  hasMultipleAccounts?: boolean;
 };
 
 async function sendVerificationDM(
@@ -54,14 +56,21 @@ async function sendVerificationDM(
     const displayUniqueId =
       uniqueId && uniqueId.length > 0 ? formatUniqueIdForDisplay(uniqueId) : null;
 
+    const { hasMultipleAccounts = false } = options;
+    
+    const descriptionLines = [
+      `Your 8 Ball Pool rank has been verified as **${rankName}** (Level ${levelDetected}).`,
+      'Your Discord role has been updated successfully.',
+    ];
+    
+    // Add explanatory line for multi-account scenarios
+    if (hasMultipleAccounts) {
+      descriptionLines.push('', '**All your accounts are fully verified. Your highest-level account is displayed first.**');
+    }
+    
     const embed = new EmbedBuilder()
       .setTitle('✅ Rank Verification Successful')
-      .setDescription(
-        [
-          `Your 8 Ball Pool rank has been verified as **${rankName}** (Level ${levelDetected}).`,
-          'Your Discord role has been updated successfully.',
-        ].join('\n\n'),
-      )
+      .setDescription(descriptionLines.join('\n\n'))
       .setColor(0x00AE86)
       .setTimestamp();
 
@@ -271,12 +280,14 @@ export async function handleMessageCreate(message: Message): Promise<void> {
     ocrText?: string;
     screenshotHash?: string;
     uniqueId?: string | null;
+    accountUsername?: string | null;
     attachmentUrl: string;
     attachmentFile?: {
       data: Buffer;
       name: string;
       contentType: string;
     };
+    profileData?: import('../services/visionProfileExtractor').ProfileData;
   }> = [];
 
   for (const attachment of imageAttachments.values()) {
@@ -296,8 +307,10 @@ export async function handleMessageCreate(message: Message): Promise<void> {
         ocrText: result.ocrText,
         screenshotHash: result.screenshotHash,
         uniqueId: result.uniqueId ?? null,
+        accountUsername: result.accountUsername ?? null,
         attachmentUrl: result.attachmentUrl,
         attachmentFile: result.attachmentFile,
+        profileData: result.profileData,
       });
     } else if (result.isProfile === false) {
       // Image was processed but is not a profile screenshot
@@ -307,6 +320,7 @@ export async function handleMessageCreate(message: Message): Promise<void> {
         screenshotHash: result.screenshotHash,
         attachmentUrl: result.attachmentUrl,
         attachmentFile: result.attachmentFile,
+        profileData: result.profileData,
       });
     }
   }
@@ -506,6 +520,141 @@ export async function handleMessageCreate(message: Message): Promise<void> {
     return;
   }
 
+  // Validate account using registration-validation.ts script
+  if (uniqueId) {
+    const accountUsername = (bestMatch.accountUsername && bestMatch.accountUsername !== 'UNKNOWN' && bestMatch.accountUsername.trim() !== '')
+      ? bestMatch.accountUsername.trim()
+      : (bestMatch.profileData?.username && 
+          bestMatch.profileData.username !== 'UNKNOWN' && 
+          bestMatch.profileData.username !== undefined &&
+          bestMatch.profileData.username.trim() !== ''
+          ? bestMatch.profileData.username.trim()
+          : message.author.username);
+
+    logger.info('🔍 Starting account validation', {
+      discord_id: message.author.id,
+      unique_id: uniqueId,
+      username: accountUsername,
+    });
+
+    try {
+      // Resolve script path - works in both dev and Docker
+      // Try both .ts and .js versions
+      const possiblePaths = [
+        path.join(process.cwd(), 'backend/src/scripts/registration-validation.ts'),
+        path.join(process.cwd(), 'backend/src/scripts/registration-validation.js'),
+        path.join(process.cwd(), 'dist/backend/backend/src/scripts/registration-validation.ts'),
+        path.join(process.cwd(), 'dist/backend/backend/src/scripts/registration-validation.js'),
+        path.join(process.cwd(), 'services/verification-bot/../backend/src/scripts/registration-validation.ts'),
+        path.join(process.cwd(), 'services/verification-bot/../backend/src/scripts/registration-validation.js'),
+        path.resolve(__dirname, '../../../backend/src/scripts/registration-validation.ts'),
+        path.resolve(__dirname, '../../../backend/src/scripts/registration-validation.js'),
+      ];
+      
+      let validationScript: string | null = null;
+      for (const scriptPath of possiblePaths) {
+        try {
+          if (fs.existsSync(scriptPath)) {
+            validationScript = scriptPath;
+            break;
+          }
+        } catch (e) {
+          // Continue to next path
+        }
+      }
+      
+      if (validationScript) {
+        logger.info('Running account validation script', { 
+          unique_id: uniqueId, 
+          username: accountUsername, 
+          script: validationScript,
+        });
+        
+        const isTypeScript = validationScript.endsWith('.ts');
+        const command = isTypeScript ? 'npx' : 'node';
+        const args = isTypeScript 
+          ? ['tsx', validationScript, uniqueId, accountUsername]
+          : [validationScript, uniqueId, accountUsername];
+        
+        // Run validation with timeout (don't block too long)
+        await new Promise<void>((resolve) => {
+          const validationProcess = spawn(command, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            cwd: process.cwd(),
+            detached: false,
+            env: {
+              ...process.env,
+              NODE_ENV: process.env.NODE_ENV || 'production'
+            }
+          });
+          
+          const timeout = setTimeout(() => {
+            logger.warn('Account validation timeout - continuing anyway', { 
+              unique_id: uniqueId,
+              username: accountUsername 
+            });
+            validationProcess.kill('SIGKILL');
+            resolve(); // Continue even if timeout
+          }, 120000); // 2 minutes timeout
+          
+          let stdout = '';
+          let stderr = '';
+          
+          validationProcess.stdout?.on('data', (data) => {
+            stdout += data.toString();
+          });
+          
+          validationProcess.stderr?.on('data', (data) => {
+            stderr += data.toString();
+          });
+          
+          validationProcess.on('close', (code) => {
+            clearTimeout(timeout);
+            if (code === 0) {
+              logger.info('Account validation completed successfully', {
+                unique_id: uniqueId,
+                username: accountUsername,
+                exit_code: code
+              });
+              resolve();
+            } else {
+              logger.warn('Account validation completed with non-zero exit code - continuing anyway', {
+                unique_id: uniqueId,
+                username: accountUsername,
+                exit_code: code,
+                stderr: stderr.substring(0, 500) // Log first 500 chars of stderr
+              });
+              resolve(); // Continue even if validation fails
+            }
+          });
+          
+          validationProcess.on('error', (error) => {
+            clearTimeout(timeout);
+            logger.warn('Account validation process error - continuing anyway', {
+              unique_id: uniqueId,
+              username: accountUsername,
+              error: error.message
+            });
+            resolve(); // Continue even if process fails to start
+          });
+        });
+      } else {
+        logger.warn('Account validation script not found - skipping validation', {
+          unique_id: uniqueId,
+          username: accountUsername,
+          tried_paths: possiblePaths
+        });
+      }
+    } catch (error) {
+      logger.warn('Account validation error - continuing anyway', {
+        unique_id: uniqueId,
+        username: accountUsername,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      // Continue with verification even if validation fails
+    }
+  }
+
   try {
     // Get guild member
     const member = await message.guild?.members.fetch(message.author.id);
@@ -514,28 +663,21 @@ export async function handleMessageCreate(message: Message): Promise<void> {
       return;
     }
 
-    // Check if user already has a higher rank
-    const existingVerification = await databaseService.getVerification(message.author.id);
-    if (existingVerification) {
-      const existingRank = rankMatcher.getRankByName(existingVerification.rank_name);
-      if (existingRank && existingRank.level_min > matchedRank.level_min) {
-        // User already has a higher rank, ignore this verification
-        logger.info('User already has higher rank, ignoring', {
-          user_id: message.author.id,
-          existing_rank: existingVerification.rank_name,
-          new_rank: matchedRank.rank_name,
-        });
-
-        // Delete the message
-        try {
-          await message.delete();
-        } catch (error) {
-          logger.warn('Failed to delete message', { error });
-        }
-
-        return;
-      }
-    }
+    // Check if user has existing accounts to determine if this is a multi-account scenario
+    const existingAccounts = await databaseService.getUserAccounts(message.author.id);
+    const highestLevelAccount = existingAccounts.length > 0 
+      ? existingAccounts.reduce((highest, account) => 
+          account.level > highest.level ? account : highest, existingAccounts[0])
+      : null;
+    
+    logger.info('Processing verification - all accounts will be fully processed', {
+      user_id: message.author.id,
+      existing_accounts_count: existingAccounts.length,
+      new_account_level: levelDetected,
+      new_account_rank: matchedRank.rank_name,
+      highest_existing_level: highestLevelAccount?.level || null,
+      highest_existing_rank: highestLevelAccount?.rank_name || null,
+    });
 
     // Assign role
     await roleManager.assignRankRole(member, {
@@ -572,6 +714,60 @@ export async function handleMessageCreate(message: Message): Promise<void> {
       success: true,
     });
 
+    // Get account username from profile data if available
+    // Try accountUsername from bestMatch first, then fall back to profileData
+    const accountUsername = (bestMatch.accountUsername && bestMatch.accountUsername !== 'UNKNOWN' && bestMatch.accountUsername.trim() !== '')
+      ? bestMatch.accountUsername.trim()
+      : (bestMatch.profileData?.username && 
+          bestMatch.profileData.username !== 'UNKNOWN' && 
+          bestMatch.profileData.username !== undefined &&
+          bestMatch.profileData.username.trim() !== ''
+          ? bestMatch.profileData.username.trim()
+          : undefined);
+
+    // Prepare metadata for embed - ensure all fields are properly set
+    const embedMetadata = {
+      rank_name: matchedRank.rank_name,
+      level_detected: levelDetected,
+      account_username: accountUsername || undefined,
+      sendToPublicChannel: false,
+    };
+
+    // Log extracted data for debugging - comprehensive logging
+    logger.info('📋 Preparing verification event metadata for embed', {
+      discord_id: message.author.id,
+      discord_username: message.author.username,
+      level_detected: levelDetected,
+      level_type: typeof levelDetected,
+      rank_name: matchedRank.rank_name,
+      rank_type: typeof matchedRank.rank_name,
+      account_username: accountUsername || 'NOT_EXTRACTED',
+      account_username_type: typeof accountUsername,
+      profileData_username: bestMatch.profileData?.username || 'NOT_IN_PROFILEDATA',
+      bestMatch_accountUsername: bestMatch.accountUsername || 'NOT_IN_BESTMATCH',
+      unique_id: uniqueId,
+      metadata_object: embedMetadata,
+    });
+
+    // Verify metadata before passing to embed
+    if (!embedMetadata.rank_name || embedMetadata.rank_name === 'UNKNOWN') {
+      logger.error('❌ CRITICAL: rank_name is missing or UNKNOWN in metadata!', {
+        rank_name: embedMetadata.rank_name,
+        matchedRank_rank_name: matchedRank.rank_name,
+      });
+    }
+    if (embedMetadata.level_detected === undefined || embedMetadata.level_detected === null) {
+      logger.error('❌ CRITICAL: level_detected is missing in metadata!', {
+        level_detected: embedMetadata.level_detected,
+        levelDetected_value: levelDetected,
+      });
+    }
+
+    logger.info('📤 Sending verification event to audit service', {
+      discord_id: message.author.id,
+      metadata: embedMetadata,
+    });
+
     await verificationAuditService.recordEvent({
       userId: message.author.id,
       username: message.author.username,
@@ -583,33 +779,135 @@ export async function handleMessageCreate(message: Message): Promise<void> {
       attachmentFile: bestMatch.attachmentFile,
       messageId: message.id,
       processingTimeMs: Date.now() - startedAt,
-      metadata: {
-        rank_name: matchedRank.rank_name,
-        level_detected: levelDetected,
-        sendToPublicChannel: false,
-      },
+      metadata: embedMetadata,
     });
 
-    // Sync to accounts portal
-    if (uniqueId) {
-      await accountPortalSync.syncAccount({
-        discord_id: message.author.id,
-        username: message.author.username,
-        unique_id: uniqueId,
-        level: levelDetected,
-        rank_name: matchedRank.rank_name,
-        avatar_url: message.author.avatarURL(),
-        metadata: {
-          rank_min: matchedRank.level_min,
-          rank_max: matchedRank.level_max,
-          confidence: matchedRank.confidence,
-        },
-      });
-    }
+    logger.info('✅ Verification event sent to audit service', {
+      discord_id: message.author.id,
+    });
 
     // Generate profile URL
     const profileUrl = accountPortalSync.generateProfileUrl(message.author.id, uniqueId || undefined);
 
+    // Save verification image to dedicated folder FIRST (before sync so filename can be included)
+    let savedImageFilename: string | null = null;
+    if (bestMatch.attachmentFile) {
+      try {
+        const fileExtension = path.extname(bestMatch.attachmentFile.name) || '.png';
+        logger.info('💾 Attempting to save verification image', {
+          discord_id: message.author.id,
+          unique_id: uniqueId,
+          level: levelDetected,
+          rank: matchedRank.rank_name,
+          file_extension: fileExtension,
+          file_size: bestMatch.attachmentFile.data.length,
+          has_buffer: !!bestMatch.attachmentFile.data,
+          buffer_length: bestMatch.attachmentFile.data?.length || 0,
+        });
+        
+        const savedFilename = await saveVerificationImage(
+          bestMatch.attachmentFile.data,
+          message.author.id,
+          uniqueId,
+          levelDetected,
+          matchedRank.rank_name,
+          fileExtension
+        );
+        
+        if (savedFilename) {
+          savedImageFilename = savedFilename;
+          logger.info('✅ Verification image saved successfully - will be available in dashboard', { 
+            filename: savedFilename,
+            discord_id: message.author.id,
+            unique_id: uniqueId,
+            file_path: `/app/services/verification-bot/verifications/${savedFilename}`,
+          });
+        } else {
+          logger.error('❌ Failed to save verification image - saveVerificationImage returned null', { 
+            discord_id: message.author.id,
+            unique_id: uniqueId,
+            level: levelDetected,
+            rank: matchedRank.rank_name,
+          });
+        }
+      } catch (error) {
+        logger.error('❌ Error saving verification image - exception thrown', {
+          error: error instanceof Error ? error.message : String(error),
+          error_stack: error instanceof Error ? error.stack : undefined,
+          discord_id: message.author.id,
+          unique_id: uniqueId,
+        });
+      }
+    } else {
+        logger.error('❌ Cannot save verification image - attachmentFile is missing', {
+        discord_id: message.author.id,
+        has_attachment_url: !!bestMatch.attachmentUrl,
+        has_attachment_file: !!bestMatch.attachmentFile,
+        attachment_url: bestMatch.attachmentUrl,
+      });
+    }
+
+    // Sync to accounts portal (AFTER image is saved so we can include filename)
+    if (uniqueId) {
+      logger.info('🔄 Syncing account to rewards API', {
+        discord_id: message.author.id,
+        unique_id: uniqueId,
+        level: levelDetected,
+        rank_name: matchedRank.rank_name,
+        verification_image_filename: savedImageFilename || 'NOT_SAVED',
+      });
+
+      try {
+        // Use accountUsername from image if available, otherwise fall back to Discord username
+        const syncUsername = accountUsername || message.author.username;
+        
+        logger.info('🔄 Preparing account sync with username', {
+          discord_id: message.author.id,
+          unique_id: uniqueId,
+          account_username_from_image: accountUsername || 'NOT_EXTRACTED',
+          discord_username: message.author.username,
+          username_used_for_sync: syncUsername,
+        });
+        
+        await accountPortalSync.syncAccount({
+          discord_id: message.author.id,
+          username: syncUsername,
+          unique_id: uniqueId,
+          level: levelDetected,
+          rank_name: matchedRank.rank_name,
+          avatar_url: message.author.avatarURL(),
+          metadata: {
+            rank_min: matchedRank.level_min,
+            rank_max: matchedRank.level_max,
+            confidence: matchedRank.confidence,
+            verification_image_filename: savedImageFilename || undefined,
+          },
+        });
+        logger.info('✅ Account synced to rewards API successfully', {
+          discord_id: message.author.id,
+          unique_id: uniqueId,
+          api_response: 'success',
+        });
+      } catch (syncError) {
+        logger.error('❌ Failed to sync account to rewards API', {
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+          stack: syncError instanceof Error ? syncError.stack : undefined,
+          discord_id: message.author.id,
+          unique_id: uniqueId,
+          api_url: process.env.REWARDS_API_URL || 'http://backend:2600',
+        });
+        // Don't fail verification if sync fails, but log it
+      }
+    } else {
+      logger.warn('⚠️ Cannot sync account - uniqueId is missing', {
+        discord_id: message.author.id,
+      });
+    }
+
+    // Get all user accounts to determine if this is multi-account scenario
+    const allUserAccounts = await databaseService.getUserAccounts(message.author.id);
+    const userHasMultipleAccounts = allUserAccounts.length > 1;
+    
     // Send DM confirmation
     await sendVerificationDM(message.author.id, {
       rankName: matchedRank.rank_name,
@@ -619,6 +917,7 @@ export async function handleMessageCreate(message: Message): Promise<void> {
       attachmentUrl: bestMatch.attachmentUrl,
       attachmentFile: bestMatch.attachmentFile ?? null,
       profileUrl,
+      hasMultipleAccounts: userHasMultipleAccounts,
     });
 
     // Delete the processed screenshot

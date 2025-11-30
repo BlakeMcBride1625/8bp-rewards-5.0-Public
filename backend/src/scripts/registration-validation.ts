@@ -814,7 +814,7 @@ async function validateUserRegistration(eightBallPoolId: string, username: strin
       username
     });
     
-    // STEP 5: Wait for response and analyze result
+    // STEP 5: Wait for response and analyse result
     logger.debug('Waiting for page response', {
       action: 'validation_wait_response',
       eightBallPoolId,

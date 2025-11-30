@@ -25,6 +25,7 @@ import SchedulerService from './services/SchedulerService';
 import authRoutes from './routes/auth';
 import registrationRoutes from './routes/registration';
 import adminRoutes from './routes/admin';
+import adminTicketsRoutes from './routes/admin-tickets';
 import contactRoutes from './routes/contact';
 import statusRoutes from './routes/status';
 import leaderboardRoutes from './routes/leaderboard';
@@ -178,6 +179,7 @@ class Server {
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/registration', registrationRoutes);
     this.app.use('/api/admin', adminRoutes);
+    this.app.use('/api/admin/tickets', adminTicketsRoutes);
     this.app.use('/api/contact', contactRoutes);
     this.app.use('/api/status', statusRoutes);
     this.app.use('/api/leaderboard', leaderboardRoutes);
@@ -194,6 +196,7 @@ class Server {
     this.app.use('/8bp-rewards/api/auth', authRoutes);
     this.app.use('/8bp-rewards/api/registration', registrationRoutes);
     this.app.use('/8bp-rewards/api/admin', adminRoutes);
+    this.app.use('/8bp-rewards/api/admin/tickets', adminTicketsRoutes);
     this.app.use('/8bp-rewards/api/contact', contactRoutes);
     this.app.use('/8bp-rewards/api/status', statusRoutes);
     this.app.use('/8bp-rewards/api/leaderboard', leaderboardRoutes);
@@ -270,6 +273,26 @@ class Server {
           }));
         }
         
+        // Serve uploaded profile and leaderboard images
+        const uploadsDir = path.join(process.cwd(), 'uploads');
+        if (require('fs').existsSync(uploadsDir)) {
+          this.app.use('/uploads', express.static(uploadsDir, {
+            maxAge: '1y',
+            etag: true,
+            lastModified: true
+          }));
+        }
+        
+        // Serve 8 Ball Pool avatars
+        const avatarsDir = path.join(process.cwd(), 'frontend', '8 Ball Pool Avatars');
+        if (require('fs').existsSync(avatarsDir)) {
+          this.app.use('/8bp-rewards/avatars', express.static(avatarsDir, {
+            maxAge: '1y',
+            etag: true,
+            lastModified: true
+          }));
+        }
+        
         // Redirect root to /8bp-rewards
         this.app.get('/', (req, res) => {
           res.redirect('/8bp-rewards');
@@ -334,13 +357,44 @@ class Server {
       });
     });
     
-    // Final 404 handler (must be last)
+    // Handle missing static files gracefully (especially manifest.json and other common files)
+    this.app.get('/8bp-rewards/manifest.json', (req, res) => {
+      const manifestPath = path.join(process.cwd(), 'frontend/build/manifest.json');
+      const fs = require('fs');
+      if (fs.existsSync(manifestPath)) {
+        res.sendFile(manifestPath);
+      } else {
+        // Return a default manifest.json if it doesn't exist
+        res.json({
+          short_name: "8BP Rewards",
+          name: "8 Ball Pool Rewards",
+          icons: [],
+          start_url: "/8bp-rewards/",
+          display: "standalone",
+          theme_color: "#f2760a",
+          background_color: "#ffffff"
+        });
+      }
+    });
+    
+    // Final 404 handler (must be last) - but don't show JSON errors for static file requests
     this.app.use('*', (req, res) => {
+      // If it's a static file request that doesn't exist, return 404 without JSON
+      if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|eot|map)$/)) {
+        res.status(404).end();
+        return;
+      }
+      // Only show JSON errors for API-like routes
+      if (req.path.startsWith('/api/')) {
       res.status(404).json({
-        error: 'Route not found',
+          error: 'API route not found',
         path: req.originalUrl,
         method: req.method
       });
+        return;
+      }
+      // For other routes, return empty 404 (React Router will handle it)
+      res.status(404).end();
     });
 
     // Global error handler
@@ -382,7 +436,17 @@ class Server {
       process.on('SIGINT', this.shutdown.bind(this));
 
     } catch (error) {
-      logger.error('Failed to start server', { error: error instanceof Error ? error.message : 'Unknown error' });
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : typeof error === 'string' 
+          ? error 
+          : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      logger.error('Failed to start server', { 
+        error: errorMessage,
+        stack: errorStack
+      });
+      console.error('Server startup error:', error);
       process.exit(1);
     }
   }

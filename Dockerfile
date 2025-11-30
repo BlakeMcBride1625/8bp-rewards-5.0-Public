@@ -1,7 +1,7 @@
 # Multi-stage build for all services
 FROM node:20-alpine AS builder
 
-# Install build dependencies including canvas requirements
+# Install build dependencies including canvas requirements and verification bot dependencies
 RUN apk add --no-cache \
     python3 \
     make \
@@ -10,7 +10,11 @@ RUN apk add --no-cache \
     jpeg-dev \
     pango-dev \
     giflib-dev \
-    pixman-dev
+    pixman-dev \
+    tesseract-ocr \
+    tesseract-ocr-data-eng \
+    openssl \
+    openssl-dev
 
 # Set working directory
 WORKDIR /app
@@ -63,10 +67,24 @@ RUN npm ci
 RUN npm run build
 WORKDIR /app
 
+# Build verification bot
+COPY services/verification-bot/package*.json ./services/verification-bot/
+COPY services/verification-bot/tsconfig.json ./services/verification-bot/
+WORKDIR /app/services/verification-bot
+RUN npm ci
+# Copy verification bot source and Prisma schema
+COPY services/verification-bot/src ./src/
+COPY services/verification-bot/prisma ./prisma/
+# Generate Prisma client
+RUN npx prisma generate
+# Build TypeScript
+RUN npm run build
+WORKDIR /app
+
 # Production stage
 FROM node:20-alpine
 
-# Install runtime dependencies including Playwright/Chromium and build dependencies for native modules
+# Install runtime dependencies including Playwright/Chromium, build dependencies for native modules, and verification bot dependencies
 RUN apk add --no-cache \
     wget \
     curl \
@@ -84,6 +102,10 @@ RUN apk add --no-cache \
     pango-dev \
     giflib-dev \
     pixman-dev \
+    tesseract-ocr \
+    tesseract-ocr-data-eng \
+    openssl \
+    openssl-dev \
     && rm -rf /var/cache/apk/*
 
 # Set working directory
@@ -114,6 +136,11 @@ COPY --from=builder /app/frontend/build ./frontend/build
 COPY --from=builder /app/discord-status-bot/dist ./discord-status-bot/dist
 COPY --from=builder /app/discord-status-bot/node_modules ./discord-status-bot/node_modules
 
+# Copy built verification bot
+COPY --from=builder /app/services/verification-bot/dist ./services/verification-bot/dist
+COPY --from=builder /app/services/verification-bot/node_modules ./services/verification-bot/node_modules
+COPY --from=builder /app/services/verification-bot/prisma ./services/verification-bot/prisma
+
 # Copy all necessary source files for runtime
 COPY backend/ ./backend/
 COPY models/ ./models/
@@ -129,7 +156,7 @@ COPY claimer-utils.js ./
 COPY browser-pool.js ./
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/backend/logs /app/screenshots /app/backend/screenshots
+RUN mkdir -p /app/logs /app/backend/logs /app/screenshots /app/backend/screenshots /app/assets
 
 # Set environment variables
 ENV NODE_ENV=production

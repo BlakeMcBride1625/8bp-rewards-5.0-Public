@@ -73,11 +73,23 @@ async function initializeServices(): Promise<void> {
 client.once('ready', async () => {
   logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
   logger.info(`Bot is in ${client.guilds.cache.size} guild(s)`);
+  
+  // Set bot status to DND
+  if (client.user) {
+    client.user.setPresence({
+      status: 'dnd',
+      activities: [{
+        name: '8 Ball Pool Account Verification',
+        type: 3 // Watching
+      }]
+    });
+    logger.info('Bot status set to DND');
+  }
 
   try {
     // Register slash commands
     const token = process.env.VERIFICATION_BOT_TOKEN;
-      let guildId = process.env.VERIFICATION_GUILD_ID || process.env.GUILD_ID; // Optional: set for faster guild-specific command registration
+    let guildId = process.env.VERIFICATION_GUILD_ID || process.env.GUILD_ID || process.env.DISCORD_GUILD_ID;
     
     // If no GUILD_ID is set, use the first available guild for immediate registration
     if (!guildId && client.guilds.cache.size > 0) {
@@ -89,14 +101,17 @@ client.once('ready', async () => {
     }
     
     if (token && client.user) {
-      // Register for specific guild if available (faster), otherwise global
-      await registerSlashCommands(client.user.id, token, guildId);
-      
-      // Also register globally for all servers
+      // Register for specific guild if available (appears instantly)
       if (guildId) {
-        logger.info('Also registering commands globally...');
-        await registerSlashCommands(client.user.id, token, undefined);
+        logger.info('Registering commands to guild for instant availability...');
+        await registerSlashCommands(client.user.id, token, guildId);
       }
+      
+      // Also register globally (takes up to 1 hour but works everywhere)
+      logger.info('Registering commands globally (may take up to 1 hour)...');
+      await registerSlashCommands(client.user.id, token, undefined);
+      
+      logger.info('Slash command registration complete');
     }
     
     // Send verification channel instructions (will check for duplicates)
